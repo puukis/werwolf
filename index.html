@@ -41,6 +41,10 @@
                 <label for="events-enabled">Random Events an</label>
                 <input type="checkbox" id="events-enabled" checked>
             </div>
+            <div class="event-toggle">
+                <label for="reveal-dead-roles">Rollen der Toten aufdecken</label>
+                <input type="checkbox" id="reveal-dead-roles" checked>
+            </div>
         </div>
 
         <div class="setup-container">
@@ -59,10 +63,17 @@ Carla
 
             <section class="input-section card">
                 <h2><span class="icon">🎭</span>Rollen</h2>
-                <div id="roles-container">
-                    <!-- Dynamisch generierte Rollen-Zeilen -->
+                <div id="roles-scroll-container">
+                    <h3 class="role-category">Dorfbewohner</h3>
+                    <div id="roles-container-village" class="roles-category-container"></div>
+
+                    <h3 class="role-category">Werwölfe</h3>
+                    <div id="roles-container-werwolf" class="roles-category-container"></div>
+
+                    <h3 class="role-category">Spezialrollen</h3>
+                    <div id="roles-container-special" class="roles-category-container"></div>
                 </div>
-                <button id="add-role" type="button" class="secondary-btn">Rolle hinzufügen</button>
+                <button id="add-role" type="button" class="secondary-btn">Freie Rolle hinzufügen</button>
             </section>
         </div>
 
@@ -123,6 +134,14 @@ Carla
         </div>
     </div>
 
+    <div id="graveyard-modal" class="modal">
+        <div class="modal-content">
+            <h3 id="graveyard-title">In der Nacht gestorben</h3>
+            <div id="graveyard-grid" class="reveal-grid"></div>
+            <button id="graveyard-close-btn" class="primary-btn">Weiter</button>
+        </div>
+    </div>
+
     <div id="role-info-modal" class="modal">
         <div class="modal-content">
             <span class="close-modal">&times;</span>
@@ -139,6 +158,15 @@ Carla
                 <div class="button-wrapper"><button id="confirm-btn" class="primary-btn">Bestätigen</button></div>
                 <div class="button-wrapper"><button id="cancel-btn" class="secondary-btn">Abbrechen</button></div>
             </div>
+        </div>
+    </div>
+
+    <div id="geist-modal" class="modal">
+        <div class="modal-content">
+            <h3>Nachricht aus dem Jenseits</h3>
+            <p>Du bist der Geist. Du kannst eine einmalige, letzte Nachricht an die Welt senden (max 140 Zeichen).</p>
+            <textarea id="geist-message" rows="3" maxlength="140" placeholder="Deine Nachricht..."></textarea>
+            <button id="geist-send-btn" class="primary-btn">Nachricht senden</button>
         </div>
     </div>
 

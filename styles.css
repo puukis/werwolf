@@ -260,7 +260,30 @@ input[type="text"]:focus {
   border-color: #0077ff;
 }
 
-#roles-container > .role-row {
+.role-category {
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  font-size: 1.1rem;
+  color: var(--text-light);
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.5rem;
+  text-align: left;
+}
+
+.roles-category-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+#roles-scroll-container {
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.role-row {
   display: flex;
   gap: 0.5rem;
   margin-bottom: 0.5rem;
@@ -432,6 +455,14 @@ button {
 
 [data-theme="dark"] .role-row input[value="Hexe"] {
   color: #60a5fa; /* Lighter blue for dark mode */
+}
+
+[data-theme="dark"] .role-row input[value="Henker"] {
+  color: #adb5bd; /* Lighter Gray for dark theme */
+}
+
+[data-theme="dark"] .role-row input[value="Inquisitor"] {
+  color: #fd7e14; /* Orange */
 }
 
 .role-row input[value="Hexe"] {
@@ -1376,6 +1407,11 @@ body.night-active main.container {
   text-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
 }
 
+#night-role[data-role="Inquisitor"] {
+  color: #fd7e14; /* Orange */
+  text-shadow: 0 0 8px rgba(253, 126, 20, 0.6);
+}
+
 /* Sessions Sidebar */
 .sessions-sidebar {
     position: fixed;
@@ -1806,4 +1842,94 @@ body.blood-moon-active .blood-moon-indicator {
 .day-choices .player-btn:hover:not(:disabled),
 .witch-actions .witch-btn:hover:not(:disabled) {
     transform: scale(1.05);
+}
+
+/* Graveyard Modal */
+#graveyard-modal .modal-content {
+  max-width: 800px;
+}
+
+#graveyard-grid {
+  margin: 1.5rem 0;
+}
+
+#graveyard-close-btn {
+  margin-top: 1.5rem;
+}
+
+/* New Role Colors */
+.role-row input[value="Henker"] {
+  color: #6c757d; /* Dark Gray */
+  font-weight: 600;
+}
+
+.role-row input[value="Inquisitor"] {
+  color: #fd7e14; /* Orange */
+  font-weight: 600;
+}
+
+.role-row input[value="Verfluchte"] {
+  color: #9b59b6; /* Purple */
+  font-weight: 600;
+}
+
+.role-row input[value="Sündenbock"] {
+  color: #e67e22; /* Carrot */
+  font-weight: 600;
+}
+
+.role-row input[value="Geschwister"] {
+  color: #3498db; /* Blue */
+  font-weight: 600;
+}
+
+.role-row input[value="Geist"] {
+  color: #bdc3c7; /* Light Gray */
+  font-weight: 600;
+}
+
+.role-row input[value="Friedenstifter"] {
+  color: #2ecc71; /* Emerald */
+  font-weight: 600;
+}
+
+.role-info-btn {
+  background: none;
+  border: none;
+  color: var(--text-light);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0 0.5rem;
+  transition: color 0.2s;
+}
+
+.role-info-btn:hover {
+  color: var(--button-bg);
+}
+.henker-target {
+  font-size: 0.8rem;
+  margin-top: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  display: block;
+}
+
+/* Custom Scrollbar for Role Containers */
+#roles-scroll-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+#roles-scroll-container::-webkit-scrollbar-track {
+  background: var(--button-secondary-bg);
+  border-radius: 4px;
+}
+
+#roles-scroll-container::-webkit-scrollbar-thumb {
+  background-color: var(--text-light);
+  border-radius: 4px;
+}
+
+#roles-scroll-container::-webkit-scrollbar-thumb:hover {
+  background-color: var(--button-hover);
 }
