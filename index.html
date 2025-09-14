@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Werwolf</title>
+    <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+    <div class="full-moon-indicator"></div>
+    <aside id="sessions-sidebar" class="sessions-sidebar">
+        <h2>Gespeicherte Sessions</h2>
+        <ul id="sessions-list"></ul>
+    </aside>
+    <button id="sessions-toggle" class="sessions-toggle" aria-label="Toggle sessions sidebar">☰</button>
+    <button id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode">
+        <svg class="sun-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 18a6 6 0 1 1 0-12 6 6 0 0 1 0 12zm0-2a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM11 1h2v3h-2V1zm0 19h2v3h-2v-3zM3.515 4.929l1.414-1.414L7.05 5.636 5.636 7.05 3.515 4.93zM16.95 18.364l1.414-1.414 2.121 2.121-1.414 1.414-2.121-2.121zm2.122-14.85l1.414 1.415-2.121 2.121-1.414-1.414 2.121-2.121zM5.636 16.95l1.414 1.414-2.121 2.121-1.414-1.414 2.121-2.121zM23 11v2h-3v-2h3zM4 11v2H1v-2h3z"/>
+        </svg>
+        <svg class="moon-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M10 7a7 7 0 0 0 12 4.9v.1c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2h.1A6.979 6.979 0 0 0 10 7zm-6 5a8 8 0 0 0 15.062 3.762A9 9 0 0 1 8.238 4.938 7.999 7.999 0 0 0 4 12z"/>
+        </svg>
+    </button>
+    <main class="container">
+        <div class="main-header">
+            <h1>Werwolf</h1>
+            <p class="subtitle">Rollenverteiler für das Werwolf-Spiel</p>
+            <div id="full-moon-odds" class="full-moon-odds"></div>
+            <div class="event-toggle">
+                <label for="events-enabled">Random Events an</label>
+                <input type="checkbox" id="events-enabled" checked>
+            </div>
+        </div>
+
+        <div class="setup-container">
+            <section class="input-section card">
+                <h2><span class="icon">👥</span>Spieler</h2>
+                <label for="players">Spielernamen (je eine Zeile)</label>
+                <textarea id="players" rows="8" placeholder="Anna
+Bernd
+Carla
+..."></textarea>
+                <div class="name-actions">
+                    <button id="save-names-manually" type="button" class="secondary-btn small-btn">Namen speichern</button>
+                    <button id="load-saved-names" type="button" class="secondary-btn small-btn">Namen laden</button>
+                </div>
+            </section>
+
+            <section class="input-section card">
+                <h2><span class="icon">🎭</span>Rollen</h2>
+                <div id="roles-container">
+                    <!-- Dynamisch generierte Rollen-Zeilen -->
+                </div>
+                <button id="add-role" type="button" class="secondary-btn">Rolle hinzufügen</button>
+            </section>
+        </div>
+
+        <div class="actions">
+            <button id="load-last-used" type="button" class="secondary-btn">Zuletzt benutzte Optionen laden</button>
+            <button id="assign" type="button" class="primary-btn large-btn">Rollen zuteilen</button>
+        </div>
+
+        <section class="output-section">
+            <h2 id="ergebnisse-title" style="display: none;">Ergebnisse</h2>
+            <div id="reveal-grid" class="reveal-grid"></div>
+            <div id="result-output" class="result-card" style="display: none;"></div>
+            <div class="navigation-buttons" style="display: none; margin-top: 1.5rem;">
+                <button id="finish-btn" type="button" class="primary-btn">Fertig</button>
+                <button id="start-night-btn" type="button" class="primary-btn night">Nacht starten</button>
+                <button id="save-game-btn" type="button" class="primary-btn">Spiel speichern</button>
+            </div>
+        </section>
+    </main>
+
+    <div id="night-overlay" class="night-overlay" style="display:none;">
+        <div class="night-content">
+            <h2 id="night-role"></h2>
+            <p id="night-text"></p>
+            <div id="witch-actions" class="witch-actions"></div>
+            <div id="night-choices" class="night-choices"></div>
+            <div class="night-actions">
+              <button id="night-next-btn" type="button" class="primary-btn">Weiter</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="seerVisionModal" class="modal">
+      <div class="modal-content">
+        <h3>Die Vision des Sehers</h3>
+        <p id="seerVisionText"></p>
+        <button id="closeSeerVision" class="primary-btn">Verstanden</button>
+      </div>
+    </div>
+
+    <div id="day-overlay" class="day-overlay" style="display:none;">
+        <div class="day-content">
+            <h2>Tagphase</h2>
+            <p id="day-text">Das Dorf diskutieren und stimmen über einen Spieler ab, der gehängt werden soll.</p>
+            <div id="day-choices" class="day-choices"></div>
+            <div class="day-actions">
+                <button id="day-lynch-btn" type="button" class="primary-btn">Hängen</button>
+                <button id="day-skip-btn" type="button" class="secondary-btn">Überspringen</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="win-overlay" class="win-overlay" style="display:none;">
+        <div class="win-content">
+            <h2 id="win-title"></h2>
+            <p id="win-message"></p>
+            <button id="win-btn" type="button" class="primary-btn">Spiel beenden</button>
+        </div>
+    </div>
+
+    <div id="role-info-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal">&times;</span>
+            <h3 id="role-info-title"></h3>
+            <p id="role-info-desc"></p>
+        </div>
+    </div>
+
+    <div id="confirmation-modal" class="modal">
+        <div class="modal-content">
+            <h3 id="confirmation-title"></h3>
+            <p id="confirmation-text"></p>
+            <div class="confirmation-buttons">
+                <button id="confirm-btn" class="primary-btn">Bestätigen</button>
+                <button id="cancel-btn" class="secondary-btn">Abbrechen</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="admin-panel" class="admin-panel hidden">
+        <h4>Admin Panel</h4>
+        <button id="trigger-full-moon-btn" class="secondary-btn">Trigger Full Moon</button>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>

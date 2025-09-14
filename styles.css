@@ -1,0 +1,1552 @@
+:root {
+  /* Light theme (default) */
+  --bg-color: #f5f7fa;
+  --container-bg: #ffffff;
+  --text-color: #333333;
+  --text-light: #666666;
+  --border-color: #dfe3e9;
+  --button-bg: #0077ff;
+  --button-hover: #005fd1;
+  --button-secondary-bg: #e7eaf1;
+  --button-secondary-hover: #d2d5df;
+  --result-bg: #f9fafc;
+  --role-color: #333333;
+  --special-role-color: #8b5cf6;
+  --input-bg: #ffffff;
+  --input-border: #ccc;
+  --shadow-color: rgba(0, 0, 0, 0.08);
+  --theme-toggle-bg: #e7eaf1;
+  --theme-toggle-hover: #d2d5df;
+}
+
+[data-theme="dark"] {
+  --bg-color: #1a1a1a;
+  --container-bg: #2d2d2d;
+  --text-color: #f0f0f0;
+  --text-light: #b0b0b0;
+  --border-color: #444444;
+  --button-bg: #4a90e2;
+  --button-hover: #3a7bc8;
+  --button-secondary-bg: #3d3d3d;
+  --button-secondary-hover: #4d4d4d;
+  --result-bg: #333333;
+  --role-color: #f0f0f0;
+  --special-role-color: #a78bfa;
+  --input-bg: #3d3d3d;
+  --input-border: #555555;
+  --shadow-color: rgba(0, 0, 0, 0.3);
+  --theme-toggle-bg: #3d3d3d;
+  --theme-toggle-hover: #4d4d4d;
+}
+
+/* Theme toggle button */
+.theme-toggle {
+  position: fixed;
+  top: 1.5rem;
+  right: 1.5rem;
+  background: var(--theme-toggle-bg);
+  border: none;
+  border-radius: 50%;
+  width: 2.5rem;
+  height: 2.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 1000;
+  transition: background-color 0.3s ease;
+  padding: 0;
+}
+
+.theme-toggle:hover {
+  background: var(--theme-toggle-hover);
+}
+
+.theme-toggle svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  color: var(--text-color);
+  transition: opacity 0.3s ease;
+}
+
+.theme-toggle .moon-icon {
+  display: none;
+}
+
+[data-theme="dark"] .theme-toggle .sun-icon {
+  display: none;
+}
+
+[data-theme="dark"] .theme-toggle .moon-icon {
+  display: block;
+}
+
+/* Basic reset */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+  background: var(--bg-color);
+  color: var(--text-color);
+  min-height: 100vh;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 2rem;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.container {
+  background: var(--container-bg);
+  border-radius: 12px;
+  max-width: 900px;
+  width: 100%;
+  box-shadow: 0 8px 24px var(--shadow-color);
+  padding: 2.5rem;
+  transition: background-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.main-header {
+  text-align: center;
+  margin-bottom: 2.5rem;
+}
+
+.main-header h1 {
+  font-size: 2.5rem;
+  font-weight: 700;
+}
+
+.subtitle {
+  font-size: 1.1rem;
+  color: var(--text-light);
+  margin-top: 0.25rem;
+}
+
+.full-moon-odds {
+  font-size: 0.9rem;
+  color: var(--text-light);
+  margin-top: 1rem;
+  font-style: italic;
+}
+
+.event-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  font-size: 0.9rem;
+  color: var(--text-light);
+}
+
+.setup-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+  margin-bottom: 2rem;
+}
+
+.card {
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 4px var(--shadow-color);
+}
+
+.card h2 {
+  font-size: 1.3rem;
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.icon {
+  font-size: 1.5rem;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.name-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.large-btn {
+  padding: 0.8rem 2rem;
+  font-size: 1.1rem;
+}
+
+.navigation-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.primary-btn.night {
+  background: #4a148c; /* Dark purple */
+}
+
+.primary-btn.night:hover {
+  background: #3a106a;
+}
+
+[data-theme="dark"] .primary-btn.night {
+  background: #9c27b0;
+}
+
+[data-theme="dark"] .primary-btn.night:hover {
+  background: #89229b;
+}
+
+h1, h2, h3 {
+  text-align: center;
+  margin-bottom: 1.5rem;
+  color: var(--text-color);
+  transition: color 0.3s ease;
+}
+
+/* Section headers in dark mode */
+[data-theme="dark"] .input-section h2,
+[data-theme="dark"] .output-section h2 {
+  color: #ffffff;
+}
+
+h2 {
+  margin-bottom: 0.5rem;
+  font-size: 1.2rem;
+  color: #333;
+}
+
+.input-section {
+  margin-bottom: 1.5rem;
+}
+
+textarea,
+input[type="text"] {
+  width: 100%;
+  padding: 0.75rem;
+  background: var(--input-bg);
+  color: var(--text-color);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  font-size: 0.95rem;
+  transition: border-color 0.2s, background-color 0.3s ease, color 0.3s ease;
+}
+
+textarea:focus,
+input[type="text"]:focus {
+  outline: none;
+  border-color: #0077ff;
+}
+
+#roles-container > .role-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  align-items: center;
+}
+
+.role-row input {
+  flex: 1 1 auto;
+  background: var(--input-bg);
+  color: var(--text-color);
+  border: 1px solid var(--input-border);
+  padding: 0.5rem;
+  border-radius: 4px;
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+.role-row .remove-role {
+  background: #ff4d4f;
+  border: none;
+  color: #fff;
+  padding: 0 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.role-row .remove-role:hover {
+  background: #d9363e;
+}
+
+/* Quantity controls */
+.qty-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.qty-btn {
+  background: var(--button-secondary-bg);
+  color: var(--text-color);
+  border: none;
+  padding: 0 0.55rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1.2;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.qty-btn:hover {
+  background: var(--button-secondary-hover);
+}
+
+.qty-display {
+  min-width: 1.5rem;
+  text-align: center;
+  font-weight: 600;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 4px;
+  font-weight: 600;
+  transition: background 0.2s;
+}
+
+.primary-btn {
+  background: var(--button-bg);
+  color: #fff;
+  padding: 0.6rem 1.2rem;
+  transition: background-color 0.3s ease;
+}
+
+.primary-btn:hover {
+  background: var(--button-hover);
+}
+
+.secondary-btn {
+  background: var(--button-secondary-bg);
+  color: var(--text-color);
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border-color);
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+.secondary-btn:hover {
+  background: var(--button-secondary-hover);
+}
+
+.actions {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1.5rem;
+}
+
+.output-section {
+  margin-top: 1rem;
+}
+
+.result-card {
+  background: var(--result-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 1rem 1.5rem;
+  min-height: 80px;
+  font-family: "Courier New", Courier, monospace;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  transition: background 0.4s, color 0.4s, transform 0.6s, border-color 0.3s ease;
+  cursor: default;
+  color: var(--text-color);
+}
+
+.result-card.revealed {
+  background: #0077ff;
+  color: #fff;
+  transform: scale(1.05);
+}
+
+/* Description text inside result card */
+.result-card .role-desc {
+  display: block;
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+  opacity: 0.9;
+  text-align: center;
+}
+
+/* old output-box kept for legacy but hidden */
+.output-box {
+  background: #f9fafc;
+  border: 1px solid #dfe3e9;
+  border-radius: 4px;
+  padding: 1rem;
+  min-height: 120px;
+  font-family: "Courier New", Courier, monospace;
+  white-space: pre-wrap; 
+  display: none;
+}
+
+/* Role Colors */
+.role-row input[value="Amor"] {
+  color: #ec4899; /* Pink */
+  font-weight: 600;
+}
+
+.role-row input[value="Seer"],
+.role-row input[value="Seher"] {
+  color: #8b5cf6; /* Purple */
+  font-weight: 600;
+}
+
+.role-row input[value="Werwolf"],
+.role-row input[value="Werwolf"] {
+  color: #ef4444; /* Red */
+  font-weight: 600;
+}
+
+/* Special role colors in dark mode */
+[data-theme="dark"] .role-row input[value="Seer"],
+[data-theme="dark"] .role-row input[value="Seher"] {
+  color: #a78bfa; /* Lighter purple for dark mode */
+}
+
+[data-theme="dark"] .role-row input[value="Hexe"] {
+  color: #60a5fa; /* Lighter blue for dark mode */
+}
+
+.role-row input[value="Hexe"] {
+  color: #10b981; /* Emerald green */
+  font-weight: 600;
+}
+
+/* Button Colors */
+#next-btn {
+  background: rgb(25, 116, 4);
+}
+
+#finish-btn {
+  background: rgb(25, 116, 4);
+}
+
+/* Discussion and Voting Styles */
+.players-list {
+  margin: 1.5rem 0;
+  text-align: center;
+}
+
+.player-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.player-tag {
+  background: #4a90e2;
+  color: white;
+  padding: 0.4rem 0.8rem;
+  border-radius: 20px;
+  font-size: 0.9rem;
+  display: inline-block;
+}
+
+.discussion-timer,
+.voting-timer {
+  font-size: 2rem;
+  font-weight: bold;
+  text-align: center;
+  margin: 1rem 0;
+  color: #e74c3c;
+  background: rgba(0, 0, 0, 0.1);
+  padding: 0.5rem;
+  border-radius: 8px;
+  display: inline-block;
+  min-width: 100px;
+}
+
+.voting-instruction {
+  text-align: center;
+  margin-bottom: 1.5rem;
+  font-size: 1.2rem;
+  color: #333;
+}
+
+.player-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.player-card {
+  position: relative;
+  transition: all 0.2s;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.player-card.selected {
+  box-shadow: 0 0 0 3px #e74c3c;
+  transform: translateY(-3px);
+}
+
+.vote-count {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: #e74c3c;
+  color: white;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom-left-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: bold;
+}
+
+/* Day overlay */
+.day-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.9);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.day-content {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 10px;
+  padding: 2.5rem 2rem;
+  text-align: center;
+  max-width: 90%;
+  width: 500px;
+  box-shadow: 0 0 25px rgba(0, 0, 0, 0.7);
+  animation: pop 0.4s ease-out forwards;
+  color: #333;
+}
+
+[data-theme="dark"] .day-content {
+  background: rgba(40, 40, 40, 0.95);
+  color: #f0f0f0;
+  border: 1px solid #555;
+}
+
+.day-choices {
+  margin: 1.5rem 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.day-choices .player-btn {
+  background: #f0f0f0;
+  color: #333;
+  border: 1px solid #ddd;
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+[data-theme="dark"] .day-choices .player-btn {
+  background: #3d3d3d;
+  color: #f0f0f0;
+  border-color: #555;
+}
+
+.day-choices .player-btn:hover {
+  background: #e0e0e0;
+  transform: translateY(-2px);
+}
+
+[data-theme="dark"] .day-choices .player-btn:hover {
+  background: #4d4d4d;
+}
+
+.day-choices .player-btn.selected {
+  background: #4a90e2;
+  color: white;
+  border-color: #3a7bc8;
+}
+
+.day-actions {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.day-actions .primary-btn {
+  background: #4a90e2;
+  color: white;
+  border: none;
+  padding: 0.5rem 1.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: background-color 0.2s;
+}
+
+.day-actions .primary-btn:hover {
+  background: #3a7bc8;
+}
+
+.day-actions .secondary-btn {
+  background: #f0f0f0;
+  color: #333;
+  border: 1px solid #ddd;
+  padding: 0.5rem 1.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: all 0.2s;
+}
+
+[data-theme="dark"] .day-actions .secondary-btn {
+  background: #3d3d3d;
+  color: #f0f0f0;
+  border-color: #555;
+}
+
+.day-actions .secondary-btn:hover {
+  background: #e0e0e0;
+}
+
+[data-theme="dark"] .day-actions .secondary-btn:hover {
+  background: #4d4d4d;
+}
+
+/* Night overlay */
+.night-overlay {
+  position: fixed;
+  inset: 0;
+  background: #000; /* Solid black background */
+  display: none; /* toggled via JS */
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  overflow: hidden;
+  /* Starry background effect */
+  background-image: 
+    radial-gradient(ellipse at 20% 20%, rgba(255,255,255,0.1) 0%, transparent 40%),
+    radial-gradient(ellipse at 80% 80%, rgba(255,255,255,0.1) 0%, transparent 40%),
+    radial-gradient(ellipse at 50% 30%, rgba(255,255,255,0.05) 0%, transparent 40%),
+    radial-gradient(circle at 100% 10%, rgba(255,255,255,0.2) 0 120px, rgba(0,0,0,0.9) 300px);
+}
+
+/* Starry night effect */
+.night-overlay::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: 
+    /* Main stars */
+    radial-gradient(2px 2px at 20px 30px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 40px 70px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 50px 160px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 90px 40px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 130px 80px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 70% 30%, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 85% 20%, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 65% 15%, #fff, rgba(0,0,0,0)),
+    
+    /* Fainter stars */
+    radial-gradient(1px 1px at 30% 40%, rgba(255,255,255,0.8), rgba(0,0,0,0)),
+    radial-gradient(1px 1px at 60% 25%, rgba(255,255,255,0.8), rgba(0,0,0,0)),
+    radial-gradient(1px 1px at 25% 60%, rgba(255,255,255,0.8), rgba(0,0,0,0)),
+    
+    /* Twinkling effect */
+    radial-gradient(1px 1px at 50% 50%, #fff, rgba(0,0,0,0)),
+    radial-gradient(1px 1px at 20% 80%, #fff, rgba(0,0,0,0)),
+    radial-gradient(1px 1px at 80% 70%, #fff, rgba(0,0,0,0));
+  opacity: 0.7;
+  animation: twinkle 8s infinite ease-in-out;
+  pointer-events: none;
+}
+
+/* Cloud-like elements */
+.night-overlay::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: 
+    radial-gradient(150px 30px at 20% 30%, rgba(20, 10, 50, 0.3), transparent 60%),
+    radial-gradient(200px 40px at 70% 50%, rgba(30, 15, 60, 0.3), transparent 70%),
+    radial-gradient(180px 35px at 40% 70%, rgba(25, 10, 55, 0.3), transparent 65%);
+  pointer-events: none;
+  animation: float 20s infinite ease-in-out;
+}
+
+/* Glow effect */
+.night-overlay::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: 
+    radial-gradient(circle at 20% 30%, rgba(100, 100, 255, 0.03), transparent 25%),
+    radial-gradient(circle at 80% 70%, rgba(255, 100, 255, 0.03), transparent 25%),
+    radial-gradient(circle at 50% 50%, rgba(100, 255, 255, 0.02), transparent 30%);
+  animation: pulse 15s infinite alternate;
+  pointer-events: none;
+}
+
+@keyframes twinkle {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 0.9; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0) translateX(0); }
+  25% { transform: translateY(-10px) translateX(5px); }
+  50% { transform: translateY(5px) translateX(-5px); }
+  75% { transform: translateY(-5px) translateX(3px); }
+}
+
+@keyframes pulse {
+  0% { opacity: 0.7; }
+  100% { opacity: 1; }
+}
+
+.night-overlay::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 140px;
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+body.night-active {
+  overflow: hidden;
+}
+
+body.night-active main.container {
+  visibility: hidden;
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.night-content {
+  background: rgba(17, 17, 17, 0.8);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.5), inset 0 0 20px rgba(255, 255, 255, 0.1);
+  color: #fff;
+  padding: 2.5rem 2rem;
+  border-radius: 10px;
+  text-align: center;
+  max-width: 90%;
+  width: 420px;
+  box-shadow: 0 0 25px rgba(0, 0, 0, 0.7);
+  animation: pop 0.4s ease-out forwards;
+  transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+.night-actions {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1rem;
+  justify-content: center;
+  width: 100%;
+}
+
+.night-actions .primary-btn,
+.night-actions .secondary-btn {
+  flex: 0 1 auto;
+  min-width: 90px;
+  max-width: 95px;
+  margin: 0;
+  padding: 0.55rem 0.6rem;
+  font-size: 0.85em;
+  text-align: center;
+  line-height: 0.9;
+  border-radius: 3px;
+}
+
+.night-actions .secondary-btn {
+  background-color: #ef4444;
+  color: white;
+  border: 1px solid #dc2626;
+  transition: background-color 0.2s, border-color 0.2s;
+}
+
+.night-actions .secondary-btn:hover {
+  background-color: #dc2626;
+}
+
+.night-choices {
+  margin-top: 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.night-choices .player-btn {
+  background: #333;
+  color: #fff;
+  border: 1px solid #555;
+  padding: 0.5rem 0.75rem 0.5rem 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+  position: relative;
+  text-align: left;
+  padding-right: 2rem; /* Make room for the werewolf icon */
+  min-width: 120px; /* Ensure consistent width */
+}
+
+/* Style for werewolf players */
+.night-choices .werewolf-player {
+  position: relative;
+  background: #5a2a2a; /* Darker red background for werewolves */
+  border-color: #7a3a3a;
+  padding-right: 2.5rem; /* Extra space for the icon */
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.night-choices .werewolf-player::after {
+  content: '🐺';
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 1.1em;
+}
+
+.witch-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.witch-actions .witch-btn {
+  background: #55007b;
+  color: #fff;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.witch-actions .witch-btn:disabled {
+  background: #333;
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.night-choices .player-btn.selected {
+  background: #b30000;
+  border-color: #ff4d4d;
+  box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+}
+
+/* Disabled state for player buttons */
+.night-choices .player-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #333;
+}
+
+/* Make sure werewolf players are clearly unselectable */
+.night-choices .werewolf-player:disabled {
+  text-decoration: line-through;
+  background: #5a2a2a;
+  opacity: 0.7;
+}
+
+@keyframes pop {
+  from {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+
+#start-night-btn {
+  background: rgb(84, 4, 116);
+}
+
+#night-role, #day-role {
+  color: #fff;
+  transition: color 0.3s ease;
+}
+
+/* Day Overlay */
+.day-overlay {
+  position: fixed;
+  inset: 0;
+  background: #1a3a1a; /* Dark green background for day */
+  background-image: 
+    radial-gradient(ellipse at 20% 20%, rgba(255,255,255,0.1) 0%, transparent 40%),
+    radial-gradient(ellipse at 80% 80%, rgba(255,255,255,0.1) 0%, transparent 40%),
+    radial-gradient(ellipse at 50% 30%, rgba(255,255,255,0.05) 0%, transparent 40%),
+    radial-gradient(circle at 100% 10%, rgba(255,255,255,0.2) 0 120px, rgba(0,0,0,0.9) 300px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+  overflow: hidden;
+}
+
+.day-content {
+  background: rgba(20, 40, 20, 0.8);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.5), inset 0 0 20px rgba(255, 255, 255, 0.1);
+  color: #fff;
+  padding: 2.5rem 2rem;
+  border-radius: 10px;
+  text-align: center;
+  max-width: 90%;
+  width: 420px;
+  box-shadow: 0 0 25px rgba(0, 0, 0, 0.7);
+  animation: pop 0.4s ease-out forwards;
+  position: relative;
+  z-index: 2;
+}
+
+.day-choices {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+}
+
+.day-choices .player-btn {
+  background: #2a5a2a;
+  color: #fff;
+  border: 1px solid #3a7a3a;
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.day-choices .player-btn:hover:not(:disabled) {
+  background: #3a7a3a;
+  transform: translateY(-2px);
+}
+
+.day-choices .player-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.day-choices .player-btn.selected {
+  background: #4a9a4a;
+  border-color: #5aba5a;
+  box-shadow: 0 0 10px rgba(100, 255, 100, 0.5);
+}
+
+.day-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin-top: 1.5rem;
+}
+
+.day-actions .primary-btn {
+  background: #2e7d32;
+}
+
+.day-actions .primary-btn:hover {
+  background: #1b5e20;
+}
+
+.day-actions .secondary-btn {
+  background: #5d4037;
+  color: white;
+}
+
+.day-actions .secondary-btn:hover {
+  background: #4e342e;
+}
+
+/* Win Overlay */
+.win-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.8);
+  z-index: 1000;
+  animation: fadeInDay 0.5s ease-out;
+}
+
+.win-content {
+  background: var(--container-bg);
+  padding: 2rem;
+  border-radius: 10px;
+  text-align: center;
+  box-shadow: 0 4px 12px var(--shadow-color);
+  max-width: 90%;
+}
+
+.win-content h2 {
+  margin-bottom: 1rem;
+  font-size: 1.8rem;
+  color: var(--text-color);
+}
+
+.win-content p {
+  margin-bottom: 1.5rem;
+  font-size: 1.1rem;
+  color: var(--text-light);
+}
+
+/* Hide night phase and seer vision elements by default */
+#seerVisionModal {
+  display: none;
+}
+
+/* Show night overlay when active */
+#seerVisionModal.active {
+  display: flex;
+}
+
+/* Modal Styles */
+.modal {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.7);
+  z-index: 1000;
+  justify-content: center;
+  align-items: center;
+}
+
+.modal-content {
+  background-color: var(--container-bg);
+  padding: 2rem;
+  border-radius: 8px;
+  max-width: 500px;
+  width: 90%;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+
+.modal h3 {
+  margin-top: 0;
+  color: var(--text-color);
+}
+
+.modal p {
+  margin: 1.5rem 0;
+  color: var(--text-color);
+  font-size: 1.1rem;
+  line-height: 1.5;
+}
+
+.modal .primary-btn {
+  margin-top: 1rem;
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+}
+
+/* Seer Vision Styles */
+#seerVisionModal .modal-content {
+  background: linear-gradient(135deg, #1a1a2e, #16213e);
+  color: #fff;
+  border: 2px solid #854cf0;
+  box-shadow: 0 0 20px rgba(76, 201, 240, 0.3);
+}
+
+#seerVisionModal h3 {
+  color: #754cf0;
+  font-size: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+#seerVisionText {
+  font-size: 1.2rem;
+  line-height: 1.6;
+  margin: 1.5rem 0;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  border-left: 4px solid #6d4cf0;
+}
+
+#closeSeerVision {
+  background: #624cf0;
+  color: #16213e;
+  border: none;
+  font-weight: bold;
+  transition: all 0.3s ease;
+}
+
+#closeSeerVision:hover {
+  background: #7c01f7;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(76, 201, 240, 0.3);
+}
+
+/* Confetti animation placeholder (optional) */
+
+/* Voting rows */
+.vote-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+  padding: 0.5rem;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.vote-row.silenced {
+  background-color: rgba(239, 68, 68, 0.1);
+  border-left: 3px solid #ef4444;
+  opacity: 0.8;
+}
+
+.silenced-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: #ef4444;
+  margin-top: 0.25rem;
+  background: rgba(239, 68, 68, 0.1);
+  padding: 0.1rem 0.4rem;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.vote-name {
+  flex: 1 1 auto;
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.vote-input {
+  width: 4rem;
+  padding: 0.4rem;
+  background: var(--input-bg);
+  color: var(--text-color);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  text-align: center;
+}
+
+.vote-input:focus {
+  outline: none;
+  border-color: var(--button-bg);
+}
+
+/* Mayor indicator */
+.mayor-indicator {
+  background: rgba(0, 0, 0, 0.2);
+  color: #ffeb3b;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  display: inline-block;
+  margin: 1rem 0;
+  font-weight: bold;
+  border: 1px solid rgba(255, 235, 59, 0.3);
+  box-shadow: 0 0 10px rgba(255, 235, 59, 0.2);
+}
+
+/* Make the day phase text more visible */
+#day-text {
+  font-size: 1.1em;
+  line-height: 1.5;
+  margin-bottom: 1.5rem;
+}
+
+/* Role reveal grid */
+.reveal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 1rem;
+  perspective: 1000px;
+  margin-top: 1.5rem;
+}
+
+.reveal-card {
+  background-color: transparent;
+  aspect-ratio: 3 / 4;
+  perspective: 1000px;
+  cursor: pointer;
+}
+
+.reveal-card-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  text-align: center;
+  transition: transform 0.7s;
+  transform-style: preserve-3d;
+  box-shadow: 0 4px 8px var(--shadow-color);
+  border-radius: 8px;
+}
+
+.reveal-card.flipped .reveal-card-inner {
+  transform: rotateY(180deg);
+}
+
+.reveal-card-front,
+.reveal-card-back {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  -webkit-backface-visibility: hidden; /* Safari */
+  backface-visibility: hidden;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+}
+
+.reveal-card-front {
+  background: var(--button-secondary-bg);
+  color: var(--text-color);
+  font-weight: 600;
+}
+
+.reveal-card-back {
+  background: var(--button-bg);
+  color: white;
+  transform: rotateY(180deg);
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.reveal-card-back .role-name {
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.reveal-card-back .role-name.long-text {
+  font-size: 0.9rem;
+}
+
+.reveal-card-back .player-name {
+  font-size: 0.9rem;
+  opacity: 0.9;
+}
+
+.info-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  margin-top: 0.5rem;
+  transition: background 0.2s;
+}
+
+.info-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.reveal-card.dead {
+  opacity: 0.6;
+  pointer-events: none; /* Disable clicks on dead players' cards */
+}
+
+.reveal-card.dead .reveal-card-inner {
+  box-shadow: none;
+}
+
+.reveal-card.dead .reveal-card-front {
+  background: #4a4a4a; /* Darker background for dead players */
+  color: #999;
+  text-decoration: line-through;
+}
+
+.reveal-card.dead .reveal-card-back {
+  background: #333; /* Even darker for the back */
+  color: #888;
+}
+
+
+/* Style for the mayor election phase */
+.day-overlay .mayor-candidate {
+  background: #2a5a2a;
+  border: 2px solid #3a7a3a;
+  transition: all 0.2s ease;
+}
+
+.day-overlay .mayor-candidate:hover {
+  background: #3a7a3a;
+  transform: translateY(-2px);
+}
+
+.day-overlay .mayor-candidate.selected {
+  background: #4a9a4a;
+  border-color: #5aba5a;
+  box-shadow: 0 0 15px rgba(100, 255, 100, 0.5);
+  transform: scale(1.05);
+}
+
+/* Animation for day overlay */
+@keyframes fadeInDay {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.day-overlay h2 {
+  color: #e6f0ff;  /* Light blue color for better visibility */
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+  margin-bottom: 1rem;
+}
+
+.day-overlay.show {
+  display: flex;
+  animation: fadeInDay 0.5s ease-out;
+}
+
+.hidden {
+  display: none !important;
+}
+
+#night-role[data-role="Amor"] {
+  color: #ec4899; /* Pink */
+  text-shadow: 0 0 8px rgba(236, 72, 153, 0.5);
+}
+
+#night-role[data-role="Seer"] {
+  color: #8b5cf6; /* Purple */
+  text-shadow: 0 0 8px rgba(139, 92, 246, 0.5);
+}
+
+#night-role[data-role="Werwolf"] {
+  color: #ef4444; /* Red */
+  text-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+}
+
+/* Sessions Sidebar */
+.sessions-sidebar {
+    position: fixed;
+    top: 0;
+    left: -300px; /* Hidden by default */
+    width: 300px;
+    height: 100%;
+    background: var(--container-bg);
+    border-right: 1px solid var(--border-color);
+    box-shadow: 4px 0 15px rgba(0, 0, 0, 0.1);
+    padding: 1.5rem;
+    transition: left 0.3s ease-in-out;
+    z-index: 1001;
+    overflow-y: auto;
+}
+
+.sessions-sidebar.show {
+    left: 0;
+}
+
+.sessions-sidebar h2 {
+    margin-top: 2.5rem;
+    text-align: left;
+}
+
+#sessions-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+#sessions-list li {
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    cursor: pointer;
+    transition: background-color 0.2s, box-shadow 0.2s;
+    position: relative;
+}
+
+#sessions-list li:hover {
+    background: var(--button-secondary-hover);
+    box-shadow: 0 2px 8px var(--shadow-color);
+}
+
+.session-date {
+    font-size: 0.8rem;
+    color: var(--text-light);
+    margin-bottom: 0.5rem;
+}
+
+.session-players {
+    font-weight: 600;
+}
+
+.delete-session-btn {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    background: none;
+    border: none;
+    color: var(--text-light);
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 0.25rem;
+}
+
+.delete-session-btn:hover {
+    color: #ef4444; /* Red */
+}
+
+.sessions-toggle {
+    position: fixed;
+    top: 1.5rem;
+    left: 1.5rem;
+    background: var(--theme-toggle-bg);
+    border: none;
+    border-radius: 50%;
+    width: 2.5rem;
+    height: 2.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 1002;
+    transition: background-color 0.3s ease, left 0.3s ease-in-out;
+}
+
+.sessions-toggle:hover {
+    background: var(--theme-toggle-hover);
+}
+
+/* Adjust main container when sidebar is open */
+body.sidebar-open .container {
+    margin-left: 300px;
+}
+
+body.sidebar-open .sessions-toggle {
+    left: 315px; /* Adjust toggle button position */
+}
+
+@media (max-width: 768px) {
+    body.sidebar-open .container {
+        margin-left: 0;
+    }
+
+    .container {
+        padding: 1.5rem;
+    }
+}
+
+#night-role[data-role="Hexe"] {
+  color: #1e40af; /* Dark Blue */
+  text-shadow: 0 0 8px rgba(30, 64, 175, 0.5);
+}
+
+/* Full Moon Animation */
+.full-moon-indicator {
+  display: none;
+  position: fixed;
+  top: 10%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100px;
+  height: 100px;
+  background-color: #f0e68c; /* Khaki */
+  border-radius: 50%;
+  box-shadow: 0 0 20px #f0e68c, 0 0 40px #f0e68c, 0 0 60px #fff;
+  z-index: 1001;
+  animation: glow 2s infinite alternate;
+}
+
+body.full-moon-active .full-moon-indicator {
+  display: block;
+}
+
+@keyframes glow {
+  from {
+    box-shadow: 0 0 20px #f0e68c, 0 0 40px #f0e68c, 0 0 60px #fff;
+  }
+  to {
+    box-shadow: 0 0 30px #fff, 0 0 50px #f0e68c, 0 0 70px #f0e68c;
+  }
+}
+
+/* Admin Panel */
+.admin-panel {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  background: var(--container-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 1rem;
+  box-shadow: 0 4px 12px var(--shadow-color);
+  z-index: 1002;
+}
+
+.admin-panel.hidden {
+    display: none;
+}
+
+.admin-panel h4 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+/* Confirmation Modal */
+.confirmation-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+.confirmation-buttons button {
+    flex: 1 1 0;
+    padding: 0.75rem 1rem;
+    font-size: 1rem;
+}
+
+#confirm-btn {
+    background-color: #ef4444; /* Red for confirmation of dangerous actions */
+}
+
+#confirm-btn:hover {
+    background-color: #dc2626;
+}
