@@ -21,9 +21,10 @@ function initTheme() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("players").value = "";
   // Initialize theme
   initTheme();
-  updateFullMoonOdds();
+  updateBloodMoonOdds();
 
   // Sidebar elements and toggle
   const sessionsSidebar = document.getElementById('sessions-sidebar');
@@ -88,10 +89,12 @@ document.addEventListener("DOMContentLoaded", () => {
   let onConfirmCallback = null;
 
   // Show confirmation modal
-  function showConfirmation(title, text, onConfirm) {
+  function showConfirmation(title, text, onConfirm, confirmText = 'Bestätigen', showCancel = true) {
     confirmationTitle.textContent = title;
     confirmationText.textContent = text;
     onConfirmCallback = onConfirm;
+    confirmBtn.textContent = confirmText;
+    cancelBtn.parentElement.style.display = showCancel ? 'block' : 'none';
     confirmationModal.style.display = 'flex';
   }
 
@@ -99,6 +102,8 @@ document.addEventListener("DOMContentLoaded", () => {
   function hideConfirmation() {
     confirmationModal.style.display = 'none';
     onConfirmCallback = null;
+    confirmBtn.textContent = 'Bestätigen';
+    cancelBtn.parentElement.style.display = 'block';
   }
 
   // Add event listeners for confirmation modal
@@ -144,7 +149,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let healRemaining = 1;
   let poisonRemaining = 1;
   let selectedWitchAction = null;
-  let fullMoonActive = false;
+  let bloodMoonActive = false;
 
   let players = [];
   let rolesAssigned = [];
@@ -224,7 +229,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Initiale Anzeige: Werwolf und Dorfbewohner mit 1, Rest mit 0
   allRoles.forEach((r) => {
-    const qty = (r === "Werwolf" || r === "Dorfbewohner") ? 1 : 0;
+    const qty = 0;
     addRoleRow(r, qty);
   });
 
@@ -368,10 +373,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // Show choices based on role (case-insensitive comparison)
-    if (normalizedRole === "werwolf" && fullMoonActive) {
-        document.body.classList.add('full-moon-active');
+    if (normalizedRole === "werwolf" && bloodMoonActive) {
+        document.body.classList.add('blood-moon-active');
     } else {
-        document.body.classList.remove('full-moon-active');
+        document.body.classList.remove('blood-moon-active');
     }
 
     if (normalizedRole === "amor") {
@@ -394,8 +399,8 @@ document.addEventListener("DOMContentLoaded", () => {
       const nextBtn = document.getElementById('night-next-btn');
       nightActions.insertBefore(clearBtn, nextBtn);
     } else if (normalizedRole === "werwolf") {
-      if (fullMoonActive) {
-        nightTextEl.innerHTML += "<br><strong>Vollmond!</strong> Ihr dürft ein zweites Opfer wählen.";
+      if (bloodMoonActive) {
+        nightTextEl.innerHTML += "<br><strong>Blutmond!</strong> Ihr dürft ein zweites Opfer wählen.";
         renderPlayerChoices(2);
       } else {
         renderPlayerChoices(1); // limit to one victim
@@ -776,8 +781,8 @@ ${partner} stirbt, weil sie/er mit ${lynched} verliebt war.`;
       showNightStep();
     } else {
       // Nacht beendet
-      fullMoonActive = false; // Reset full moon event
-      document.body.classList.remove('full-moon-active');
+      bloodMoonActive = false; // Reset blood moon event
+      document.body.classList.remove('blood-moon-active');
       nightMode = false;
       nightOverlay.style.display = "none";
       assignBtn.style.display = "inline-block";
@@ -874,7 +879,6 @@ ${partner} stirbt, weil sie/er mit ${lynched} verliebt war.`;
         
         // Add to game log
         resultOutput.innerHTML += `<br>Der Seher hat ${name} angesehen.`;
-        moveToNextNightStep();
       });
       return; // Wait for confirmation
     } else if (role === "Werwolf") {
@@ -929,14 +933,19 @@ ${partner} stirbt, weil sie/er mit ${lynched} verliebt war.`;
   const seerVisionText = document.getElementById('seerVisionText');
   const closeSeerVision = document.getElementById('closeSeerVision');
   
-  closeSeerVision.addEventListener('click', () => {
-    seerVisionModal.style.display = 'none';
-  });
+  function closeSeerModalAndProceed() {
+    if (seerVisionModal.style.display !== 'none') {
+        seerVisionModal.style.display = 'none';
+        moveToNextNightStep();
+    }
+  }
+
+  closeSeerVision.addEventListener('click', closeSeerModalAndProceed);
   
   // Close modal when clicking outside of it
   window.addEventListener('click', (event) => {
     if (event.target === seerVisionModal) {
-      seerVisionModal.style.display = 'none';
+      closeSeerModalAndProceed();
     }
   });
   
@@ -944,34 +953,34 @@ ${partner} stirbt, weil sie/er mit ${lynched} verliebt war.`;
   // We'll handle click events through direct onclick assignments
   // to prevent multiple event listeners from stacking up
 
-  function updateFullMoonOdds() {
-    const fullMoonPityTimer = parseInt(localStorage.getItem('fullMoonPityTimer') || '0');
-    const fullMoonChance = Math.min(0.2 + fullMoonPityTimer * 0.1, 1);
-    const oddsEl = document.getElementById('full-moon-odds');
+  function updateBloodMoonOdds() {
+    const bloodMoonPityTimer = parseInt(localStorage.getItem('bloodMoonPityTimer') || '0');
+    const bloodMoonChance = Math.min(0.2 + bloodMoonPityTimer * 0.1, 1);
+    const oddsEl = document.getElementById('blood-moon-odds');
     if (oddsEl) {
-      oddsEl.textContent = `Vollmond-Chance diese Nacht: ${Math.round(fullMoonChance * 100)}%`;
+      oddsEl.textContent = `Blutmond-Chance diese Nacht: ${Math.round(bloodMoonChance * 100)}%`;
     }
   }
 
   function triggerRandomEvents() {
     // Reset all events
-    fullMoonActive = false;
+    bloodMoonActive = false;
 
     if (!eventsEnabledCheckbox.checked) {
       return;
     }
 
-    let fullMoonPityTimer = parseInt(localStorage.getItem('fullMoonPityTimer') || '0');
-    const fullMoonChance = Math.min(0.2 + fullMoonPityTimer * 0.1, 1);
+    let bloodMoonPityTimer = parseInt(localStorage.getItem('bloodMoonPityTimer') || '0');
+    const bloodMoonChance = Math.min(0.2 + bloodMoonPityTimer * 0.1, 1);
 
-    if (Math.random() < fullMoonChance) {
-      fullMoonActive = true;
-      fullMoonPityTimer = 0;
+    if (Math.random() < bloodMoonChance) {
+      bloodMoonActive = true;
+      bloodMoonPityTimer = 0;
     } else {
-      fullMoonPityTimer++;
+      bloodMoonPityTimer++;
     }
-    localStorage.setItem('fullMoonPityTimer', fullMoonPityTimer);
-    updateFullMoonOdds();
+    localStorage.setItem('bloodMoonPityTimer', bloodMoonPityTimer);
+    updateBloodMoonOdds();
   }
 
   startNightBtn.addEventListener("click", () => {
@@ -1246,6 +1255,7 @@ ${partner} stirbt, weil sie/er mit ${lynched} verliebt war.`;
     // Hide setup and show results
     document.querySelector('.setup-container').style.display = 'none';
     assignBtn.style.display = 'none';
+    loadLastUsedBtn.style.display = 'none';
     document.getElementById('ergebnisse-title').style.display = 'block';
     document.querySelector('.navigation-buttons').style.display = 'flex';
     revealGrid.style.display = 'grid';
@@ -1302,6 +1312,7 @@ ${partner} stirbt, weil sie/er mit ${lynched} verliebt war.`;
     document.querySelector('.container').classList.remove('hidden');
     document.querySelector('.setup-container').style.display = 'grid';
     assignBtn.style.display = 'inline-block';
+    loadLastUsedBtn.style.display = 'inline-block';
     document.getElementById('ergebnisse-title').style.display = 'none';
     document.querySelector('.navigation-buttons').style.display = 'none';
     document.getElementById('reveal-grid').style.display = 'none';
@@ -1324,7 +1335,7 @@ ${partner} stirbt, weil sie/er mit ${lynched} verliebt war.`;
       silencedPlayer: silencedPlayer,
       healRemaining: healRemaining,
       poisonRemaining: poisonRemaining,
-      fullMoonActive: fullMoonActive,
+      bloodMoonActive: bloodMoonActive,
       dayCount: dayCount,
       mayor: mayor,
       nightMode: nightMode,
@@ -1398,7 +1409,7 @@ ${partner} stirbt, weil sie/er mit ${lynched} verliebt war.`;
     silencedPlayer = session.silencedPlayer || null;
     healRemaining = session.healRemaining !== undefined ? session.healRemaining : 1;
     poisonRemaining = session.poisonRemaining !== undefined ? session.poisonRemaining : 1;
-    fullMoonActive = session.fullMoonActive || false;
+    bloodMoonActive = session.bloodMoonActive || false;
     dayCount = session.dayCount || 0;
     mayor = session.mayor || null;
     nightMode = session.nightMode || false;
@@ -1422,6 +1433,7 @@ ${partner} stirbt, weil sie/er mit ${lynched} verliebt war.`;
     // Hide setup and show results
     document.querySelector('.setup-container').style.display = 'none';
     assignBtn.style.display = 'none';
+    loadLastUsedBtn.style.display = 'none';
     document.getElementById('ergebnisse-title').style.display = 'block';
     document.querySelector('.navigation-buttons').style.display = 'flex';
     document.getElementById('reveal-grid').style.display = 'grid';
@@ -1496,7 +1508,21 @@ ${partner} stirbt, weil sie/er mit ${lynched} verliebt war.`;
 
   // Admin Panel
   const adminPanel = document.getElementById('admin-panel');
-  const triggerFullMoonBtn = document.getElementById('trigger-full-moon-btn');
+  const triggerBloodMoonBtn = document.getElementById('trigger-blood-moon-btn');
+  const adminPanelToggle = document.getElementById('admin-panel-toggle');
+  const closeAdminPanelBtn = document.getElementById('close-admin-panel-btn');
+
+  if (adminPanelToggle) {
+    adminPanelToggle.addEventListener('click', () => {
+      adminPanel.classList.toggle('hidden');
+    });
+  }
+
+  if (closeAdminPanelBtn) {
+    closeAdminPanelBtn.addEventListener('click', () => {
+      adminPanel.classList.add('hidden');
+    });
+  }
 
   document.addEventListener('keydown', (e) => {
     if (e.metaKey && e.shiftKey && e.key === 'o') {
@@ -1504,13 +1530,13 @@ ${partner} stirbt, weil sie/er mit ${lynched} verliebt war.`;
     }
   });
 
-  triggerFullMoonBtn.addEventListener('click', () => {
-    fullMoonActive = true;
-    document.body.classList.add('full-moon-active');
+  triggerBloodMoonBtn.addEventListener('click', () => {
+    bloodMoonActive = true;
     
     // If in werewolf night step, update UI immediately
     if (nightMode && nightSteps[nightIndex] === 'Werwolf') {
-      nightTextEl.innerHTML = nightTexts['Werwolf'] + "<br><strong>Vollmond!</strong> Ihr dürft ein zweites Opfer wählen.";
+      document.body.classList.add('blood-moon-active');
+      nightTextEl.innerHTML = nightTexts['Werwolf'] + "<br><strong>Blutmond!</strong> Ihr dürft ein zweites Opfer wählen.";
       renderPlayerChoices(2);
     }
   });

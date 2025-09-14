@@ -126,7 +126,7 @@ body {
   margin-top: 0.25rem;
 }
 
-.full-moon-odds {
+.blood-moon-odds {
   font-size: 0.9rem;
   color: var(--text-light);
   margin-top: 1rem;
@@ -1477,36 +1477,118 @@ body.sidebar-open .sessions-toggle {
   text-shadow: 0 0 8px rgba(30, 64, 175, 0.5);
 }
 
-/* Full Moon Animation */
-.full-moon-indicator {
+/* Blood Moon Animation */
+.blood-moon-indicator {
   display: none;
   position: fixed;
-  top: 10%;
+  top: 5%;
   left: 50%;
   transform: translateX(-50%);
-  width: 100px;
-  height: 100px;
-  background-color: #f0e68c; /* Khaki */
+  width: 120px;
+  height: 120px;
   border-radius: 50%;
-  box-shadow: 0 0 20px #f0e68c, 0 0 40px #f0e68c, 0 0 60px #fff;
   z-index: 1001;
-  animation: glow 2s infinite alternate;
+  overflow: hidden; /* Keep clouds contained */
+  animation: blood-moon-glow 3s infinite alternate;
+  box-shadow: 0 0 10px #ff4d4d, 0 0 20px #ff4d4d, 0 0 30px #d9363e, 0 0 40px #d9363e;
 }
 
-body.full-moon-active .full-moon-indicator {
+.moon-surface {
+    width: 100%;
+    height: 100%;
+    background-color: #c62828; /* Dark Red */
+    background-image:
+        radial-gradient(circle at 20% 30%, #d32f2f 10%, transparent 10.5%),
+        radial-gradient(circle at 60% 40%, #b71c1c 15%, transparent 15.5%),
+        radial-gradient(circle at 30% 70%, #d32f2f 8%, transparent 8.5%),
+        radial-gradient(circle at 80% 80%, #c62828 12%, transparent 12.5%);
+    border-radius: 50%;
+}
+
+body.blood-moon-active .blood-moon-indicator {
   display: block;
 }
 
-@keyframes glow {
+@keyframes blood-moon-glow {
   from {
-    box-shadow: 0 0 20px #f0e68c, 0 0 40px #f0e68c, 0 0 60px #fff;
+    box-shadow: 0 0 10px #ff4d4d, 0 0 20px #ff4d4d, 0 0 30px #d9363e, 0 0 40px #d9363e;
   }
   to {
-    box-shadow: 0 0 30px #fff, 0 0 50px #f0e68c, 0 0 70px #f0e68c;
+    box-shadow: 0 0 20px #ff4d4d, 0 0 35px #d9363e, 0 0 50px #d9363e, 0 0 60px #b71c1c;
   }
 }
 
+/* Clouds */
+.cloud {
+    position: absolute;
+    background: #000;
+    border-radius: 50%;
+    opacity: 0.5; /* Darker clouds */
+    filter: blur(6px);
+    animation-name: drift;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+}
+
+.cloud-1 {
+    width: 100px;
+    height: 35px;
+    top: 20px;
+    animation-duration: 25s;
+    animation-delay: -12s;
+}
+
+.cloud-2 {
+    width: 130px;
+    height: 40px;
+    top: 50px;
+    animation-duration: 30s;
+}
+
+.cloud-3 {
+    width: 80px;
+    height: 30px;
+    top: 85px;
+    animation-duration: 22s;
+    animation-delay: -8s;
+}
+
+@keyframes drift {
+    from { transform: translateX(-180px); }
+    to { transform: translateX(180px); }
+}
+
 /* Admin Panel */
+.admin-toggle-btn {
+    position: fixed;
+    bottom: 1rem;
+    right: 1rem;
+    background: var(--theme-toggle-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 50%;
+    width: 3rem;
+    height: 3rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 1001;
+    transition: all 0.3s ease;
+    padding: 0;
+    box-shadow: 0 2px 8px var(--shadow-color);
+}
+
+.admin-toggle-btn:hover {
+    background: var(--theme-toggle-hover);
+    transform: scale(1.1);
+}
+
+.admin-toggle-btn svg {
+    width: 1.75rem;
+    height: 1.75rem;
+    color: var(--text-light);
+}
+
 .admin-panel {
   position: fixed;
   bottom: 1rem;
@@ -1529,24 +1611,59 @@ body.full-moon-active .full-moon-indicator {
   text-align: center;
 }
 
-/* Confirmation Modal */
+.admin-panel .close-btn {
+    position: absolute;
+    top: 0.25rem;
+    right: 0.5rem;
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    color: var(--text-light);
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+
+.admin-panel .close-btn:hover {
+    color: var(--text-color);
+}
+
 .confirmation-buttons {
     display: flex;
     justify-content: center;
     gap: 1rem;
     margin-top: 1.5rem;
+    align-items: stretch;
 }
 
-.confirmation-buttons button {
-    flex: 1 1 0;
+#confirm-btn, #cancel-btn {
+    flex: 1;
     padding: 0.75rem 1rem;
     font-size: 1rem;
+    border-width: 1px;
+    border-style: solid;
+    box-sizing: border-box;
+    display: flex;
 }
 
 #confirm-btn {
-    background-color: #ef4444; /* Red for confirmation of dangerous actions */
+    background-color: #ef4444;
+    border-color: #ef4444;
+    color: #fff;
 }
 
 #confirm-btn:hover {
     background-color: #dc2626;
+    border-color: #dc2626;
+}
+
+#cancel-btn {
+    border-color: var(--border-color);
+    background-color: var(--button-secondary-bg);
+    color: var(--text-color);
+    position: relative;
+    top: 15px;
+}
+#cancel-btn:hover {
+    background-color: var(--button-secondary-hover);
 }
