@@ -1435,6 +1435,7 @@ body.night-active main.container {
 .sessions-sidebar h2 {
     margin-top: 2.5rem;
     text-align: left;
+    color: whitesmoke;
 }
 
 #sessions-list {
@@ -1500,6 +1501,7 @@ body.night-active main.container {
     cursor: pointer;
     z-index: 1002;
     transition: background-color 0.3s ease, left 0.3s ease-in-out;
+    color: white;
 }
 
 .sessions-toggle:hover {

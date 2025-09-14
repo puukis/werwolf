@@ -1224,6 +1224,14 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function triggerRandomEvents() {
+    // If blood moon was manually triggered by admin, keep it active and skip random check.
+    if (bloodMoonActive === true) {
+        // Reset pity timer as the blood moon is happening
+        localStorage.setItem('bloodMoonPityTimer', 0);
+        updateBloodMoonOdds();
+        return;
+    }
+
     // Reset all events
     bloodMoonActive = false;
 
@@ -1853,7 +1861,6 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
   }
-});
 
   // Admin Panel
   const adminPanel = document.getElementById('admin-panel');
@@ -1881,6 +1888,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   triggerBloodMoonBtn.addEventListener('click', () => {
     bloodMoonActive = true;
+    showConfirmation("Blutmond aktiviert", "Der Blutmond wurde für die nächste Nacht manuell aktiviert.", () => {}, "Okay", false);
     
     // If in werewolf night step, update UI immediately
     if (nightMode && nightSteps[nightIndex] === 'Werwolf') {
@@ -1889,3 +1897,4 @@ document.addEventListener("DOMContentLoaded", () => {
       renderPlayerChoices(2);
     }
   });
+});
