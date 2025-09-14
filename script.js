@@ -89,12 +89,18 @@ document.addEventListener("DOMContentLoaded", () => {
   let onConfirmCallback = null;
 
   // Show confirmation modal
-  function showConfirmation(title, text, onConfirm, confirmText = 'Bestätigen', showCancel = true) {
+  function showConfirmation(title, text, onConfirm, confirmText = 'Bestätigen', showCancel = true, modalClass = '') {
     confirmationTitle.textContent = title;
     confirmationText.textContent = text;
     onConfirmCallback = onConfirm;
     confirmBtn.textContent = confirmText;
     cancelBtn.parentElement.style.display = showCancel ? 'block' : 'none';
+
+    confirmationModal.className = 'modal';
+    if(modalClass) {
+        confirmationModal.classList.add(modalClass);
+    }
+
     confirmationModal.style.display = 'flex';
   }
 
@@ -104,6 +110,7 @@ document.addEventListener("DOMContentLoaded", () => {
     onConfirmCallback = null;
     confirmBtn.textContent = 'Bestätigen';
     cancelBtn.parentElement.style.display = 'block';
+    confirmationModal.className = 'modal';
   }
 
   // Add event listeners for confirmation modal
@@ -400,8 +407,17 @@ document.addEventListener("DOMContentLoaded", () => {
       nightActions.insertBefore(clearBtn, nextBtn);
     } else if (normalizedRole === "werwolf") {
       if (bloodMoonActive) {
-        nightTextEl.innerHTML += "<br><strong>Blutmond!</strong> Ihr dürft ein zweites Opfer wählen.";
-        renderPlayerChoices(2);
+        showConfirmation(
+            "Blutmond!", 
+            "Es ist Blutmond! Die Werwölfe dürfen sich 2 Opfer aussuchen.", 
+            () => {
+                nightTextEl.innerHTML = nightTexts['Werwolf'] + "<br><strong>Blutmond!</strong> Ihr dürft ein zweites Opfer wählen.";
+                renderPlayerChoices(2);
+            },
+            'OK',
+            false,
+            'blood-moon-popup'
+        );
       } else {
         renderPlayerChoices(1); // limit to one victim
       }
@@ -834,13 +850,19 @@ ${partner} stirbt, weil sie/er mit ${lynched} verliebt war.`;
         }
         const name = target.textContent;
         showConfirmation("Gifttrank einsetzen?", `Willst du ${name} wirklich vergiften? Dieser Trank kann nur einmal pro Spiel verwendet werden.`, () => {
-          if (!deadPlayers.includes(name)) deadPlayers.push(name);
+          if (!deadPlayers.includes(name)) {
+            deadPlayers.push(name);
+            currentNightVictims.push(name);
+          }
           updatePlayerCardVisuals();
           // lover chain effect
           lovers.forEach((pair) => {
             if (pair.includes(name)) {
               const partner = pair[0] === name ? pair[1] : pair[0];
-              if (!deadPlayers.includes(partner)) deadPlayers.push(partner);
+              if (!deadPlayers.includes(partner)) {
+                deadPlayers.push(partner);
+                currentNightVictims.push(partner);
+              }
             }
           });
           poisonRemaining--;
@@ -901,7 +923,10 @@ ${partner} stirbt, weil sie/er mit ${lynched} verliebt war.`;
           lovers.forEach((pair) => {
             if (pair.includes(victim)) {
               const partner = pair[0] === victim ? pair[1] : pair[0];
-              if (!deadPlayers.includes(partner)) deadPlayers.push(partner);
+              if (!deadPlayers.includes(partner)) {
+                deadPlayers.push(partner);
+                currentNightVictims.push(partner);
+              }
             }
           });
         });
@@ -1207,6 +1232,7 @@ ${partner} stirbt, weil sie/er mit ${lynched} verliebt war.`;
     players.forEach((player, index) => {
       const card = document.createElement('div');
       card.className = 'reveal-card';
+      card.style.animationDelay = `${index * 0.05}s`;
       card.onclick = () => {
         if (currentlyFlippedCard && currentlyFlippedCard !== card) {
           currentlyFlippedCard.classList.remove('flipped');
@@ -1446,6 +1472,7 @@ ${partner} stirbt, weil sie/er mit ${lynched} verliebt war.`;
     players.forEach((player, index) => {
       const card = document.createElement('div');
       card.className = 'reveal-card';
+      card.style.animationDelay = `${index * 0.05}s`;
       if (deadPlayers.includes(player)) {
         card.classList.add('dead');
       }

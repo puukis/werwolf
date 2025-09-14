@@ -17,6 +17,7 @@
   --shadow-color: rgba(0, 0, 0, 0.08);
   --theme-toggle-bg: #e7eaf1;
   --theme-toggle-hover: #d2d5df;
+  --glow-color: rgba(0, 119, 255, 0.3);
 }
 
 [data-theme="dark"] {
@@ -37,6 +38,7 @@
   --shadow-color: rgba(0, 0, 0, 0.3);
   --theme-toggle-bg: #3d3d3d;
   --theme-toggle-hover: #4d4d4d;
+  --glow-color: rgba(74, 144, 226, 0.2);
 }
 
 /* Theme toggle button */
@@ -88,16 +90,20 @@
   padding: 0;
 }
 
+html {
+  background: var(--bg-color);
+  transition: background-color 0.3s ease;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
-  background: var(--bg-color);
   color: var(--text-color);
   min-height: 100vh;
   display: flex;
   align-items: flex-start;
   justify-content: center;
   padding: 2rem;
-  transition: background-color 0.3s ease, color 0.3s ease;
+  transition: color 0.3s ease;
 }
 
 .container {
@@ -156,6 +162,12 @@ body {
   border-radius: 8px;
   padding: 1.5rem;
   box-shadow: 0 2px 4px var(--shadow-color);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 12px 28px var(--shadow-color);
 }
 
 .card h2 {
@@ -320,11 +332,12 @@ button {
   background: var(--button-bg);
   color: #fff;
   padding: 0.6rem 1.2rem;
-  transition: background-color 0.3s ease;
+  transition: background-color 0.3s ease, transform 0.2s ease;
 }
 
 .primary-btn:hover {
   background: var(--button-hover);
+  transform: scale(1.05);
 }
 
 .secondary-btn {
@@ -1085,14 +1098,16 @@ body.night-active main.container {
 
 /* Seer Vision Styles */
 #seerVisionModal .modal-content {
-  background: linear-gradient(135deg, #1a1a2e, #16213e);
+  background: rgba(17, 17, 17, 0.8);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.5), inset 0 0 20px rgba(139, 92, 246, 0.2);
   color: #fff;
-  border: 2px solid #854cf0;
-  box-shadow: 0 0 20px rgba(76, 201, 240, 0.3);
 }
 
 #seerVisionModal h3 {
-  color: #754cf0;
+  color: #8b5cf6; /* Purple */
+  text-shadow: 0 0 8px rgba(139, 92, 246, 0.5);
   font-size: 1.5rem;
   margin-bottom: 1.5rem;
 }
@@ -1102,23 +1117,23 @@ body.night-active main.container {
   line-height: 1.6;
   margin: 1.5rem 0;
   padding: 1rem;
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(139, 92, 246, 0.1);
   border-radius: 8px;
-  border-left: 4px solid #6d4cf0;
+  border-left: 4px solid #8b5cf6;
 }
 
 #closeSeerVision {
-  background: #624cf0;
-  color: #16213e;
+  background: #8b5cf6;
+  color: #fff;
   border: none;
   font-weight: bold;
   transition: all 0.3s ease;
 }
 
 #closeSeerVision:hover {
-  background: #7c01f7;
+  background: #7c3aed;
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(76, 201, 240, 0.3);
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
 }
 
 /* Confetti animation placeholder (optional) */
@@ -1208,6 +1223,8 @@ body.night-active main.container {
   aspect-ratio: 3 / 4;
   perspective: 1000px;
   cursor: pointer;
+  animation: fade-in-up 0.5s ease-out forwards;
+  opacity: 0;
 }
 
 .reveal-card-inner {
@@ -1666,4 +1683,127 @@ body.blood-moon-active .blood-moon-indicator {
 }
 #cancel-btn:hover {
     background-color: var(--button-secondary-hover);
+}
+
+.modal.blood-moon-popup .modal-content {
+  background: rgba(17, 17, 17, 0.8);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.5), inset 0 0 20px rgba(255, 0, 0, 0.2);
+  color: #fff;
+}
+
+.modal.blood-moon-popup h3 {
+    color: #ef4444; /* Red */
+    text-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+}
+
+/* Glow Background */
+.glow-background {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  z-index: -1;
+}
+
+.glow-element {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--glow-color) 0%, transparent 70%);
+  animation: float-glow 20s infinite ease-in-out;
+}
+
+.glow-element:nth-child(1) {
+  width: 400px;
+  height: 400px;
+  top: 10%;
+  left: 10%;
+  animation-duration: 25s;
+  animation-delay: -5s;
+}
+
+.glow-element:nth-child(2) {
+  width: 300px;
+  height: 300px;
+  top: 50%;
+  left: 70%;
+  animation-duration: 30s;
+  animation-delay: -10s;
+}
+
+.glow-element:nth-child(3) {
+  width: 200px;
+  height: 200px;
+  top: 80%;
+  left: 20%;
+  animation-duration: 20s;
+  animation-delay: -15s;
+}
+
+.glow-element:nth-child(4) {
+  width: 500px;
+  height: 500px;
+  top: 20%;
+  left: 80%;
+  animation-duration: 35s;
+  animation-delay: 0s;
+}
+
+@keyframes float-glow {
+  0% {
+    transform: translate(0, 0);
+    opacity: 0.4;
+  }
+  25% {
+    transform: translate(20px, 40px);
+    opacity: 0.6;
+  }
+  50% {
+    transform: translate(-30px, -10px);
+    opacity: 0.3;
+  }
+  75% {
+    transform: translate(10px, -30px);
+    opacity: 0.7;
+  }
+  100% {
+    transform: translate(0, 0);
+    opacity: 0.4;
+  }
+}
+
+/* Entry Animations */
+.main-header, .setup-container, .actions {
+    animation: fade-in-up 0.8s ease-out forwards;
+    opacity: 0;
+}
+
+.main-header { animation-delay: 0.1s; }
+.setup-container { animation-delay: 0.3s; }
+.actions { animation-delay: 0.5s; }
+
+@keyframes fade-in-up {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.night-choices .player-btn,
+.day-choices .player-btn,
+.witch-actions .witch-btn {
+    transition: transform 0.2s ease, background-color 0.2s, border-color 0.2s;
+}
+
+.night-choices .player-btn:hover:not(:disabled),
+.day-choices .player-btn:hover:not(:disabled),
+.witch-actions .witch-btn:hover:not(:disabled) {
+    transform: scale(1.05);
 }
