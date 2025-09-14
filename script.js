@@ -1208,6 +1208,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (event.target === seerVisionModal) {
       closeSeerModalAndProceed();
     }
+    if (event.target === roleInfoModal) {
+      roleInfoModal.style.display = 'none';
+    }
+    if (event.target === rolesOverviewModal) {
+      rolesOverviewModal.style.display = 'none';
+    }
   });
   
   // Day phase event listeners
@@ -1606,6 +1612,7 @@ document.addEventListener("DOMContentLoaded", () => {
     loadLastUsedBtn.style.display = 'none';
     document.getElementById('ergebnisse-title').style.display = 'block';
     document.querySelector('.navigation-buttons').style.display = 'flex';
+    showRolesOverviewBtn.style.display = 'inline-block';
     revealGrid.style.display = 'grid';
   });
 
@@ -1641,9 +1648,24 @@ document.addEventListener("DOMContentLoaded", () => {
     roleInfoModal.style.display = 'none';
   });
 
+  // Close other modals
+  const rolesOverviewModal = document.getElementById('roles-overview-modal');
+  const rolesOverviewContent = document.getElementById('roles-overview-content');
+  const closeRolesOverviewBtn = rolesOverviewModal.querySelector('.close-modal');
+
+  closeRolesOverviewBtn.addEventListener('click', () => {
+    rolesOverviewModal.style.display = 'none';
+  });
+
   window.addEventListener('click', (event) => {
+    if (event.target === seerVisionModal) {
+      closeSeerModalAndProceed();
+    }
     if (event.target === roleInfoModal) {
       roleInfoModal.style.display = 'none';
+    }
+    if (event.target === rolesOverviewModal) {
+      rolesOverviewModal.style.display = 'none';
     }
   });
 
@@ -1664,6 +1686,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById('ergebnisse-title').style.display = 'none';
     document.querySelector('.navigation-buttons').style.display = 'none';
     document.getElementById('reveal-grid').style.display = 'none';
+    showRolesOverviewBtn.style.display = 'none';
   });
 
   // Session Management
@@ -1867,6 +1890,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const triggerBloodMoonBtn = document.getElementById('trigger-blood-moon-btn');
   const adminPanelToggle = document.getElementById('admin-panel-toggle');
   const closeAdminPanelBtn = document.getElementById('close-admin-panel-btn');
+  const showRolesOverviewBtn = document.getElementById('show-roles-overview-btn');
 
   if (adminPanelToggle) {
     adminPanelToggle.addEventListener('click', () => {
@@ -1896,5 +1920,34 @@ document.addEventListener("DOMContentLoaded", () => {
       nightTextEl.innerHTML = nightTexts['Werwolf'] + "<br><strong>Blutmond!</strong> Ihr dürft ein zweites Opfer wählen.";
       renderPlayerChoices(2);
     }
+  });
+
+  showRolesOverviewBtn.addEventListener('click', () => {
+    const rolesOverviewModal = document.getElementById('roles-overview-modal');
+    const rolesOverviewContent = document.getElementById('roles-overview-content');
+
+    let content = `
+        <table>
+            <thead>
+                <tr>
+                    <th>Spieler</th>
+                    <th>Rolle</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+
+    players.forEach((player, index) => {
+        const role = rolesAssigned[index];
+        content += `<tr><td>${player}</td><td>${role}</td></tr>`;
+    });
+
+    content += `
+            </tbody>
+        </table>
+    `;
+
+    rolesOverviewContent.innerHTML = content; // Populate the modal's content div
+    rolesOverviewModal.style.display = 'flex'; // Show the modal
   });
 });
