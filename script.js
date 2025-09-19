@@ -1303,6 +1303,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const playersTextarea = document.getElementById("players");
   const saveNamesBtn = document.getElementById("save-names-manually");
   const loadNamesBtn = document.getElementById("load-saved-names");
+  const saveRolesBtn = document.getElementById("save-roles-manually");
+  const loadRolesBtn = document.getElementById("load-saved-roles");
   const loadLastUsedBtn = document.getElementById("load-last-used");
 
   let isLoadingLastUsed = false;
@@ -1381,6 +1383,77 @@ document.addEventListener("DOMContentLoaded", () => {
       playersTextarea.dispatchEvent(new Event("input"));
     } catch (e) {
       alert("Fehler beim Laden der Namen.");
+    }
+  });
+
+  // Save roles to localStorage
+  saveRolesBtn.addEventListener("click", () => {
+    const roleRows = [
+        ...rolesContainerVillage.querySelectorAll(".role-row"),
+        ...rolesContainerWerwolf.querySelectorAll(".role-row"),
+        ...rolesContainerSpecial.querySelectorAll(".role-row")
+    ];
+    const roleSetup = [];
+    roleRows.forEach((row) => {
+      const roleName = row.querySelector("input[type='text']").value.trim();
+      const qty = parseInt(row.querySelector(".qty-display").textContent, 10) || 0;
+      if (roleName && qty > 0) {
+        roleSetup.push({ name: roleName, quantity: qty });
+      }
+    });
+
+    if (roleSetup.length === 0) {
+      alert("Keine Rollen zum Speichern.");
+      return;
+    }
+    localStorage.setItem("werwolfSavedRoles", JSON.stringify(roleSetup));
+    alert("Rollen gespeichert!");
+  });
+
+  // Load roles from localStorage
+  loadRolesBtn.addEventListener("click", () => {
+    const data = localStorage.getItem("werwolfSavedRoles");
+    if (!data) {
+      alert("Keine gespeicherten Rollen gefunden.");
+      return;
+    }
+    try {
+      const savedRoles = JSON.parse(data);
+      
+      rolesContainerVillage.innerHTML = "";
+      rolesContainerWerwolf.innerHTML = "";
+      rolesContainerSpecial.innerHTML = "";
+
+      // First, re-add all default roles with 0 quantity
+      categorizedRoles.village.forEach(r => addRoleRow(r, 0, rolesContainerVillage));
+      categorizedRoles.werwolf.forEach(r => addRoleRow(r, 0, rolesContainerWerwolf));
+      categorizedRoles.special.forEach(r => addRoleRow(r, 0, rolesContainerSpecial));
+
+      // Now, update quantities or add new rows for saved roles
+      savedRoles.forEach(role => {
+        let rowFound = false;
+        const allRoleRows = document.querySelectorAll('.role-row');
+        allRoleRows.forEach(row => {
+            const input = row.querySelector('input[type="text"]');
+            if (input.value === role.name) {
+                row.querySelector('.qty-display').textContent = role.quantity;
+                rowFound = true;
+            }
+        });
+
+        if (!rowFound) {
+            if (categorizedRoles.village.includes(role.name)) {
+                addRoleRow(role.name, role.quantity, rolesContainerVillage);
+            } else if (categorizedRoles.werwolf.includes(role.name)) {
+                addRoleRow(role.name, role.quantity, rolesContainerWerwolf);
+            } else {
+                addRoleRow(role.name, role.quantity, rolesContainerSpecial);
+            }
+        }
+      });
+
+    } catch (e) {
+      alert("Fehler beim Laden der Rollen.");
     }
   });
 

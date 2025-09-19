@@ -186,7 +186,7 @@ textarea {
   resize: vertical;
 }
 
-.name-actions {
+.name-actions, .role-actions {
   display: flex;
   gap: 0.5rem;
   margin-top: 0.75rem;
