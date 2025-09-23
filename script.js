@@ -403,21 +403,36 @@ document.addEventListener("DOMContentLoaded", () => {
   function renderPlayerChoices(selectLimit = 1, customList = null) {
     nightChoices.innerHTML = "";
     let list = customList || players;
-    
+
     // Check if we're showing a custom list (like currentNightVictims)
     const isCustomList = customList !== null;
-    
+
     // If it's the werewolf phase, show all players but disable werewolves
     const isWerewolfPhase = nightSteps[nightIndex] === "Werwolf";
-    
-    list.forEach((p, index) => {
+
+    // Build a lookup for player roles that can handle duplicate names
+    const roleBuckets = players.reduce((acc, playerName, idx) => {
+      if (!acc[playerName]) {
+        acc[playerName] = [];
+      }
+      acc[playerName].push(rolesAssigned[idx]);
+      return acc;
+    }, {});
+
+    const roleUsage = {};
+
+    list.forEach((p) => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.textContent = p;
       btn.className = "player-btn";
-      
+
       // Check if this player is a werewolf (only during werewolf phase)
-      const isWerewolf = isWerewolfPhase && rolesAssigned[players.indexOf(p)] === "Werwolf";
+      const usageIndex = roleUsage[p] || 0;
+      const playerRoles = roleBuckets[p] || [];
+      const playerRole = playerRoles[usageIndex] || null;
+      roleUsage[p] = usageIndex + 1;
+      const isWerewolf = isWerewolfPhase && playerRole === "Werwolf";
       
       // Disable if:
       // 1. Player is dead (and we're not showing a custom list of dead players), OR
