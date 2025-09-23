@@ -216,6 +216,27 @@ Carla
             <select id="admin-change-role-role-select"></select>
             <button id="admin-change-role-btn" class="secondary-btn">Ändern</button>
         </div>
+        <div class="admin-section macro-section">
+            <h5>Makros</h5>
+            <div class="macro-controls">
+                <label class="sr-only" for="admin-macro-select">Makro auswählen</label>
+                <select id="admin-macro-select"></select>
+                <button id="admin-run-macro-btn" type="button" class="secondary-btn small-btn" disabled>Makro ausführen</button>
+            </div>
+            <p id="admin-macro-description" class="admin-helper-text">Makros fassen häufige Aktionen zusammen und lassen sich jederzeit rückgängig machen.</p>
+        </div>
+        <div class="admin-section timeline-section">
+            <h5>Aktions-Timeline</h5>
+            <ul id="admin-timeline" class="admin-timeline" aria-live="polite" aria-label="Zuletzt ausgeführte Aktionen"></ul>
+        </div>
+        <div class="admin-section undo-section">
+            <h5>Undo &amp; Redo</h5>
+            <div class="undo-controls">
+                <button id="admin-undo-btn" type="button" class="secondary-btn small-btn" disabled>Rückgängig</button>
+                <button id="admin-redo-btn" type="button" class="secondary-btn small-btn" disabled>Wiederholen</button>
+            </div>
+            <ul id="admin-undo-history" class="undo-history" aria-live="polite" aria-label="Verfügbare Rückgängig-Schritte"></ul>
+        </div>
     </div>
     <button id="admin-panel-toggle" class="admin-toggle-btn" aria-label="Toggle Admin Panel">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24px" height="24px">

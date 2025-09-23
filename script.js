@@ -378,7 +378,12 @@ document.addEventListener("DOMContentLoaded", () => {
   let dayLynchBtn = document.getElementById('day-lynch-btn');
   let daySkipBtn = document.getElementById('day-skip-btn');
 
-  function handlePlayerDeath(playerName) {
+  function handlePlayerDeath(playerName, options = {}) {
+    const { silent = false } = options;
+    if (silent) {
+        return;
+    }
+
     if (playerName === geist.player && !geist.messageSent) {
         const geistModal = document.getElementById('geist-modal');
         const geistMessage = document.getElementById('geist-message');
@@ -398,21 +403,36 @@ document.addEventListener("DOMContentLoaded", () => {
   function renderPlayerChoices(selectLimit = 1, customList = null) {
     nightChoices.innerHTML = "";
     let list = customList || players;
-    
+
     // Check if we're showing a custom list (like currentNightVictims)
     const isCustomList = customList !== null;
-    
+
     // If it's the werewolf phase, show all players but disable werewolves
     const isWerewolfPhase = nightSteps[nightIndex] === "Werwolf";
-    
-    list.forEach((p, index) => {
+
+    // Build a lookup for player roles that can handle duplicate names
+    const roleBuckets = players.reduce((acc, playerName, idx) => {
+      if (!acc[playerName]) {
+        acc[playerName] = [];
+      }
+      acc[playerName].push(rolesAssigned[idx]);
+      return acc;
+    }, {});
+
+    const roleUsage = {};
+
+    list.forEach((p) => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.textContent = p;
       btn.className = "player-btn";
-      
+
       // Check if this player is a werewolf (only during werewolf phase)
-      const isWerewolf = isWerewolfPhase && rolesAssigned[players.indexOf(p)] === "Werwolf";
+      const usageIndex = roleUsage[p] || 0;
+      const playerRoles = roleBuckets[p] || [];
+      const playerRole = playerRoles[usageIndex] || null;
+      roleUsage[p] = usageIndex + 1;
+      const isWerewolf = isWerewolfPhase && playerRole === "Werwolf";
       
       // Disable if:
       // 1. Player is dead (and we're not showing a custom list of dead players), OR
@@ -2075,51 +2095,444 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const adminKillPlayerSelect = document.getElementById('admin-kill-player-select');
   const adminKillPlayerBtn = document.getElementById('admin-kill-player-btn');
-
-  function populateAdminKillSelect() {
-    adminKillPlayerSelect.innerHTML = '';
-    const livingPlayers = players.filter(p => !deadPlayers.includes(p));
-    livingPlayers.forEach(p => {
-        const option = document.createElement('option');
-        option.value = p;
-        option.textContent = p;
-        adminKillPlayerSelect.appendChild(option);
-    });
-  }
-
   const adminRevivePlayerSelect = document.getElementById('admin-revive-player-select');
   const adminRevivePlayerBtn = document.getElementById('admin-revive-player-btn');
-
-  function populateAdminReviveSelect() {
-    adminRevivePlayerSelect.innerHTML = '';
-    deadPlayers.forEach(p => {
-        const option = document.createElement('option');
-        option.value = p;
-        option.textContent = p;
-        adminRevivePlayerSelect.appendChild(option);
-    });
-  }
-
   const adminChangeRolePlayerSelect = document.getElementById('admin-change-role-player-select');
   const adminChangeRoleRoleSelect = document.getElementById('admin-change-role-role-select');
   const adminChangeRoleBtn = document.getElementById('admin-change-role-btn');
 
+  const adminTimelineList = document.getElementById('admin-timeline');
+  const undoHistoryList = document.getElementById('admin-undo-history');
+  const adminUndoBtn = document.getElementById('admin-undo-btn');
+  const adminRedoBtn = document.getElementById('admin-redo-btn');
+  const macroSelect = document.getElementById('admin-macro-select');
+  const macroRunBtn = document.getElementById('admin-run-macro-btn');
+  const macroDescriptionEl = document.getElementById('admin-macro-description');
+  const defaultMacroDescription = macroDescriptionEl ? macroDescriptionEl.textContent : '';
+
+  const actionLog = [];
+  const undoStack = [];
+  const redoStack = [];
+
+  const timelineLabelMap = {
+    admin: 'Admin',
+    macro: 'Makro',
+    undo: 'Undo',
+    redo: 'Redo',
+    info: 'Info',
+    error: 'Fehler'
+  };
+
+  function formatTimestamp(date) {
+    return date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  function updateTimelineUI() {
+    if (!adminTimelineList) return;
+    adminTimelineList.innerHTML = '';
+
+    if (actionLog.length === 0) {
+      const emptyItem = document.createElement('li');
+      emptyItem.className = 'empty';
+      emptyItem.textContent = 'Noch keine Aktionen protokolliert.';
+      adminTimelineList.appendChild(emptyItem);
+      return;
+    }
+
+    actionLog.slice(0, 8).forEach(entry => {
+      const item = document.createElement('li');
+      item.className = `timeline-entry timeline-${entry.type || 'info'}`;
+
+      const header = document.createElement('div');
+      header.className = 'timeline-entry-header';
+
+      const typeBadge = document.createElement('span');
+      typeBadge.className = 'timeline-type';
+      typeBadge.textContent = timelineLabelMap[entry.type] || 'Info';
+      header.appendChild(typeBadge);
+
+      const timeEl = document.createElement('time');
+      timeEl.className = 'timeline-time';
+      timeEl.dateTime = entry.timestamp.toISOString();
+      timeEl.textContent = formatTimestamp(entry.timestamp);
+      header.appendChild(timeEl);
+
+      item.appendChild(header);
+
+      const labelEl = document.createElement('p');
+      labelEl.className = 'timeline-label';
+      labelEl.textContent = entry.label;
+      item.appendChild(labelEl);
+
+      if (entry.detail) {
+        const detailEl = document.createElement('p');
+        detailEl.className = 'timeline-detail';
+        detailEl.textContent = entry.detail;
+        item.appendChild(detailEl);
+      }
+
+      adminTimelineList.appendChild(item);
+    });
+  }
+
+  function updateUndoHistoryUI() {
+    if (adminUndoBtn) {
+      adminUndoBtn.disabled = undoStack.length === 0;
+      adminUndoBtn.textContent = undoStack.length
+        ? `Rückgängig (${undoStack[undoStack.length - 1].label})`
+        : 'Rückgängig';
+    }
+
+    if (adminRedoBtn) {
+      adminRedoBtn.disabled = redoStack.length === 0;
+      adminRedoBtn.textContent = redoStack.length
+        ? `Wiederholen (${redoStack[redoStack.length - 1].label})`
+        : 'Wiederholen';
+    }
+
+    if (!undoHistoryList) return;
+    undoHistoryList.innerHTML = '';
+
+    if (undoStack.length === 0) {
+      const emptyItem = document.createElement('li');
+      emptyItem.className = 'empty';
+      emptyItem.textContent = 'Keine Rückgängig-Schritte verfügbar.';
+      undoHistoryList.appendChild(emptyItem);
+      return;
+    }
+
+    undoStack.slice(-5).reverse().forEach(action => {
+      const item = document.createElement('li');
+      item.className = 'undo-entry';
+
+      const label = document.createElement('span');
+      label.className = 'undo-label';
+      label.textContent = action.label;
+      item.appendChild(label);
+
+      if (action.detail) {
+        const detail = document.createElement('span');
+        detail.className = 'undo-detail';
+        detail.textContent = action.detail;
+        item.appendChild(detail);
+      }
+
+      undoHistoryList.appendChild(item);
+    });
+  }
+
+  function logAction({ type = 'info', label, detail = '' }) {
+    const timestamp = new Date();
+    actionLog.unshift({ type, label, detail, timestamp });
+    if (actionLog.length > 50) {
+      actionLog.pop();
+    }
+    updateTimelineUI();
+  }
+
+  function recordAction({ type = 'admin', label, detail = '', undo, redo }) {
+    logAction({ type, label, detail });
+    if (typeof undo === 'function' && typeof redo === 'function') {
+      undoStack.push({ label, detail, undo, redo });
+      redoStack.length = 0;
+      updateUndoHistoryUI();
+    }
+  }
+
+  function updateRevealCardRoleText(playerName, roleName) {
+    const revealGrid = document.getElementById('reveal-grid');
+    if (!revealGrid) return;
+    const cards = revealGrid.querySelectorAll('.reveal-card');
+    cards.forEach(card => {
+      const playerNameOnCard = card.querySelector('.player-name');
+      if (playerNameOnCard && playerNameOnCard.textContent === playerName) {
+        const backOfCard = card.querySelector('.reveal-card-back');
+        const roleNameEl = backOfCard ? backOfCard.querySelector('.role-name') : null;
+        if (roleNameEl) {
+          roleNameEl.textContent = roleName || '';
+          if (roleName === 'Dorfbewohner') {
+            roleNameEl.classList.add('long-text');
+          } else {
+            roleNameEl.classList.remove('long-text');
+          }
+        }
+      }
+    });
+  }
+
+  function syncBloodMoonUI({ silent = false } = {}) {
+    const isWerewolfStep = nightMode && nightSteps[nightIndex] === 'Werwolf';
+    if (isWerewolfStep) {
+      if (bloodMoonActive) {
+        document.body.classList.add('blood-moon-active');
+        nightTextEl.innerHTML = `${nightTexts['Werwolf']}<br><strong>Blutmond!</strong> Ihr dürft ein zweites Opfer wählen.`;
+        renderPlayerChoices(2);
+      } else {
+        document.body.classList.remove('blood-moon-active');
+        nightTextEl.textContent = nightTexts['Werwolf'];
+        renderPlayerChoices(1);
+      }
+    } else if (!bloodMoonActive || silent) {
+      document.body.classList.remove('blood-moon-active');
+    }
+  }
+
+  function populateAdminKillSelect() {
+    if (!adminKillPlayerSelect) return;
+    adminKillPlayerSelect.innerHTML = '';
+    const livingPlayers = players.filter(p => !deadPlayers.includes(p));
+    livingPlayers.forEach(p => {
+      const option = document.createElement('option');
+      option.value = p;
+      option.textContent = p;
+      adminKillPlayerSelect.appendChild(option);
+    });
+  }
+
+  function populateAdminReviveSelect() {
+    if (!adminRevivePlayerSelect) return;
+    adminRevivePlayerSelect.innerHTML = '';
+    deadPlayers.forEach(p => {
+      const option = document.createElement('option');
+      option.value = p;
+      option.textContent = p;
+      adminRevivePlayerSelect.appendChild(option);
+    });
+  }
+
   function populateAdminChangeRoleSelects() {
+    if (!adminChangeRolePlayerSelect || !adminChangeRoleRoleSelect) return;
     adminChangeRolePlayerSelect.innerHTML = '';
     players.forEach(p => {
-        const option = document.createElement('option');
-        option.value = p;
-        option.textContent = p;
-        adminChangeRolePlayerSelect.appendChild(option);
+      const option = document.createElement('option');
+      option.value = p;
+      option.textContent = p;
+      adminChangeRolePlayerSelect.appendChild(option);
     });
 
     adminChangeRoleRoleSelect.innerHTML = '';
     const allRoles = [...categorizedRoles.village, ...categorizedRoles.werwolf, ...categorizedRoles.special];
     allRoles.forEach(r => {
-        const option = document.createElement('option');
-        option.value = r;
-        option.textContent = r;
-        adminChangeRoleRoleSelect.appendChild(option);
+      const option = document.createElement('option');
+      option.value = r;
+      option.textContent = r;
+      adminChangeRoleRoleSelect.appendChild(option);
+    });
+  }
+
+  function populateMacroSelect() {
+    if (!macroSelect) return;
+    macroSelect.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Makro auswählen…';
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    macroSelect.appendChild(placeholder);
+
+    adminMacros.forEach(macro => {
+      const option = document.createElement('option');
+      option.value = macro.id;
+      option.textContent = macro.label;
+      macroSelect.appendChild(option);
+    });
+
+    if (macroRunBtn) {
+      macroRunBtn.disabled = true;
+    }
+    if (macroDescriptionEl) {
+      macroDescriptionEl.textContent = defaultMacroDescription;
+    }
+  }
+
+  const adminMacros = [
+    {
+      id: 'revive-all',
+      label: 'Alle Spieler wiederbeleben',
+      description: 'Belebt alle eliminierten Spieler wieder und leert den Friedhof.',
+      execute() {
+        const previouslyDead = deadPlayers.slice();
+        if (previouslyDead.length === 0) {
+          logAction({ type: 'macro', label: 'Makro: Alle Spieler wiederbeleben', detail: 'Keine toten Spieler vorhanden.' });
+          return false;
+        }
+
+        const apply = () => {
+          deadPlayers = [];
+          updatePlayerCardVisuals();
+          populateAdminKillSelect();
+          populateAdminReviveSelect();
+          checkGameOver(true);
+        };
+
+        apply();
+
+        recordAction({
+          type: 'macro',
+          label: 'Makro: Alle Spieler wiederbeleben',
+          detail: `Wiederbelebte Spieler: ${previouslyDead.join(', ')}`,
+          undo: () => {
+            deadPlayers = previouslyDead.slice();
+            updatePlayerCardVisuals();
+            populateAdminKillSelect();
+            populateAdminReviveSelect();
+            checkGameOver(true);
+          },
+          redo: () => {
+            apply();
+          }
+        });
+        return true;
+      }
+    },
+    {
+      id: 'reset-witch',
+      label: 'Hexentränke auffrischen',
+      description: 'Setzt Heil- und Gifttrank der Hexe auf den Ausgangswert zurück.',
+      execute() {
+        const previous = { heal: healRemaining, poison: poisonRemaining };
+        if (previous.heal === 1 && previous.poison === 1) {
+          logAction({ type: 'macro', label: 'Makro: Hexentränke auffrischen', detail: 'Die Hexe verfügt bereits über beide Tränke.' });
+          return false;
+        }
+
+        healRemaining = 1;
+        poisonRemaining = 1;
+
+        recordAction({
+          type: 'macro',
+          label: 'Makro: Hexentränke auffrischen',
+          detail: `Heil ${previous.heal} → 1 | Gift ${previous.poison} → 1`,
+          undo: () => {
+            healRemaining = previous.heal;
+            poisonRemaining = previous.poison;
+          },
+          redo: () => {
+            healRemaining = 1;
+            poisonRemaining = 1;
+          }
+        });
+        return true;
+      }
+    },
+    {
+      id: 'rewind-night',
+      label: 'Letzte Nacht rückgängig',
+      description: 'Entfernt die Opfer der laufenden Nacht und belebt sie wieder.',
+      execute() {
+        const victims = currentNightVictims.slice();
+        if (victims.length === 0) {
+          logAction({ type: 'macro', label: 'Makro: Letzte Nacht rückgängig', detail: 'Es sind keine Nachtopfer registriert.' });
+          return false;
+        }
+
+        const apply = () => {
+          deadPlayers = deadPlayers.filter(player => !victims.includes(player));
+          currentNightVictims = [];
+          updatePlayerCardVisuals();
+          populateAdminKillSelect();
+          populateAdminReviveSelect();
+          checkGameOver(true);
+        };
+
+        apply();
+
+        recordAction({
+          type: 'macro',
+          label: 'Makro: Letzte Nacht rückgängig',
+          detail: `Wiederbelebt: ${victims.join(', ')}`,
+          undo: () => {
+            currentNightVictims = victims.slice();
+            victims.forEach(name => {
+              if (!deadPlayers.includes(name)) {
+                deadPlayers.push(name);
+                handlePlayerDeath(name, { silent: true });
+              }
+            });
+            updatePlayerCardVisuals();
+            populateAdminKillSelect();
+            populateAdminReviveSelect();
+            checkGameOver(true);
+          },
+          redo: () => {
+            apply();
+          }
+        });
+        return true;
+      }
+    }
+  ];
+
+  populateMacroSelect();
+  updateTimelineUI();
+  updateUndoHistoryUI();
+
+  if (macroSelect) {
+    macroSelect.addEventListener('change', () => {
+      const selectedMacro = adminMacros.find(macro => macro.id === macroSelect.value);
+      if (macroDescriptionEl) {
+        macroDescriptionEl.textContent = selectedMacro ? selectedMacro.description : defaultMacroDescription;
+      }
+      if (macroRunBtn) {
+        macroRunBtn.disabled = !selectedMacro;
+      }
+    });
+  }
+
+  if (macroRunBtn) {
+    macroRunBtn.addEventListener('click', () => {
+      if (!macroSelect) return;
+      const selectedMacro = adminMacros.find(macro => macro.id === macroSelect.value);
+      if (!selectedMacro) {
+        logAction({ type: 'error', label: 'Makro konnte nicht ausgeführt werden', detail: 'Bitte zuerst ein Makro auswählen.' });
+        return;
+      }
+
+      try {
+        const executed = selectedMacro.execute();
+        if (executed && macroSelect) {
+          macroSelect.selectedIndex = 0;
+          if (macroDescriptionEl) {
+            macroDescriptionEl.textContent = defaultMacroDescription;
+          }
+          macroRunBtn.disabled = true;
+        }
+      } catch (error) {
+        console.error('Fehler beim Ausführen des Makros', error);
+        logAction({ type: 'error', label: 'Makro fehlgeschlagen', detail: error.message });
+      }
+    });
+  }
+
+  if (adminUndoBtn) {
+    adminUndoBtn.addEventListener('click', () => {
+      if (undoStack.length === 0) return;
+      const action = undoStack.pop();
+      try {
+        action.undo();
+        redoStack.push(action);
+        logAction({ type: 'undo', label: `Rückgängig: ${action.label}`, detail: action.detail || '' });
+      } catch (error) {
+        console.error('Undo fehlgeschlagen', error);
+        logAction({ type: 'error', label: 'Undo fehlgeschlagen', detail: error.message });
+      }
+      updateUndoHistoryUI();
+    });
+  }
+
+  if (adminRedoBtn) {
+    adminRedoBtn.addEventListener('click', () => {
+      if (redoStack.length === 0) return;
+      const action = redoStack.pop();
+      try {
+        action.redo();
+        undoStack.push(action);
+        logAction({ type: 'redo', label: `Wiederholen: ${action.label}`, detail: action.detail || '' });
+      } catch (error) {
+        console.error('Redo fehlgeschlagen', error);
+        logAction({ type: 'error', label: 'Redo fehlgeschlagen', detail: error.message });
+      }
+      updateUndoHistoryUI();
     });
   }
 
@@ -2130,55 +2543,104 @@ document.addEventListener("DOMContentLoaded", () => {
         populateAdminKillSelect();
         populateAdminReviveSelect();
         populateAdminChangeRoleSelects();
+        populateMacroSelect();
       }
     });
   }
 
-  adminChangeRoleBtn.addEventListener('click', () => {
-    const playerToChange = adminChangeRolePlayerSelect.value;
-    const newRole = adminChangeRoleRoleSelect.value;
-    if (!playerToChange || !newRole) {
+  if (adminChangeRoleBtn) {
+    adminChangeRoleBtn.addEventListener('click', () => {
+      const playerToChange = adminChangeRolePlayerSelect ? adminChangeRolePlayerSelect.value : '';
+      const newRole = adminChangeRoleRoleSelect ? adminChangeRoleRoleSelect.value : '';
+      if (!playerToChange || !newRole) {
         alert('Bitte einen Spieler und eine Rolle auswählen.');
         return;
-    }
+      }
 
-    showConfirmation('Rolle ändern?', `Willst du die Rolle von ${playerToChange} zu ${newRole} ändern?`, () => {
+      showConfirmation('Rolle ändern?', `Willst du die Rolle von ${playerToChange} zu ${newRole} ändern?`, () => {
         const playerIndex = players.indexOf(playerToChange);
-        if (playerIndex !== -1) {
-            rolesAssigned[playerIndex] = newRole;
-            // Update the card on the screen
-            const revealGrid = document.getElementById('reveal-grid');
-            const cards = revealGrid.querySelectorAll('.reveal-card');
-            cards.forEach(card => {
-                const playerNameOnCard = card.querySelector('.player-name').textContent;
-                if (playerNameOnCard === playerToChange) {
-                    const backOfCard = card.querySelector('.reveal-card-back');
-                    const roleNameEl = backOfCard.querySelector('.role-name');
-                    roleNameEl.textContent = newRole;
-                }
-            });
-            showConfirmation('Rolle geändert', `Die Rolle von ${playerToChange} wurde zu ${newRole} geändert.`, () => {}, 'Okay', false);
+        if (playerIndex === -1) {
+          logAction({ type: 'error', label: 'Rollenänderung nicht möglich', detail: `${playerToChange} wurde nicht gefunden.` });
+          return;
         }
+
+        const previousRole = rolesAssigned[playerIndex];
+        if (previousRole === newRole) {
+          logAction({ type: 'info', label: 'Keine Rollenänderung notwendig', detail: `${playerToChange} besitzt bereits die Rolle ${newRole}.` });
+          showConfirmation('Keine Änderung', `${playerToChange} hat bereits die Rolle ${newRole}.`, () => {}, 'Okay', false);
+          return;
+        }
+
+        rolesAssigned[playerIndex] = newRole;
+        updateRevealCardRoleText(playerToChange, newRole);
+
+        recordAction({
+          type: 'admin',
+          label: `Rollenwechsel: ${playerToChange}`,
+          detail: `${previousRole || 'Unbekannt'} → ${newRole}`,
+          undo: () => {
+            rolesAssigned[playerIndex] = previousRole;
+            updateRevealCardRoleText(playerToChange, previousRole || '');
+          },
+          redo: () => {
+            rolesAssigned[playerIndex] = newRole;
+            updateRevealCardRoleText(playerToChange, newRole);
+          }
+        });
+
+        showConfirmation('Rolle geändert', `Die Rolle von ${playerToChange} wurde zu ${newRole} geändert.`, () => {}, 'Okay', false);
+      });
     });
-  });
+  }
 
-
-  adminRevivePlayerBtn.addEventListener('click', () => {
-    const playerToRevive = adminRevivePlayerSelect.value;
-    if (!playerToRevive) {
+  if (adminRevivePlayerBtn) {
+    adminRevivePlayerBtn.addEventListener('click', () => {
+      const playerToRevive = adminRevivePlayerSelect ? adminRevivePlayerSelect.value : '';
+      if (!playerToRevive) {
         alert('Bitte einen Spieler auswählen.');
         return;
-    }
+      }
 
-    showConfirmation('Spieler wiederbeleben?', `Willst du ${playerToRevive} wirklich wiederbeleben?`, () => {
+      showConfirmation('Spieler wiederbeleben?', `Willst du ${playerToRevive} wirklich wiederbeleben?`, () => {
+        if (!deadPlayers.includes(playerToRevive)) {
+          logAction({ type: 'info', label: 'Keine Wiederbelebung erforderlich', detail: `${playerToRevive} lebt bereits.` });
+          showConfirmation('Keine Änderung', `${playerToRevive} lebt bereits.`, () => {}, 'Okay', false);
+          return;
+        }
+
         deadPlayers = deadPlayers.filter(p => p !== playerToRevive);
         updatePlayerCardVisuals();
         populateAdminKillSelect();
         populateAdminReviveSelect();
-        showConfirmation('Spieler wiederbelebt', `${playerToRevive} wurde wiederbelebt.`, () => {}, 'Okay', false);
-    });
-  });
 
+        recordAction({
+          type: 'admin',
+          label: `Wiederbelebung: ${playerToRevive}`,
+          detail: 'Spieler kehrt ins Dorf zurück.',
+          undo: () => {
+            if (!deadPlayers.includes(playerToRevive)) {
+              deadPlayers.push(playerToRevive);
+              handlePlayerDeath(playerToRevive, { silent: true });
+            }
+            updatePlayerCardVisuals();
+            populateAdminKillSelect();
+            populateAdminReviveSelect();
+            checkGameOver(true);
+          },
+          redo: () => {
+            deadPlayers = deadPlayers.filter(p => p !== playerToRevive);
+            updatePlayerCardVisuals();
+            populateAdminKillSelect();
+            populateAdminReviveSelect();
+            checkGameOver(true);
+          }
+        });
+
+        showConfirmation('Spieler wiederbelebt', `${playerToRevive} wurde wiederbelebt.`, () => {}, 'Okay', false);
+        checkGameOver(true);
+      });
+    });
+  }
 
   if (closeAdminPanelBtn) {
     closeAdminPanelBtn.addEventListener('click', () => {
@@ -2186,56 +2648,123 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  adminKillPlayerBtn.addEventListener('click', () => {
-    const playerToKill = adminKillPlayerSelect.value;
-    if (!playerToKill) {
+  if (adminKillPlayerBtn) {
+    adminKillPlayerBtn.addEventListener('click', () => {
+      const playerToKill = adminKillPlayerSelect ? adminKillPlayerSelect.value : '';
+      if (!playerToKill) {
         alert('Bitte einen Spieler auswählen.');
         return;
-    }
+      }
 
-    showConfirmation('Spieler eliminieren?', `Willst du ${playerToKill} wirklich eliminieren?`, () => {
-        if (!deadPlayers.includes(playerToKill)) {
-            deadPlayers.push(playerToKill);
-            handlePlayerDeath(playerToKill);
-
-            // Handle lover chain reaction
-            lovers.forEach(pair => {
-                if (pair.includes(playerToKill)) {
-                    const partner = pair[0] === playerToKill ? pair[1] : pair[0];
-                    if (!deadPlayers.includes(partner)) {
-                        deadPlayers.push(partner);
-                        handlePlayerDeath(partner);
-                        alert(`${partner} ist aus Liebeskummer gestorben!`);
-                    }
-                }
-            });
-
-            updatePlayerCardVisuals();
-            populateAdminKillSelect(); // Refresh the list
-            showConfirmation('Spieler eliminiert', `${playerToKill} wurde eliminiert.`, () => {}, 'Okay', false);
-            checkGameOver();
+      showConfirmation('Spieler eliminieren?', `Willst du ${playerToKill} wirklich eliminieren?`, () => {
+        if (deadPlayers.includes(playerToKill)) {
+          logAction({ type: 'info', label: 'Keine Eliminierung durchgeführt', detail: `${playerToKill} war bereits tot.` });
+          showConfirmation('Keine Änderung', `${playerToKill} war bereits eliminiert.`, () => {}, 'Okay', false);
+          return;
         }
-    });
-  });
 
+        const affectedPlayers = [];
+        const loverAlerts = [];
+
+        const markAsDead = (name, { alertMessage } = {}) => {
+          if (!deadPlayers.includes(name)) {
+            deadPlayers.push(name);
+            handlePlayerDeath(name);
+            affectedPlayers.push(name);
+            if (alertMessage) {
+              loverAlerts.push(alertMessage);
+            }
+          }
+        };
+
+        markAsDead(playerToKill);
+
+        lovers.forEach(pair => {
+          if (pair.includes(playerToKill)) {
+            const partner = pair[0] === playerToKill ? pair[1] : pair[0];
+            if (!deadPlayers.includes(partner)) {
+              markAsDead(partner, { alertMessage: `${partner} ist aus Liebeskummer gestorben!` });
+            }
+          }
+        });
+
+        updatePlayerCardVisuals();
+        populateAdminKillSelect();
+        populateAdminReviveSelect();
+
+        loverAlerts.forEach(message => alert(message));
+
+        recordAction({
+          type: 'admin',
+          label: `Eliminierung: ${playerToKill}`,
+          detail: affectedPlayers.length > 1 ? `Mit betroffen: ${affectedPlayers.slice(1).join(', ')}` : '',
+          undo: () => {
+            deadPlayers = deadPlayers.filter(p => !affectedPlayers.includes(p));
+            updatePlayerCardVisuals();
+            populateAdminKillSelect();
+            populateAdminReviveSelect();
+            checkGameOver(true);
+          },
+          redo: () => {
+            affectedPlayers.forEach(name => {
+              if (!deadPlayers.includes(name)) {
+                deadPlayers.push(name);
+                handlePlayerDeath(name, { silent: true });
+              }
+            });
+            updatePlayerCardVisuals();
+            populateAdminKillSelect();
+            populateAdminReviveSelect();
+            checkGameOver(true);
+          }
+        });
+
+        showConfirmation('Spieler eliminiert', `${playerToKill} wurde eliminiert.`, () => {}, 'Okay', false);
+        checkGameOver();
+      });
+    });
+  }
 
   document.addEventListener('keydown', (e) => {
     if (e.metaKey && e.shiftKey && e.key === 'o') {
       adminPanel.classList.toggle('hidden');
+      if (!adminPanel.classList.contains('hidden')) {
+        populateAdminKillSelect();
+        populateAdminReviveSelect();
+        populateAdminChangeRoleSelects();
+        populateMacroSelect();
+      }
     }
   });
 
-  triggerBloodMoonBtn.addEventListener('click', () => {
-    bloodMoonActive = true;
-    showConfirmation("Blutmond aktiviert", "Der Blutmond wurde für die nächste Nacht manuell aktiviert.", () => {}, "Okay", false);
-    
-    // If in werewolf night step, update UI immediately
-    if (nightMode && nightSteps[nightIndex] === 'Werwolf') {
-      document.body.classList.add('blood-moon-active');
-      nightTextEl.innerHTML = nightTexts['Werwolf'] + "<br><strong>Blutmond!</strong> Ihr dürft ein zweites Opfer wählen.";
-      renderPlayerChoices(2);
-    }
-  });
+  if (triggerBloodMoonBtn) {
+    triggerBloodMoonBtn.addEventListener('click', () => {
+      const wasActive = bloodMoonActive;
+      if (wasActive) {
+        logAction({ type: 'info', label: 'Blutmond bereits aktiv', detail: 'Der Blutmond war bereits ausgelöst.' });
+        showConfirmation('Keine Änderung', 'Der Blutmond ist bereits aktiv.', () => {}, 'Okay', false);
+        return;
+      }
+
+      bloodMoonActive = true;
+      syncBloodMoonUI({ silent: true });
+      showConfirmation('Blutmond aktiviert', 'Der Blutmond wurde für die nächste Nacht manuell aktiviert.', () => {}, 'Okay', false);
+
+      recordAction({
+        type: 'admin',
+        label: 'Blutmond manuell aktiviert',
+        detail: 'Gilt für die kommende Nacht.',
+        undo: () => {
+          bloodMoonActive = wasActive;
+          syncBloodMoonUI({ silent: true });
+        },
+        redo: () => {
+          bloodMoonActive = true;
+          syncBloodMoonUI({ silent: true });
+        }
+      });
+    });
+  }
 
   const rolesOverviewPlayerSelect = document.getElementById('roles-overview-player-select');
   const rolesOverviewShowPlayerBtn = document.getElementById('roles-overview-show-player-btn');
