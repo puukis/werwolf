@@ -255,22 +255,48 @@ document.addEventListener("DOMContentLoaded", () => {
     players.forEach((player, index) => {
       if (rolesAssigned[index] === "Michael Jackson") {
         const previousEntry = existingData[player];
-        const previousDays = Array.isArray(previousEntry?.daysAccused)
+        const previousDaysRaw = Array.isArray(previousEntry?.daysAccused)
           ? previousEntry.daysAccused
           : Array.isArray(previousEntry)
             ? previousEntry
             : [];
 
-        const uniqueDays = Array.from(new Set(previousDays.filter(day => typeof day === 'number')));
+        const normalizedDays = previousDaysRaw
+          .map(day => (typeof day === 'number' ? day : Number(day)))
+          .filter(day => Number.isFinite(day));
+
+        const uniqueDays = Array.from(new Set(normalizedDays));
         const previousSpotlight = typeof previousEntry?.hasSpotlight === 'boolean'
           ? previousEntry.hasSpotlight
           : typeof previousEntry?.spotlightActive === 'boolean'
             ? previousEntry.spotlightActive
             : false;
 
+        const storedAccusationCountRaw = typeof previousEntry?.accusationCount === 'number'
+          ? previousEntry.accusationCount
+          : Array.isArray(previousEntry)
+            ? previousEntry.length
+            : uniqueDays.length;
+        const storedAccusationCount = Number.isFinite(storedAccusationCountRaw)
+          ? storedAccusationCountRaw
+          : uniqueDays.length;
+
+        const normalizedAccusationCount = Math.max(storedAccusationCount, uniqueDays.length);
+        const storedLastDay = typeof previousEntry?.lastAccusationDay === 'number'
+          && Number.isFinite(previousEntry.lastAccusationDay)
+          ? previousEntry.lastAccusationDay
+          : null;
+        const lastDayFromEntry = storedLastDay !== null
+          ? storedLastDay
+          : uniqueDays.length > 0
+            ? Math.max(...uniqueDays)
+            : null;
+
         synced[player] = {
           daysAccused: uniqueDays,
-          hasSpotlight: previousSpotlight || uniqueDays.length > 0
+          hasSpotlight: previousSpotlight || normalizedAccusationCount > 0,
+          accusationCount: normalizedAccusationCount,
+          lastAccusationDay: lastDayFromEntry
         };
       }
     });
@@ -375,7 +401,7 @@ document.addEventListener("DOMContentLoaded", () => {
     Geschwister: "Zwei Dorfbewohner, die sich gegenseitig kennen.",
     Geist: "Kann nach seinem Tod weiterhin eine Nachricht an die Lebenden senden.",
     Friedenstifter: "Gewinnt, wenn für zwei aufeinanderfolgende Runden (Tag und Nacht) niemand stirbt.",
-    "Michael Jackson": "Dorfbewohner-Sonderrolle: Stirbt sofort, wenn er an zwei unterschiedlichen Tagen beschuldigt wird."
+    "Michael Jackson": "Dorfbewohner-Sonderrolle: Ab der ersten Beschuldigung zählt seine Stimme doppelt, bei der zweiten Beschuldigung stirbt er sofort."
   };
 
   /* -------------------- Erste Nacht Logik -------------------- */
@@ -401,6 +427,9 @@ document.addEventListener("DOMContentLoaded", () => {
   let accused = [];
   let mayor = null;
   let dayCount = 0; // Track which day it is
+  let dayIntroHtml = '';
+  let dayAnnouncements = [];
+  let currentDayAdditionalParagraphs = [];
   
   // DOM elements for day phase
   const dayOverlay = document.getElementById('day-overlay');
@@ -670,15 +699,21 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  function renderDayChoices() {
+  function renderDayChoices(customList = null) {
     dayChoices.innerHTML = '';
-    const livingPlayers = players.filter(p => !deadPlayers.includes(p));
 
-    livingPlayers.forEach(player => {
+    const seen = new Set();
+    const candidates = (Array.isArray(customList) ? customList : players).filter(player => {
+      if (seen.has(player)) return false;
+      seen.add(player);
+      return !deadPlayers.includes(player);
+    });
+
+    candidates.forEach(player => {
       // Container row for each player
       const row = document.createElement('div');
       row.className = 'vote-row';
-      
+
       // Check if player is silenced
       const isSilenced = player === silencedPlayer;
       if (isSilenced) {
@@ -736,7 +771,132 @@ document.addEventListener("DOMContentLoaded", () => {
       dayChoices.appendChild(row);
     });
   }
-  
+
+  function buildDayIntroHtml() {
+    let intro = '';
+
+    if (!revealDeadRolesCheckbox.checked) {
+      intro += currentNightVictims.length > 0
+        ? `<p>In der Nacht wurden folgende Spieler getötet: <strong>${currentNightVictims.join(', ')}</strong>.</p>`
+        : '<p>Es gab keine Todesfälle in der Nacht.</p>';
+    }
+
+    if (silencedPlayer && !deadPlayers.includes(silencedPlayer)) {
+      intro += `<p>🤫 ${silencedPlayer} wurde zum Schweigen gebracht und darf nicht reden oder abstimmen.</p>`;
+    } else if (silencedPlayer && deadPlayers.includes(silencedPlayer)) {
+      silencedPlayer = null;
+    }
+
+    if (mayor) {
+      intro += `<div class="mayor-indicator">Bürgermeister: ${mayor}</div>`;
+    }
+
+    return intro;
+  }
+
+  function composeDayMessage(additionalParagraphs = []) {
+    currentDayAdditionalParagraphs = Array.isArray(additionalParagraphs)
+      ? additionalParagraphs
+      : [additionalParagraphs];
+    const announcementsHtml = dayAnnouncements.join('');
+    const instructionsHtml = currentDayAdditionalParagraphs.join('');
+    dayText.innerHTML = `${dayIntroHtml}${announcementsHtml}${instructionsHtml}`;
+  }
+
+  function handleNoAccusation(message = 'Es wurden keine Anklagen erhoben. Niemand wird gehängt.') {
+    composeDayMessage([`<p>${message}</p>`]);
+    peaceDays++;
+    accused = [];
+    dayChoices.innerHTML = '';
+    dayLynchBtn.style.display = 'none';
+    daySkipBtn.textContent = 'Weiter';
+    daySkipBtn.style.display = 'block';
+    daySkipBtn.onclick = endDayPhase;
+  }
+
+  function renderAccusationSelection() {
+    const livingPlayers = players.filter(p => !deadPlayers.includes(p));
+    composeDayMessage([
+      '<p>Diskutiert den Vorfall und entscheidet, wen ihr beschuldigen möchtet.</p>',
+      '<p>Wählt zuerst aus, wer heute angeklagt wird. Mehrere Anklagen sind möglich.</p>'
+    ]);
+
+    dayChoices.innerHTML = '';
+    livingPlayers.forEach(player => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = player;
+      btn.className = 'player-btn';
+      btn.onclick = () => {
+        btn.classList.toggle('selected');
+      };
+      dayChoices.appendChild(btn);
+    });
+
+    dayLynchBtn.textContent = 'Anklagen bestätigen';
+    dayLynchBtn.style.display = 'block';
+    dayLynchBtn.onclick = finalizeAccusations;
+
+    daySkipBtn.textContent = 'Keine Anklagen';
+    daySkipBtn.style.display = 'block';
+    daySkipBtn.onclick = () => handleNoAccusation();
+  }
+
+  function renderLynchBallot(suspects) {
+    accused = Array.from(new Set((suspects || []).filter(name => !deadPlayers.includes(name))));
+
+    if (accused.length === 0) {
+      handleNoAccusation('Es stehen keine lebenden Beschuldigten mehr zur Auswahl. Niemand wird gehängt.');
+      return;
+    }
+
+    composeDayMessage([
+      `<p>Die folgenden Spieler wurden angeklagt: <strong>${accused.join(', ')}</strong>.</p>`,
+      '<p>Gebt eure Stimmen ab und entscheidet, wer gehängt wird.</p>'
+    ]);
+
+    renderDayChoices(accused);
+
+    dayLynchBtn.textContent = 'Hängen';
+    dayLynchBtn.style.display = 'block';
+    dayLynchBtn.onclick = executeLynching;
+
+    daySkipBtn.textContent = 'Überspringen';
+    daySkipBtn.style.display = 'block';
+    daySkipBtn.onclick = () => {
+      composeDayMessage(['<p>Die Dorfbewohner konnten sich nicht einigen. Niemand wurde gehängt.</p>']);
+      peaceDays++;
+      accused = [];
+      dayChoices.innerHTML = '';
+      dayLynchBtn.style.display = 'none';
+      daySkipBtn.textContent = 'Weiter';
+      daySkipBtn.onclick = endDayPhase;
+    };
+  }
+
+  function finalizeAccusations() {
+    const selected = Array.from(dayChoices.querySelectorAll('.player-btn.selected')).map(btn => btn.textContent);
+
+    if (selected.length === 0) {
+      handleNoAccusation();
+      return;
+    }
+
+    const uniqueSelection = Array.from(new Set(selected.filter(name => !deadPlayers.includes(name))));
+    if (uniqueSelection.length === 0) {
+      handleNoAccusation('Es stehen keine lebenden Beschuldigten mehr zur Auswahl. Niemand wird gehängt.');
+      return;
+    }
+
+    const eliminationTriggered = processMichaelJacksonAccusations(uniqueSelection);
+    if (eliminationTriggered) {
+      accused = [];
+      return;
+    }
+
+    renderLynchBallot(uniqueSelection);
+  }
+
   function calculateVoteResults() {
     const inputs = dayChoices.querySelectorAll('.vote-input');
     const voteCount = {};
@@ -745,7 +905,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const player = input.dataset.player;
       const count = parseInt(input.value, 10) || 0;
       const michaelEntry = michaelJacksonAccusations[player];
-      const finalCount = michaelEntry?.hasSpotlight ? count * 2 : count;
+      const spotlightMultiplier = michaelEntry?.hasSpotlight ? 2 : 1;
+      const mayorMultiplier = player === mayor ? 2 : 1;
+      const finalCount = count * spotlightMultiplier * mayorMultiplier;
       voteCount[player] = finalCount;
     });
 
@@ -767,43 +929,62 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function registerMichaelJacksonAccusation(playerName) {
     const playerIndex = players.indexOf(playerName);
-    if (playerIndex === -1) {
-      return false;
-    }
-
-    if (rolesAssigned[playerIndex] !== "Michael Jackson") {
-      return false;
+    if (playerIndex === -1 || rolesAssigned[playerIndex] !== "Michael Jackson") {
+      return null;
     }
 
     let entry = michaelJacksonAccusations[playerName];
     if (!entry || Array.isArray(entry)) {
-      const daysAccused = Array.isArray(entry) ? entry.slice() : [];
-      entry = { daysAccused, hasSpotlight: daysAccused.length > 0 };
+      const normalizedExistingDays = Array.isArray(entry)
+        ? entry
+            .map(day => (typeof day === 'number' ? day : Number(day)))
+            .filter(day => Number.isFinite(day))
+        : [];
+      const uniqueDays = Array.from(new Set(normalizedExistingDays));
+      entry = {
+        daysAccused: uniqueDays,
+        hasSpotlight: uniqueDays.length > 0,
+        accusationCount: uniqueDays.length,
+        lastAccusationDay: uniqueDays.length > 0 ? Math.max(...uniqueDays) : null
+      };
       michaelJacksonAccusations[playerName] = entry;
     } else {
-      entry.daysAccused = Array.isArray(entry.daysAccused) ? entry.daysAccused : [];
+      const normalizedStoredDays = Array.isArray(entry.daysAccused)
+        ? entry.daysAccused
+            .map(day => (typeof day === 'number' ? day : Number(day)))
+            .filter(day => Number.isFinite(day))
+        : [];
+      entry.daysAccused = Array.from(new Set(normalizedStoredDays));
+      if (!Number.isFinite(entry.accusationCount)) {
+        entry.accusationCount = entry.daysAccused.length;
+      }
+      if (!(typeof entry.lastAccusationDay === 'number' && Number.isFinite(entry.lastAccusationDay))) {
+        entry.lastAccusationDay = entry.daysAccused.length > 0 ? Math.max(...entry.daysAccused) : null;
+      }
       if (typeof entry.hasSpotlight !== 'boolean') {
-        entry.hasSpotlight = entry.daysAccused.length > 0;
+        entry.hasSpotlight = entry.accusationCount > 0;
       }
     }
 
-    const isNewDayAccusation = !entry.daysAccused.includes(dayCount);
+    const result = { shouldEliminate: false, announcement: null };
+    const wasPreviouslyAccused = entry.accusationCount > 0;
 
-    if (isNewDayAccusation) {
-      entry.daysAccused.push(dayCount);
-
-      if (!entry.hasSpotlight) {
-        entry.hasSpotlight = true;
-
-        const announcement = `<p><strong>${playerName}</strong> steht nun im Rampenlicht! Seine Stimme zählt ab jetzt doppelt.</p>`;
-        const existingMessage = dayText.innerHTML || '';
-        dayText.innerHTML = existingMessage ? `${existingMessage}${announcement}` : announcement;
-
-        renderDayChoices();
+    entry.accusationCount += 1;
+    const isValidDayCount = typeof dayCount === 'number' && Number.isFinite(dayCount);
+    if (isValidDayCount) {
+      entry.lastAccusationDay = dayCount;
+      if (!entry.daysAccused.includes(dayCount)) {
+        entry.daysAccused.push(dayCount);
       }
     }
 
-    return entry.daysAccused.length >= 2;
+    if (!entry.hasSpotlight && !wasPreviouslyAccused) {
+      entry.hasSpotlight = true;
+      result.announcement = `<p><strong>${playerName}</strong> steht nun im Rampenlicht! Seine Stimme zählt ab jetzt doppelt.</p>`;
+    }
+
+    result.shouldEliminate = entry.accusationCount >= 2;
+    return result;
   }
 
   function handleMichaelJacksonAutoElimination(playersToEliminate) {
@@ -840,18 +1021,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
     updatePlayerCardVisuals();
 
-    let message = newlyEliminated
-      .map(name => `${name} wurde zum zweiten Mal beschuldigt und stirbt als Michael Jackson sofort.`)
-      .join('\n\n');
+    const eliminationMessages = newlyEliminated.map(name => `<p><strong>${name}</strong> wurde zum zweiten Mal beschuldigt und stirbt als Michael Jackson sofort.</p>`);
 
     loverChainDeaths.forEach(({ partner, source }) => {
-      message += `\n\n${partner} stirbt, weil sie/er mit ${source} verliebt war.`;
+      eliminationMessages.push(`<p>${partner} stirbt, weil sie/er mit ${source} verliebt war.</p>`);
     });
 
-    dayText.textContent = message;
+    composeDayMessage(eliminationMessages);
+    accused = [];
     dayChoices.innerHTML = '';
     dayLynchBtn.style.display = 'none';
     daySkipBtn.textContent = 'Weiter';
+    daySkipBtn.style.display = 'block';
     daySkipBtn.onclick = () => {
       if (checkGameOver()) return;
       if (!checkGameOver(true)) {
@@ -867,7 +1048,29 @@ document.addEventListener("DOMContentLoaded", () => {
       return false;
     }
 
-    const playersToEliminate = candidates.filter(player => registerMichaelJacksonAccusation(player));
+    const uniqueCandidates = Array.from(new Set(candidates));
+    const playersToEliminate = [];
+    let announcementAdded = false;
+
+    uniqueCandidates.forEach(player => {
+      const result = registerMichaelJacksonAccusation(player);
+      if (!result) {
+        return;
+      }
+
+      if (result.announcement) {
+        dayAnnouncements.push(result.announcement);
+        announcementAdded = true;
+      }
+
+      if (result.shouldEliminate) {
+        playersToEliminate.push(player);
+      }
+    });
+
+    if (announcementAdded) {
+      composeDayMessage(currentDayAdditionalParagraphs);
+    }
 
     if (playersToEliminate.length === 0) {
       return false;
@@ -893,23 +1096,27 @@ document.addEventListener("DOMContentLoaded", () => {
                 handlePlayerDeath(suendenbockPlayer);
             }
             updatePlayerCardVisuals();
-            dayText.textContent = `${suendenbockPlayer} wurde als Sündenbock geopfert.`;
-            
+            const messageParts = [`<p>${suendenbockPlayer} wurde als Sündenbock geopfert.</p>`];
+            composeDayMessage(messageParts);
+
             const continueAfterLynch = () => {
                 lovers.forEach(pair => {
                   if (pair.includes(suendenbockPlayer)) {
                     const partner = pair[0] === suendenbockPlayer ? pair[1] : pair[0];
                     if (!deadPlayers.includes(partner)) {
                       deadPlayers.push(partner);
-                      dayText.textContent += `\n\n${partner} stirbt, weil sie/er mit ${suendenbockPlayer} verliebt war.`;
+                      messageParts.push(`<p>${partner} stirbt, weil sie/er mit ${suendenbockPlayer} verliebt war.</p>`);
                       handlePlayerDeath(partner);
                     }
                   }
                 });
 
+                composeDayMessage(messageParts);
+                accused = [];
                 dayChoices.innerHTML = '';
                 dayLynchBtn.style.display = 'none';
                 daySkipBtn.textContent = 'Weiter';
+                daySkipBtn.style.display = 'block';
                 daySkipBtn.onclick = () => {
                   if (checkGameOver()) return;
                   if (!checkGameOver(true)) {
@@ -935,8 +1142,9 @@ document.addEventListener("DOMContentLoaded", () => {
           handlePlayerDeath(lynched);
         }
         updatePlayerCardVisuals();
-        dayText.textContent = `${lynched} wurde mit ${maxVotes} Stimmen gehängt.`;
-        
+        const messageParts = [`<p>${lynched} wurde mit ${maxVotes} Stimmen gehängt.</p>`];
+        composeDayMessage(messageParts);
+
         if (henker && henker.target === lynched) {
           showWin('Der Henker gewinnt!', `${henker.player} hat sein Ziel erreicht und ${lynched} wurde gelyncht.`);
           return;
@@ -948,15 +1156,18 @@ document.addEventListener("DOMContentLoaded", () => {
                 const partner = pair[0] === lynched ? pair[1] : pair[0];
                 if (!deadPlayers.includes(partner)) {
                   deadPlayers.push(partner);
-                  dayText.textContent += `\n\n${partner} stirbt, weil sie/er mit ${lynched} verliebt war.`;
+                  messageParts.push(`<p>${partner} stirbt, weil sie/er mit ${lynched} verliebt war.</p>`);
                   handlePlayerDeath(partner);
                 }
               }
             });
-            
+
+            composeDayMessage(messageParts);
+            accused = [];
             dayChoices.innerHTML = '';
             dayLynchBtn.style.display = 'none';
             daySkipBtn.textContent = 'Weiter';
+            daySkipBtn.style.display = 'block';
             daySkipBtn.onclick = () => {
               if (checkGameOver()) return;
               if (!checkGameOver(true)) {
@@ -974,11 +1185,13 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       });
     } else {
-      dayText.textContent = 'Kein Spieler wurde mit ausreichend Stimmen verurteilt.';
+      composeDayMessage(['<p>Kein Spieler wurde mit ausreichend Stimmen verurteilt.</p>']);
       peaceDays++;
+      accused = [];
       dayChoices.innerHTML = '';
       dayLynchBtn.style.display = 'none';
       daySkipBtn.textContent = 'Weiter';
+      daySkipBtn.style.display = 'block';
       daySkipBtn.onclick = () => {
         if (!checkGameOver(true)) {
           setTimeout(() => endDayPhase(), 3000);
@@ -1102,44 +1315,14 @@ document.addEventListener("DOMContentLoaded", () => {
   function startNormalDayPhase() {
     dayOverlay.style.display = 'flex';
     dayOverlay.classList.add('show');
-    
-    let nightReport = '';
-    if (!revealDeadRolesCheckbox.checked) {
-        nightReport = currentNightVictims.length > 0
-            ? `<p>In der Nacht wurden folgende Spieler getötet: <strong>${currentNightVictims.join(', ')}</strong>.</p>`
-            : '<p>Es gab keine Todesfälle in der Nacht.</p>';
-    }
+    accused = accused.filter(player => !deadPlayers.includes(player));
+    dayIntroHtml = buildDayIntroHtml();
 
-    let silencedMessage = '';
-    if (silencedPlayer && !deadPlayers.includes(silencedPlayer)) {
-      silencedMessage = `<p>🤫 ${silencedPlayer} wurde zum Schweigen gebracht und darf nicht reden oder abstimmen.</p>`;
+    if (accused.length > 0) {
+      renderLynchBallot(accused);
     } else {
-      silencedPlayer = null;
+      renderAccusationSelection();
     }
-
-    dayText.innerHTML = `
-      ${nightReport}
-      ${silencedMessage}
-      <p>Diskutiert und stimmt ab, wer heute gehängt werden soll.</p>
-      ${mayor ? `<div class="mayor-indicator">Bürgermeister: ${mayor}</div>` : ''}
-    `;
-    
-    dayLynchBtn.textContent = 'Hängen';
-    dayLynchBtn.style.display = 'block';
-    daySkipBtn.textContent = 'Überspringen';
-    daySkipBtn.style.display = 'block';
-    
-    dayLynchBtn.onclick = executeLynching;
-    daySkipBtn.onclick = () => {
-      dayText.textContent = 'Die Dorfbewohner konnten sich nicht einigen. Niemand wurde gehängt.';
-      peaceDays++;
-      dayChoices.innerHTML = '';
-      dayLynchBtn.style.display = 'none';
-      daySkipBtn.textContent = 'Weiter';
-      daySkipBtn.onclick = endDayPhase;
-    };
-    
-    renderDayChoices();
   }
 
   function showGraveyardModal() {
@@ -1232,7 +1415,11 @@ document.addEventListener("DOMContentLoaded", () => {
   function startDayPhase() {
     dayMode = true;
     dayCount++;
-    
+    accused = [];
+    dayAnnouncements = [];
+    currentDayAdditionalParagraphs = [];
+    dayIntroHtml = '';
+
     if (currentNightVictims.length === 0) {
         peaceDays++;
     } else {
@@ -2068,14 +2255,32 @@ document.addEventListener("DOMContentLoaded", () => {
       bloodMoonActive: bloodMoonActive,
       dayCount: dayCount,
       mayor: mayor,
+      accused: accused.slice(),
       nightMode: nightMode,
       dayMode: dayMode,
       nightSteps: nightSteps,
       nightIndex: nightIndex,
       michaelJacksonAccusations: Object.entries(michaelJacksonAccusations).reduce((acc, [player, data]) => {
-        const days = Array.isArray(data?.daysAccused) ? data.daysAccused : [];
+        const rawDays = Array.isArray(data?.daysAccused) ? data.daysAccused : [];
+        const days = Array.from(new Set(rawDays
+          .map(day => (typeof day === 'number' ? day : Number(day)))
+          .filter(day => Number.isFinite(day))));
         const hasSpotlight = typeof data?.hasSpotlight === 'boolean' ? data.hasSpotlight : days.length > 0;
-        acc[player] = { daysAccused: days, hasSpotlight };
+        const accusationCount = typeof data?.accusationCount === 'number' && Number.isFinite(data.accusationCount)
+          ? data.accusationCount
+          : days.length;
+        const lastAccusationDay = typeof data?.lastAccusationDay === 'number' && Number.isFinite(data.lastAccusationDay)
+          ? data.lastAccusationDay
+          : days.length > 0
+            ? Math.max(...days)
+            : null;
+
+        acc[player] = {
+          daysAccused: days,
+          hasSpotlight,
+          accusationCount,
+          lastAccusationDay
+        };
         return acc;
       }, {})
     };
@@ -2148,11 +2353,15 @@ document.addEventListener("DOMContentLoaded", () => {
     bloodMoonActive = session.bloodMoonActive || false;
     dayCount = session.dayCount || 0;
     mayor = session.mayor || null;
+    accused = Array.isArray(session.accused) ? session.accused.slice() : [];
     nightMode = session.nightMode || false;
     dayMode = session.dayMode || false;
     nightSteps = session.nightSteps || [];
     nightIndex = session.nightIndex || 0;
     initializeMichaelJacksonAccusations(session.michaelJacksonAccusations || {});
+    dayAnnouncements = [];
+    currentDayAdditionalParagraphs = [];
+    dayIntroHtml = '';
 
     playersTextarea.value = session.players.join('\n');
 

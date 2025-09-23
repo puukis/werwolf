@@ -1197,6 +1197,11 @@ body.night-active main.container {
   border-left: 3px solid #3b82f6;
 }
 
+.vote-row.mayor-vote-row {
+  background-color: rgba(250, 204, 21, 0.15);
+  border-left: 3px solid #facc15;
+}
+
 .vote-row.silenced {
   background-color: rgba(239, 68, 68, 0.1);
   border-left: 3px solid #ef4444;
@@ -1213,6 +1218,21 @@ body.night-active main.container {
   background: rgba(59, 130, 246, 0.12);
   padding: 0.1rem 0.4rem;
   border-radius: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.mayor-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: #92400e;
+  margin-left: 0.5rem;
+  background: rgba(250, 204, 21, 0.25);
+  padding: 0.1rem 0.4rem;
+  border-radius: 10px;
+  font-weight: 600;
   white-space: nowrap;
 }
 
