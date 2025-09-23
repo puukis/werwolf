@@ -754,7 +754,13 @@ document.addEventListener("DOMContentLoaded", () => {
       const player = input.dataset.player;
       const count = parseInt(input.value, 10) || 0;
       const michaelEntry = michaelJacksonAccusations[player];
-      const finalCount = michaelEntry?.hasSpotlight ? count * 2 : count;
+      const hasSpotlight = michaelEntry?.hasSpotlight;
+
+      let finalCount = count;
+      if (player === mayor || hasSpotlight) {
+        finalCount *= 2;
+      }
+
       voteCount[player] = finalCount;
     });
 
@@ -776,12 +782,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function registerMichaelJacksonAccusation(playerName) {
     const playerIndex = players.indexOf(playerName);
-    if (playerIndex === -1) {
-      return false;
-    }
-
-    if (rolesAssigned[playerIndex] !== "Michael Jackson") {
-      return false;
+    if (playerIndex === -1 || rolesAssigned[playerIndex] !== "Michael Jackson") {
+      return { reachedThreshold: false, mayorPromoted: false, announcement: '' };
     }
 
     let entry = michaelJacksonAccusations[playerName];
@@ -796,23 +798,37 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
 
-    const isNewDayAccusation = !entry.daysAccused.includes(dayCount);
+    const alreadyAccusedToday = entry.daysAccused.includes(dayCount);
+    let mayorPromoted = false;
+    let announcement = '';
 
-    if (isNewDayAccusation) {
+    if (!alreadyAccusedToday) {
+      const hadPreviousAccusations = entry.daysAccused.length > 0;
       entry.daysAccused.push(dayCount);
 
       if (!entry.hasSpotlight) {
         entry.hasSpotlight = true;
+      }
 
-        const announcement = `<p><strong>${playerName}</strong> steht nun im Rampenlicht! Seine Stimme zählt ab jetzt doppelt.</p>`;
-        const existingMessage = dayText.innerHTML || '';
-        dayText.innerHTML = existingMessage ? `${existingMessage}${announcement}` : announcement;
+      if (!hadPreviousAccusations) {
+        const previousMayor = mayor;
+        if (mayor !== playerName) {
+          mayor = playerName;
+          mayorPromoted = true;
+        }
 
-        renderDayChoices();
+        const takeoverText = mayorPromoted
+          ? previousMayor && previousMayor !== playerName
+            ? ` und übernimmt das Bürgermeisteramt von ${previousMayor}`
+            : ' und übernimmt das Bürgermeisteramt'
+          : '';
+
+        announcement = `<p><strong>${playerName}</strong> steht nun im Rampenlicht${takeoverText}! Seine Stimme zählt ab jetzt doppelt.</p>`;
       }
     }
 
-    return entry.daysAccused.length >= 2;
+    const reachedThreshold = entry.daysAccused.length >= 2;
+    return { reachedThreshold, mayorPromoted, announcement };
   }
 
   function handleMichaelJacksonAutoElimination(playersToEliminate) {
@@ -875,17 +891,39 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function processMichaelJacksonAccusations(candidates) {
     if (!Array.isArray(candidates) || candidates.length === 0) {
-      return false;
+      return { autoEliminated: false, mayorPromoted: false, announcements: [] };
     }
 
     const uniqueCandidates = Array.from(new Set(candidates));
-    const playersToEliminate = uniqueCandidates.filter(player => registerMichaelJacksonAccusation(player));
+    const playersToEliminate = [];
+    const announcements = [];
+    let mayorPromoted = false;
+
+    uniqueCandidates.forEach(player => {
+      const result = registerMichaelJacksonAccusation(player);
+      if (!result) {
+        return;
+      }
+
+      if (result.reachedThreshold) {
+        playersToEliminate.push(player);
+      }
+
+      if (result.mayorPromoted) {
+        mayorPromoted = true;
+      }
+
+      if (result.announcement) {
+        announcements.push(result.announcement);
+      }
+    });
 
     if (playersToEliminate.length === 0) {
-      return false;
+      return { autoEliminated: false, mayorPromoted, announcements };
     }
 
-    return handleMichaelJacksonAutoElimination(playersToEliminate);
+    const eliminated = handleMichaelJacksonAutoElimination(playersToEliminate);
+    return { autoEliminated: eliminated, mayorPromoted, announcements };
   }
 
   function executeLynching() {
@@ -1132,8 +1170,7 @@ document.addEventListener("DOMContentLoaded", () => {
       silencedPlayer = null;
     }
 
-    const mayorIndicator = mayor ? `<div class="mayor-indicator">Bürgermeister: ${mayor}</div>` : '';
-    const dayInfo = { nightReport, silencedMessage, mayorIndicator };
+    const dayInfo = { nightReport, silencedMessage };
 
     const hasExistingAccusations = accused.some(name => !deadPlayers.includes(name));
 
@@ -1146,7 +1183,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function showAccusationSelection(dayInfo) {
     const livingPlayers = players.filter(p => !deadPlayers.includes(p));
-    const baseIntro = `${dayInfo.nightReport}${dayInfo.silencedMessage}${dayInfo.mayorIndicator || ''}`;
+    const mayorIndicator = mayor ? `<div class="mayor-indicator">Bürgermeister: ${mayor}</div>` : '';
+    const baseIntro = `${dayInfo.nightReport}${dayInfo.silencedMessage}${mayorIndicator}`;
 
     dayText.innerHTML = `
       ${baseIntro}
@@ -1193,12 +1231,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
       accused = Array.from(new Set(selected));
 
-      if (processMichaelJacksonAccusations(accused)) {
+      const mjResult = processMichaelJacksonAccusations(accused);
+      if (mjResult.autoEliminated) {
         return;
       }
 
       accused = accused.filter(name => !deadPlayers.includes(name));
-      startLynchingVote(dayInfo);
+      startLynchingVote(dayInfo, mjResult.announcements);
     };
 
     daySkipBtn.onclick = () => {
@@ -1216,16 +1255,20 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
-  function startLynchingVote(dayInfo) {
+  function startLynchingVote(dayInfo, extraAnnouncements = []) {
     const livingAccused = accused.filter(name => !deadPlayers.includes(name));
-    const baseIntro = `${dayInfo.nightReport}${dayInfo.silencedMessage}${dayInfo.mayorIndicator || ''}`;
+    const mayorIndicator = mayor ? `<div class="mayor-indicator">Bürgermeister: ${mayor}</div>` : '';
+    const baseIntro = `${dayInfo.nightReport}${dayInfo.silencedMessage}${mayorIndicator}`;
     const accusedText = livingAccused.length > 0
       ? `<p>Heute angeklagt: <strong>${livingAccused.join(', ')}</strong>.</p>`
       : '<p>Heute wurden keine Spieler angeklagt.</p>';
 
+    const announcementsHtml = extraAnnouncements.join('');
+
     dayText.innerHTML = `
       ${baseIntro}
       ${accusedText}
+      ${announcementsHtml}
       <p>Diskutiert und stimmt ab, wer heute gehängt werden soll.</p>
     `;
 
