@@ -262,7 +262,16 @@ document.addEventListener("DOMContentLoaded", () => {
             : [];
 
         const uniqueDays = Array.from(new Set(previousDays.filter(day => typeof day === 'number')));
-        synced[player] = { daysAccused: uniqueDays };
+        const previousSpotlight = typeof previousEntry?.hasSpotlight === 'boolean'
+          ? previousEntry.hasSpotlight
+          : typeof previousEntry?.spotlightActive === 'boolean'
+            ? previousEntry.spotlightActive
+            : false;
+
+        synced[player] = {
+          daysAccused: uniqueDays,
+          hasSpotlight: previousSpotlight || uniqueDays.length > 0
+        };
       }
     });
 
@@ -688,7 +697,16 @@ document.addEventListener("DOMContentLoaded", () => {
         mayorBadge.textContent = '2x Stimme';
         nameSpan.appendChild(mayorBadge);
       }
-      
+
+      const michaelEntry = michaelJacksonAccusations[player];
+      if (michaelEntry?.hasSpotlight) {
+        row.classList.add('spotlight-vote-row');
+        const spotlightBadge = document.createElement('span');
+        spotlightBadge.className = 'spotlight-badge';
+        spotlightBadge.textContent = 'Spotlight 2x Stimme';
+        nameSpan.appendChild(spotlightBadge);
+      }
+
       if (isSilenced) {
         const silencedBadge = document.createElement('span');
         silencedBadge.className = 'silenced-badge';
@@ -726,7 +744,9 @@ document.addEventListener("DOMContentLoaded", () => {
     inputs.forEach(input => {
       const player = input.dataset.player;
       const count = parseInt(input.value, 10) || 0;
-      voteCount[player] = count;
+      const michaelEntry = michaelJacksonAccusations[player];
+      const finalCount = michaelEntry?.hasSpotlight ? count * 2 : count;
+      voteCount[player] = finalCount;
     });
 
     // Determine players with the highest vote count
@@ -756,21 +776,26 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     let entry = michaelJacksonAccusations[playerName];
-    if (!entry) {
-      entry = { daysAccused: [] };
+    if (!entry || Array.isArray(entry)) {
+      const daysAccused = Array.isArray(entry) ? entry.slice() : [];
+      entry = { daysAccused, hasSpotlight: daysAccused.length > 0 };
       michaelJacksonAccusations[playerName] = entry;
+    } else {
+      entry.daysAccused = Array.isArray(entry.daysAccused) ? entry.daysAccused : [];
+      if (typeof entry.hasSpotlight !== 'boolean') {
+        entry.hasSpotlight = entry.daysAccused.length > 0;
+      }
     }
 
-    const wasAccusedCount = entry.daysAccused.length;
     const isNewDayAccusation = !entry.daysAccused.includes(dayCount);
 
     if (isNewDayAccusation) {
       entry.daysAccused.push(dayCount);
 
-      if (wasAccusedCount === 0) {
-        mayor = playerName;
+      if (!entry.hasSpotlight) {
+        entry.hasSpotlight = true;
 
-        const announcement = `<p><strong>${playerName}</strong> wurde durch die erste Anschuldigung zum Bürgermeister ernannt und erhält nun eine doppelte Stimme.</p>`;
+        const announcement = `<p><strong>${playerName}</strong> steht nun im Rampenlicht! Seine Stimme zählt ab jetzt doppelt.</p>`;
         const existingMessage = dayText.innerHTML || '';
         dayText.innerHTML = existingMessage ? `${existingMessage}${announcement}` : announcement;
 
@@ -2049,7 +2074,8 @@ document.addEventListener("DOMContentLoaded", () => {
       nightIndex: nightIndex,
       michaelJacksonAccusations: Object.entries(michaelJacksonAccusations).reduce((acc, [player, data]) => {
         const days = Array.isArray(data?.daysAccused) ? data.daysAccused : [];
-        acc[player] = days;
+        const hasSpotlight = typeof data?.hasSpotlight === 'boolean' ? data.hasSpotlight : days.length > 0;
+        acc[player] = { daysAccused: days, hasSpotlight };
         return acc;
       }, {})
     };
