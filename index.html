@@ -169,6 +169,11 @@ Carla
         <div class="modal-content">
             <span class="close-modal">&times;</span>
             <h3>Rollenübersicht</h3>
+            <div class="roles-overview-filter">
+                <select id="roles-overview-player-select"></select>
+                <button id="roles-overview-show-player-btn" class="secondary-btn small-btn">Zeigen</button>
+                <button id="roles-overview-show-all-btn" class="secondary-btn small-btn">Alle anzeigen</button>
+            </div>
             <div id="roles-overview-content"></div>
         </div>
     </div>
@@ -182,10 +187,35 @@ Carla
         </div>
     </div>
 
+    <div id="jager-modal" class="modal">
+        <div class="modal-content">
+            <h3>Der Jäger schlägt zurück</h3>
+            <p>Du bist gestorben, aber dein letzter Schuss hallt nach. Wähle einen Spieler, den du mit in den Tod nehmen willst.</p>
+            <div id="jager-choices" class="day-choices"></div>
+            <button id="jager-kill-btn" class="primary-btn">Spieler mitnehmen</button>
+        </div>
+    </div>
+
     <div id="admin-panel" class="admin-panel hidden">
         <button id="close-admin-panel-btn" class="close-btn">&times;</button>
         <h4>Admin Panel</h4>
         <button id="trigger-blood-moon-btn" class="secondary-btn">Trigger Blood Moon</button>
+        <div class="admin-section">
+            <h5>Spieler eliminieren</h5>
+            <select id="admin-kill-player-select"></select>
+            <button id="admin-kill-player-btn" class="secondary-btn">Eliminieren</button>
+        </div>
+        <div class="admin-section">
+            <h5>Spieler wiederbeleben</h5>
+            <select id="admin-revive-player-select"></select>
+            <button id="admin-revive-player-btn" class="secondary-btn">Wiederbeleben</button>
+        </div>
+        <div class="admin-section">
+            <h5>Rolle ändern</h5>
+            <select id="admin-change-role-player-select"></select>
+            <select id="admin-change-role-role-select"></select>
+            <button id="admin-change-role-btn" class="secondary-btn">Ändern</button>
+        </div>
     </div>
     <button id="admin-panel-toggle" class="admin-toggle-btn" aria-label="Toggle Admin Panel">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24px" height="24px">

@@ -181,7 +181,73 @@ document.addEventListener("DOMContentLoaded", () => {
   let henker = null; // { player: "Name", target: "Name" }
   let geschwister = [];
   let geist = { player: null, messageSent: false };
-  let peaceDays = 0; // For Friedenstifter
+  let jagerShotUsed = false;
+  let jagerDiedLastNight = null;
+
+  // Jäger Modal Elements
+  const jagerModal = document.getElementById('jager-modal');
+  const jagerChoices = document.getElementById('jager-choices');
+  const jagerKillBtn = document.getElementById('jager-kill-btn');
+
+  function handleJagerRevenge(jagerName, onFinish) {
+    if (jagerShotUsed) {
+        if(onFinish) onFinish();
+        return;
+    };
+    jagerShotUsed = true;
+
+    const livingPlayers = players.filter(p => !deadPlayers.includes(p) && p !== jagerName);
+    jagerChoices.innerHTML = '';
+    livingPlayers.forEach(player => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = player;
+        btn.className = 'player-btn';
+        btn.onclick = () => {
+            const selected = jagerChoices.querySelector('.player-btn.selected');
+            if (selected) selected.classList.remove('selected');
+            btn.classList.add('selected');
+        };
+        jagerChoices.appendChild(btn);
+    });
+
+    jagerModal.style.display = 'flex';
+
+    jagerKillBtn.onclick = () => {
+        const selected = jagerChoices.querySelector('.player-btn.selected');
+        if (!selected) {
+            alert('Bitte einen Spieler zum Mitnehmen auswählen.');
+            return;
+        }
+        const target = selected.textContent;
+
+        showConfirmation('Letzter Schuss', `Willst du ${target} wirklich mit in den Tod nehmen?`, () => {
+            if (!deadPlayers.includes(target)) {
+                deadPlayers.push(target);
+                handlePlayerDeath(target);
+
+                lovers.forEach(pair => {
+                    if (pair.includes(target)) {
+                        const partner = pair[0] === target ? pair[1] : pair[0];
+                        if (!deadPlayers.includes(partner)) {
+                            deadPlayers.push(partner);
+                            handlePlayerDeath(partner);
+                            alert(`${partner} ist aus Liebeskummer gestorben!`);
+                        }
+                    }
+                });
+
+                updatePlayerCardVisuals();
+                jagerModal.style.display = 'none';
+                showConfirmation('Der Jäger hat geschossen', `${jagerName} hat ${target} mit in den Tod gerissen.`, () => {
+                    if (checkGameOver()) return;
+                    if (onFinish) onFinish();
+                }, 'Okay', false);
+            }
+        });
+    };
+  }
+
 
   let players = [];
   let rolesAssigned = [];
@@ -652,26 +718,36 @@ document.addEventListener("DOMContentLoaded", () => {
             updatePlayerCardVisuals();
             dayText.textContent = `${suendenbockPlayer} wurde als Sündenbock geopfert.`;
             
-            lovers.forEach(pair => {
-              if (pair.includes(suendenbockPlayer)) {
-                const partner = pair[0] === suendenbockPlayer ? pair[1] : pair[0];
-                if (!deadPlayers.includes(partner)) {
-                  deadPlayers.push(partner);
-                  dayText.textContent += `\n\n${partner} stirbt, weil sie/er mit ${suendenbockPlayer} verliebt war.`;
-                  handlePlayerDeath(partner);
-                }
-              }
-            });
+            const continueAfterLynch = () => {
+                lovers.forEach(pair => {
+                  if (pair.includes(suendenbockPlayer)) {
+                    const partner = pair[0] === suendenbockPlayer ? pair[1] : pair[0];
+                    if (!deadPlayers.includes(partner)) {
+                      deadPlayers.push(partner);
+                      dayText.textContent += `\n\n${partner} stirbt, weil sie/er mit ${suendenbockPlayer} verliebt war.`;
+                      handlePlayerDeath(partner);
+                    }
+                  }
+                });
 
-            dayChoices.innerHTML = '';
-            dayLynchBtn.style.display = 'none';
-            daySkipBtn.textContent = 'Weiter';
-            daySkipBtn.onclick = () => {
-              if (checkGameOver()) return;
-              if (!checkGameOver(true)) {
-                setTimeout(() => endDayPhase(), 3000);
-              }
+                dayChoices.innerHTML = '';
+                dayLynchBtn.style.display = 'none';
+                daySkipBtn.textContent = 'Weiter';
+                daySkipBtn.onclick = () => {
+                  if (checkGameOver()) return;
+                  if (!checkGameOver(true)) {
+                    setTimeout(() => endDayPhase(), 3000);
+                  }
+                };
             };
+
+            const lynchedIndex = players.indexOf(suendenbockPlayer);
+            const lynchedRole = rolesAssigned[lynchedIndex];
+            if (lynchedRole === 'Jäger' && !jagerShotUsed) {
+                handleJagerRevenge(suendenbockPlayer, continueAfterLynch);
+            } else {
+                continueAfterLynch();
+            }
         });
     } else if (candidates.length === 1) {
       const lynched = candidates[0];
@@ -689,26 +765,36 @@ document.addEventListener("DOMContentLoaded", () => {
           return;
         }
 
-        lovers.forEach(pair => {
-          if (pair.includes(lynched)) {
-            const partner = pair[0] === lynched ? pair[1] : pair[0];
-            if (!deadPlayers.includes(partner)) {
-              deadPlayers.push(partner);
-              dayText.textContent += `\n\n${partner} stirbt, weil sie/er mit ${lynched} verliebt war.`;
-              handlePlayerDeath(partner);
-            }
-          }
-        });
-        
-        dayChoices.innerHTML = '';
-        dayLynchBtn.style.display = 'none';
-        daySkipBtn.textContent = 'Weiter';
-        daySkipBtn.onclick = () => {
-          if (checkGameOver()) return;
-          if (!checkGameOver(true)) {
-            setTimeout(() => endDayPhase(), 3000);
-          }
+        const afterLynchTasks = () => {
+            lovers.forEach(pair => {
+              if (pair.includes(lynched)) {
+                const partner = pair[0] === lynched ? pair[1] : pair[0];
+                if (!deadPlayers.includes(partner)) {
+                  deadPlayers.push(partner);
+                  dayText.textContent += `\n\n${partner} stirbt, weil sie/er mit ${lynched} verliebt war.`;
+                  handlePlayerDeath(partner);
+                }
+              }
+            });
+            
+            dayChoices.innerHTML = '';
+            dayLynchBtn.style.display = 'none';
+            daySkipBtn.textContent = 'Weiter';
+            daySkipBtn.onclick = () => {
+              if (checkGameOver()) return;
+              if (!checkGameOver(true)) {
+                setTimeout(() => endDayPhase(), 3000);
+              }
+            };
         };
+
+        const lynchedIndex = players.indexOf(lynched);
+        const lynchedRole = rolesAssigned[lynchedIndex];
+        if (lynchedRole === 'Jäger' && !jagerShotUsed) {
+            handleJagerRevenge(lynched, afterLynchTasks);
+        } else {
+            afterLynchTasks();
+        }
       });
     } else {
       dayText.textContent = 'Kein Spieler wurde mit ausreichend Stimmen verurteilt.';
@@ -881,12 +967,29 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function showGraveyardModal() {
     const revealRoles = revealDeadRolesCheckbox.checked;
+
+    const afterGraveyard = () => {
+        if (jagerDiedLastNight) {
+            const jagerName = jagerDiedLastNight;
+            jagerDiedLastNight = null;
+            handleJagerRevenge(jagerName, () => {
+                if (dayCount === 1 && !mayor) {
+                    electMayor();
+                } else {
+                    startNormalDayPhase();
+                }
+            });
+        } else {
+            if (dayCount === 1 && !mayor) {
+                electMayor();
+            } else {
+                startNormalDayPhase();
+            }
+        }
+    };
+
     if (!revealRoles || currentNightVictims.length === 0) {
-      if (dayCount === 1) {
-        electMayor();
-      } else {
-        startNormalDayPhase();
-      }
+      afterGraveyard();
       return;
     }
 
@@ -945,11 +1048,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     graveyardCloseBtn.onclick = () => {
       graveyardModal.style.display = 'none';
-      if (dayCount === 1) {
-        electMayor();
-      } else {
-        startNormalDayPhase();
-      }
+      afterGraveyard();
     };
   }
 
@@ -1046,6 +1145,10 @@ document.addEventListener("DOMContentLoaded", () => {
           if (!deadPlayers.includes(name)) {
             deadPlayers.push(name);
             currentNightVictims.push(name);
+            const victimIndex = players.indexOf(name);
+            if (rolesAssigned[victimIndex] === 'Jäger') {
+                jagerDiedLastNight = name;
+            }
             handlePlayerDeath(name);
           }
           updatePlayerCardVisuals();
@@ -1127,6 +1230,9 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!deadPlayers.includes(victim)) {
               deadPlayers.push(victim);
               currentNightVictims.push(victim);
+              if (rolesAssigned[victimIndex] === 'Jäger') {
+                jagerDiedLastNight = victim;
+              }
               handlePlayerDeath(victim);
               console.log("Player killed by werewolves:", victim);
             }
@@ -1580,6 +1686,8 @@ document.addEventListener("DOMContentLoaded", () => {
     geist.player = null;
     geist.messageSent = false;
     peaceDays = 0;
+    jagerShotUsed = false;
+    jagerDiedLastNight = null;
 
     const villageTeamRoles = ["Dorfbewohner", "Seer", "Jäger", "Hexe", "Stumme Jule", "Inquisitor", "Verfluchte", "Sündenbock", "Geschwister", "Geist"];
     const villagersForHenkerTarget = [];
@@ -1965,17 +2073,151 @@ document.addEventListener("DOMContentLoaded", () => {
   const closeAdminPanelBtn = document.getElementById('close-admin-panel-btn');
   const showRolesOverviewBtn = document.getElementById('show-roles-overview-btn');
 
+  const adminKillPlayerSelect = document.getElementById('admin-kill-player-select');
+  const adminKillPlayerBtn = document.getElementById('admin-kill-player-btn');
+
+  function populateAdminKillSelect() {
+    adminKillPlayerSelect.innerHTML = '';
+    const livingPlayers = players.filter(p => !deadPlayers.includes(p));
+    livingPlayers.forEach(p => {
+        const option = document.createElement('option');
+        option.value = p;
+        option.textContent = p;
+        adminKillPlayerSelect.appendChild(option);
+    });
+  }
+
+  const adminRevivePlayerSelect = document.getElementById('admin-revive-player-select');
+  const adminRevivePlayerBtn = document.getElementById('admin-revive-player-btn');
+
+  function populateAdminReviveSelect() {
+    adminRevivePlayerSelect.innerHTML = '';
+    deadPlayers.forEach(p => {
+        const option = document.createElement('option');
+        option.value = p;
+        option.textContent = p;
+        adminRevivePlayerSelect.appendChild(option);
+    });
+  }
+
+  const adminChangeRolePlayerSelect = document.getElementById('admin-change-role-player-select');
+  const adminChangeRoleRoleSelect = document.getElementById('admin-change-role-role-select');
+  const adminChangeRoleBtn = document.getElementById('admin-change-role-btn');
+
+  function populateAdminChangeRoleSelects() {
+    adminChangeRolePlayerSelect.innerHTML = '';
+    players.forEach(p => {
+        const option = document.createElement('option');
+        option.value = p;
+        option.textContent = p;
+        adminChangeRolePlayerSelect.appendChild(option);
+    });
+
+    adminChangeRoleRoleSelect.innerHTML = '';
+    const allRoles = [...categorizedRoles.village, ...categorizedRoles.werwolf, ...categorizedRoles.special];
+    allRoles.forEach(r => {
+        const option = document.createElement('option');
+        option.value = r;
+        option.textContent = r;
+        adminChangeRoleRoleSelect.appendChild(option);
+    });
+  }
+
   if (adminPanelToggle) {
     adminPanelToggle.addEventListener('click', () => {
       adminPanel.classList.toggle('hidden');
+      if (!adminPanel.classList.contains('hidden')) {
+        populateAdminKillSelect();
+        populateAdminReviveSelect();
+        populateAdminChangeRoleSelects();
+      }
     });
   }
+
+  adminChangeRoleBtn.addEventListener('click', () => {
+    const playerToChange = adminChangeRolePlayerSelect.value;
+    const newRole = adminChangeRoleRoleSelect.value;
+    if (!playerToChange || !newRole) {
+        alert('Bitte einen Spieler und eine Rolle auswählen.');
+        return;
+    }
+
+    showConfirmation('Rolle ändern?', `Willst du die Rolle von ${playerToChange} zu ${newRole} ändern?`, () => {
+        const playerIndex = players.indexOf(playerToChange);
+        if (playerIndex !== -1) {
+            rolesAssigned[playerIndex] = newRole;
+            // Update the card on the screen
+            const revealGrid = document.getElementById('reveal-grid');
+            const cards = revealGrid.querySelectorAll('.reveal-card');
+            cards.forEach(card => {
+                const playerNameOnCard = card.querySelector('.player-name').textContent;
+                if (playerNameOnCard === playerToChange) {
+                    const backOfCard = card.querySelector('.reveal-card-back');
+                    const roleNameEl = backOfCard.querySelector('.role-name');
+                    roleNameEl.textContent = newRole;
+                }
+            });
+            showConfirmation('Rolle geändert', `Die Rolle von ${playerToChange} wurde zu ${newRole} geändert.`, () => {}, 'Okay', false);
+        }
+    });
+  });
+
+
+  adminRevivePlayerBtn.addEventListener('click', () => {
+    const playerToRevive = adminRevivePlayerSelect.value;
+    if (!playerToRevive) {
+        alert('Bitte einen Spieler auswählen.');
+        return;
+    }
+
+    showConfirmation('Spieler wiederbeleben?', `Willst du ${playerToRevive} wirklich wiederbeleben?`, () => {
+        deadPlayers = deadPlayers.filter(p => p !== playerToRevive);
+        updatePlayerCardVisuals();
+        populateAdminKillSelect();
+        populateAdminReviveSelect();
+        showConfirmation('Spieler wiederbelebt', `${playerToRevive} wurde wiederbelebt.`, () => {}, 'Okay', false);
+    });
+  });
+
 
   if (closeAdminPanelBtn) {
     closeAdminPanelBtn.addEventListener('click', () => {
       adminPanel.classList.add('hidden');
     });
   }
+
+  adminKillPlayerBtn.addEventListener('click', () => {
+    const playerToKill = adminKillPlayerSelect.value;
+    if (!playerToKill) {
+        alert('Bitte einen Spieler auswählen.');
+        return;
+    }
+
+    showConfirmation('Spieler eliminieren?', `Willst du ${playerToKill} wirklich eliminieren?`, () => {
+        if (!deadPlayers.includes(playerToKill)) {
+            deadPlayers.push(playerToKill);
+            handlePlayerDeath(playerToKill);
+
+            // Handle lover chain reaction
+            lovers.forEach(pair => {
+                if (pair.includes(playerToKill)) {
+                    const partner = pair[0] === playerToKill ? pair[1] : pair[0];
+                    if (!deadPlayers.includes(partner)) {
+                        deadPlayers.push(partner);
+                        handlePlayerDeath(partner);
+                        alert(`${partner} ist aus Liebeskummer gestorben!`);
+                    }
+                }
+            });
+
+            updatePlayerCardVisuals();
+            populateAdminKillSelect(); // Refresh the list
+            showConfirmation('Spieler eliminiert', `${playerToKill} wurde eliminiert.`, () => {}, 'Okay', false);
+            checkGameOver();
+        }
+    });
+  });
+
 
   document.addEventListener('keydown', (e) => {
     if (e.metaKey && e.shiftKey && e.key === 'o') {
@@ -1995,32 +2237,55 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  showRolesOverviewBtn.addEventListener('click', () => {
-    const rolesOverviewModal = document.getElementById('roles-overview-modal');
-    const rolesOverviewContent = document.getElementById('roles-overview-content');
+  const rolesOverviewPlayerSelect = document.getElementById('roles-overview-player-select');
+  const rolesOverviewShowPlayerBtn = document.getElementById('roles-overview-show-player-btn');
+  const rolesOverviewShowAllBtn = document.getElementById('roles-overview-show-all-btn');
 
-    let content = `
-        <table>
-            <thead>
-                <tr>
-                    <th>Spieler</th>
-                    <th>Rolle</th>
-                </tr>
-            </thead>
-            <tbody>
-    `;
-
+  function displayAllRolesInOverview() {
+    rolesOverviewContent.innerHTML = '';
+    const list = document.createElement('ul');
     players.forEach((player, index) => {
-        const role = rolesAssigned[index];
-        content += `<tr><td>${player}</td><td>${role}</td></tr>`;
+        const item = document.createElement('li');
+        item.textContent = `${player}: ${rolesAssigned[index]}`;
+        if (deadPlayers.includes(player)) {
+            item.classList.add('dead');
+        }
+        list.appendChild(item);
+    });
+    rolesOverviewContent.appendChild(list);
+  }
+
+  showRolesOverviewBtn.addEventListener('click', () => {
+    rolesOverviewPlayerSelect.innerHTML = '';
+    players.forEach(p => {
+        const option = document.createElement('option');
+        option.value = p;
+        option.textContent = p;
+        rolesOverviewPlayerSelect.appendChild(option);
     });
 
-    content += `
-            </tbody>
-        </table>
-    `;
-
-    rolesOverviewContent.innerHTML = content; // Populate the modal's content div
-    rolesOverviewModal.style.display = 'flex'; // Show the modal
+    displayAllRolesInOverview();
+    rolesOverviewModal.style.display = 'flex';
   });
+
+  rolesOverviewShowPlayerBtn.addEventListener('click', () => {
+    const selectedPlayer = rolesOverviewPlayerSelect.value;
+    if (!selectedPlayer) return;
+
+    const playerIndex = players.indexOf(selectedPlayer);
+    const role = rolesAssigned[playerIndex];
+
+    rolesOverviewContent.innerHTML = '';
+    const p = document.createElement('p');
+    p.className = 'single-role-display';
+    p.textContent = `${selectedPlayer}: ${role}`;
+    if (deadPlayers.includes(selectedPlayer)) {
+        p.classList.add('dead');
+    }
+    rolesOverviewContent.appendChild(p);
+  });
+
+  rolesOverviewShowAllBtn.addEventListener('click', displayAllRolesInOverview);
+
+
 });
