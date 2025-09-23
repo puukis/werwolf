@@ -106,6 +106,18 @@ body {
   transition: color 0.3s ease;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .container {
   background: var(--container-bg);
   border-radius: 12px;
@@ -1654,6 +1666,13 @@ body.blood-moon-active .blood-moon-indicator {
   padding: 1rem;
   box-shadow: 0 4px 12px var(--shadow-color);
   z-index: 1002;
+  width: min(360px, 92vw);
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  backdrop-filter: blur(6px);
 }
 
 .admin-panel.hidden {
@@ -1681,6 +1700,196 @@ body.blood-moon-active .blood-moon-indicator {
 
 .admin-panel .close-btn:hover {
     color: var(--text-color);
+}
+
+.admin-panel::-webkit-scrollbar {
+  width: 6px;
+}
+
+.admin-panel::-webkit-scrollbar-thumb {
+  background-color: var(--border-color);
+  border-radius: 999px;
+}
+
+.admin-panel::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-light);
+}
+
+.admin-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.admin-section + .admin-section {
+  border-top: 1px solid var(--border-color);
+  padding-top: 0.75rem;
+}
+
+.admin-section h5 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-light);
+}
+
+.admin-section select,
+.admin-section button {
+  width: 100%;
+}
+
+.macro-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.macro-controls select {
+  flex: 1;
+  padding: 0.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--input-bg);
+  color: var(--text-color);
+}
+
+.macro-controls button {
+  flex: 0 0 auto;
+}
+
+.admin-helper-text {
+  font-size: 0.8rem;
+  color: var(--text-light);
+  line-height: 1.3;
+}
+
+.admin-panel .small-btn {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.admin-timeline,
+.undo-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--input-bg);
+  box-shadow: inset 0 1px 3px var(--shadow-color);
+}
+
+.admin-timeline .empty,
+.undo-history .empty {
+  padding: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-light);
+  text-align: center;
+}
+
+.timeline-entry {
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.timeline-entry:last-child {
+  border-bottom: none;
+}
+
+.timeline-entry-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.timeline-type {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: var(--button-secondary-bg);
+  color: var(--text-color);
+}
+
+.timeline-entry.timeline-admin .timeline-type {
+  background: rgba(0, 119, 255, 0.15);
+  color: var(--button-bg);
+}
+
+.timeline-entry.timeline-macro .timeline-type {
+  background: rgba(139, 92, 246, 0.2);
+  color: var(--special-role-color);
+}
+
+.timeline-entry.timeline-undo .timeline-type {
+  background: rgba(16, 185, 129, 0.15);
+  color: #0f766e;
+}
+
+.timeline-entry.timeline-redo .timeline-type {
+  background: rgba(249, 115, 22, 0.15);
+  color: #ea580c;
+}
+
+.timeline-entry.timeline-error .timeline-type {
+  background: rgba(239, 68, 68, 0.15);
+  color: #dc2626;
+}
+
+.timeline-time {
+  font-size: 0.75rem;
+  color: var(--text-light);
+}
+
+.timeline-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.timeline-detail {
+  font-size: 0.8rem;
+  color: var(--text-light);
+  line-height: 1.35;
+}
+
+.undo-controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.undo-history {
+  margin-top: 0.5rem;
+}
+
+.undo-entry {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.undo-entry:last-child {
+  border-bottom: none;
+}
+
+.undo-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.undo-detail {
+  font-size: 0.75rem;
+  color: var(--text-light);
 }
 
 .confirmation-buttons {
@@ -1977,4 +2186,56 @@ body.blood-moon-active .blood-moon-indicator {
   bottom: 1.5rem;
   left: 1.5rem;
   z-index: 1005;
+}
+
+@media (max-width: 1024px) {
+  body {
+    padding: 1.5rem;
+  }
+
+  .container {
+    padding: 2rem;
+  }
+}
+
+@media (max-width: 768px) {
+  body {
+    padding: 1.25rem;
+    align-items: stretch;
+  }
+
+  .container {
+    padding: 1.5rem;
+  }
+
+  .admin-panel {
+    left: 50%;
+    right: auto;
+    bottom: 1.5rem;
+    transform: translateX(-50%);
+    width: min(420px, 96vw);
+  }
+
+  .macro-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .macro-controls button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 600px) {
+  body {
+    padding: 1rem;
+  }
+
+  .container {
+    padding: 1.25rem;
+  }
+
+  .setup-container {
+    grid-template-columns: 1fr;
+  }
 }
