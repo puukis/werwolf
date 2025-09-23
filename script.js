@@ -183,6 +183,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let geist = { player: null, messageSent: false };
   let jagerShotUsed = false;
   let jagerDiedLastNight = null;
+  let michaelJacksonAccusations = {};
 
   // Jäger Modal Elements
   const jagerModal = document.getElementById('jager-modal');
@@ -246,6 +247,35 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         });
     };
+  }
+
+  function initializeMichaelJacksonAccusations(existingData = michaelJacksonAccusations) {
+    const synced = {};
+
+    players.forEach((player, index) => {
+      if (rolesAssigned[index] === "Michael Jackson") {
+        const previousEntry = existingData[player];
+        const previousDays = Array.isArray(previousEntry?.daysAccused)
+          ? previousEntry.daysAccused
+          : Array.isArray(previousEntry)
+            ? previousEntry
+            : [];
+
+        const uniqueDays = Array.from(new Set(previousDays.filter(day => typeof day === 'number')));
+        const previousSpotlight = typeof previousEntry?.hasSpotlight === 'boolean'
+          ? previousEntry.hasSpotlight
+          : typeof previousEntry?.spotlightActive === 'boolean'
+            ? previousEntry.spotlightActive
+            : false;
+
+        synced[player] = {
+          daysAccused: uniqueDays,
+          hasSpotlight: previousSpotlight || uniqueDays.length > 0
+        };
+      }
+    });
+
+    michaelJacksonAccusations = synced;
   }
 
 
@@ -325,7 +355,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const categorizedRoles = {
       village: ["Dorfbewohner", "Seer", "Jäger", "Hexe", "Stumme Jule", "Inquisitor", "Sündenbock", "Geschwister", "Geist"],
       werwolf: ["Werwolf", "Verfluchte"],
-      special: ["Amor", "Trickster", "Henker", "Friedenstifter"]
+      special: ["Amor", "Trickster", "Henker", "Friedenstifter", "Michael Jackson"]
   };
 
   // Descriptions for roles
@@ -344,7 +374,8 @@ document.addEventListener("DOMContentLoaded", () => {
     Sündenbock: "Wird anstelle der anderen Spieler gelyncht, wenn es bei der Abstimmung einen Gleichstand gibt.",
     Geschwister: "Zwei Dorfbewohner, die sich gegenseitig kennen.",
     Geist: "Kann nach seinem Tod weiterhin eine Nachricht an die Lebenden senden.",
-    Friedenstifter: "Gewinnt, wenn für zwei aufeinanderfolgende Runden (Tag und Nacht) niemand stirbt."
+    Friedenstifter: "Gewinnt, wenn für zwei aufeinanderfolgende Runden (Tag und Nacht) niemand stirbt.",
+    "Michael Jackson": "Dorfbewohner-Sonderrolle: Stirbt sofort, wenn er an zwei unterschiedlichen Tagen beschuldigt wird."
   };
 
   /* -------------------- Erste Nacht Logik -------------------- */
@@ -666,7 +697,16 @@ document.addEventListener("DOMContentLoaded", () => {
         mayorBadge.textContent = '2x Stimme';
         nameSpan.appendChild(mayorBadge);
       }
-      
+
+      const michaelEntry = michaelJacksonAccusations[player];
+      if (michaelEntry?.hasSpotlight) {
+        row.classList.add('spotlight-vote-row');
+        const spotlightBadge = document.createElement('span');
+        spotlightBadge.className = 'spotlight-badge';
+        spotlightBadge.textContent = 'Spotlight 2x Stimme';
+        nameSpan.appendChild(spotlightBadge);
+      }
+
       if (isSilenced) {
         const silencedBadge = document.createElement('span');
         silencedBadge.className = 'silenced-badge';
@@ -704,7 +744,9 @@ document.addEventListener("DOMContentLoaded", () => {
     inputs.forEach(input => {
       const player = input.dataset.player;
       const count = parseInt(input.value, 10) || 0;
-      voteCount[player] = count;
+      const michaelEntry = michaelJacksonAccusations[player];
+      const finalCount = michaelEntry?.hasSpotlight ? count * 2 : count;
+      voteCount[player] = finalCount;
     });
 
     // Determine players with the highest vote count
@@ -722,10 +764,125 @@ document.addEventListener("DOMContentLoaded", () => {
 
     return { maxVotes, candidates };
   }
-  
+
+  function registerMichaelJacksonAccusation(playerName) {
+    const playerIndex = players.indexOf(playerName);
+    if (playerIndex === -1) {
+      return false;
+    }
+
+    if (rolesAssigned[playerIndex] !== "Michael Jackson") {
+      return false;
+    }
+
+    let entry = michaelJacksonAccusations[playerName];
+    if (!entry || Array.isArray(entry)) {
+      const daysAccused = Array.isArray(entry) ? entry.slice() : [];
+      entry = { daysAccused, hasSpotlight: daysAccused.length > 0 };
+      michaelJacksonAccusations[playerName] = entry;
+    } else {
+      entry.daysAccused = Array.isArray(entry.daysAccused) ? entry.daysAccused : [];
+      if (typeof entry.hasSpotlight !== 'boolean') {
+        entry.hasSpotlight = entry.daysAccused.length > 0;
+      }
+    }
+
+    const isNewDayAccusation = !entry.daysAccused.includes(dayCount);
+
+    if (isNewDayAccusation) {
+      entry.daysAccused.push(dayCount);
+
+      if (!entry.hasSpotlight) {
+        entry.hasSpotlight = true;
+
+        const announcement = `<p><strong>${playerName}</strong> steht nun im Rampenlicht! Seine Stimme zählt ab jetzt doppelt.</p>`;
+        const existingMessage = dayText.innerHTML || '';
+        dayText.innerHTML = existingMessage ? `${existingMessage}${announcement}` : announcement;
+
+        renderDayChoices();
+      }
+    }
+
+    return entry.daysAccused.length >= 2;
+  }
+
+  function handleMichaelJacksonAutoElimination(playersToEliminate) {
+    const newlyEliminated = [];
+
+    playersToEliminate.forEach(name => {
+      if (!deadPlayers.includes(name)) {
+        deadPlayers.push(name);
+        handlePlayerDeath(name);
+        newlyEliminated.push(name);
+      }
+    });
+
+    if (newlyEliminated.length === 0) {
+      return false;
+    }
+
+    peaceDays = 0;
+
+    const loverChainDeaths = [];
+
+    newlyEliminated.forEach(name => {
+      lovers.forEach(pair => {
+        if (pair.includes(name)) {
+          const partner = pair[0] === name ? pair[1] : pair[0];
+          if (!deadPlayers.includes(partner)) {
+            deadPlayers.push(partner);
+            handlePlayerDeath(partner);
+            loverChainDeaths.push({ partner, source: name });
+          }
+        }
+      });
+    });
+
+    updatePlayerCardVisuals();
+
+    let message = newlyEliminated
+      .map(name => `${name} wurde zum zweiten Mal beschuldigt und stirbt als Michael Jackson sofort.`)
+      .join('\n\n');
+
+    loverChainDeaths.forEach(({ partner, source }) => {
+      message += `\n\n${partner} stirbt, weil sie/er mit ${source} verliebt war.`;
+    });
+
+    dayText.textContent = message;
+    dayChoices.innerHTML = '';
+    dayLynchBtn.style.display = 'none';
+    daySkipBtn.textContent = 'Weiter';
+    daySkipBtn.onclick = () => {
+      if (checkGameOver()) return;
+      if (!checkGameOver(true)) {
+        setTimeout(() => endDayPhase(), 3000);
+      }
+    };
+
+    return true;
+  }
+
+  function processMichaelJacksonAccusations(candidates) {
+    if (!Array.isArray(candidates) || candidates.length === 0) {
+      return false;
+    }
+
+    const playersToEliminate = candidates.filter(player => registerMichaelJacksonAccusation(player));
+
+    if (playersToEliminate.length === 0) {
+      return false;
+    }
+
+    return handleMichaelJacksonAutoElimination(playersToEliminate);
+  }
+
   function executeLynching() {
     const { maxVotes, candidates } = calculateVoteResults();
     const suendenbockPlayer = players.find((p, i) => rolesAssigned[i] === 'Sündenbock' && !deadPlayers.includes(p));
+
+    if (processMichaelJacksonAccusations(candidates)) {
+      return;
+    }
 
     if (candidates.length > 1 && suendenbockPlayer) {
         // Tie vote, and Sündenbock is alive
@@ -1699,7 +1856,7 @@ document.addEventListener("DOMContentLoaded", () => {
     players = playersRaw;
     rolesAssigned = roles;
     currentIndex = 0;
-    
+
     // Reset and set up special roles
     henker = null;
     geschwister = [];
@@ -1708,8 +1865,9 @@ document.addEventListener("DOMContentLoaded", () => {
     peaceDays = 0;
     jagerShotUsed = false;
     jagerDiedLastNight = null;
+    initializeMichaelJacksonAccusations();
 
-    const villageTeamRoles = ["Dorfbewohner", "Seer", "Jäger", "Hexe", "Stumme Jule", "Inquisitor", "Verfluchte", "Sündenbock", "Geschwister", "Geist"];
+    const villageTeamRoles = ["Dorfbewohner", "Seer", "Jäger", "Hexe", "Stumme Jule", "Inquisitor", "Verfluchte", "Sündenbock", "Geschwister", "Geist", "Michael Jackson"];
     const villagersForHenkerTarget = [];
     
     players.forEach((p, i) => {
@@ -1913,7 +2071,13 @@ document.addEventListener("DOMContentLoaded", () => {
       nightMode: nightMode,
       dayMode: dayMode,
       nightSteps: nightSteps,
-      nightIndex: nightIndex
+      nightIndex: nightIndex,
+      michaelJacksonAccusations: Object.entries(michaelJacksonAccusations).reduce((acc, [player, data]) => {
+        const days = Array.isArray(data?.daysAccused) ? data.daysAccused : [];
+        const hasSpotlight = typeof data?.hasSpotlight === 'boolean' ? data.hasSpotlight : days.length > 0;
+        acc[player] = { daysAccused: days, hasSpotlight };
+        return acc;
+      }, {})
     };
 
     let sessions = JSON.parse(localStorage.getItem('werwolfSessions')) || [];
@@ -1988,6 +2152,7 @@ document.addEventListener("DOMContentLoaded", () => {
     dayMode = session.dayMode || false;
     nightSteps = session.nightSteps || [];
     nightIndex = session.nightIndex || 0;
+    initializeMichaelJacksonAccusations(session.michaelJacksonAccusations || {});
 
     playersTextarea.value = session.players.join('\n');
 
@@ -2573,6 +2738,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         rolesAssigned[playerIndex] = newRole;
         updateRevealCardRoleText(playerToChange, newRole);
+        initializeMichaelJacksonAccusations();
 
         recordAction({
           type: 'admin',

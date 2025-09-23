@@ -1192,10 +1192,28 @@ body.night-active main.container {
   transition: background-color 0.2s;
 }
 
+.vote-row.spotlight-vote-row {
+  background-color: rgba(59, 130, 246, 0.12);
+  border-left: 3px solid #3b82f6;
+}
+
 .vote-row.silenced {
   background-color: rgba(239, 68, 68, 0.1);
   border-left: 3px solid #ef4444;
   opacity: 0.8;
+}
+
+.spotlight-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: #2563eb;
+  margin-left: 0.5rem;
+  background: rgba(59, 130, 246, 0.12);
+  padding: 0.1rem 0.4rem;
+  border-radius: 10px;
+  white-space: nowrap;
 }
 
 .silenced-badge {
