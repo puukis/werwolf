@@ -42,7 +42,15 @@ document.addEventListener("DOMContentLoaded", () => {
   if (saveGameBtn) {
     saveGameBtn.addEventListener('click', () => {
       saveSession();
-      alert('Spiel gespeichert!');
+      const detail = players.length
+        ? `${players.length} Spielende gespeichert.`
+        : 'Leerer Spielstand gespeichert.';
+      showInfoMessage({
+        title: 'Spiel gespeichert',
+        text: 'Der aktuelle Spielstand wurde gesichert.',
+        confirmText: 'Okay',
+        log: { type: 'info', label: 'Session gespeichert', detail }
+      });
     });
   }
 
@@ -90,30 +98,113 @@ document.addEventListener("DOMContentLoaded", () => {
   const confirmBtn = document.getElementById('confirm-btn');
   const cancelBtn = document.getElementById('cancel-btn');
   let onConfirmCallback = null;
+  let onCancelCallback = null;
+  let logConfirmHandler = null;
+  let logCancelHandler = null;
 
   // Show confirmation modal
-  function showConfirmation(title, text, onConfirm, confirmText = 'Bestätigen', showCancel = true, modalClass = '') {
-    confirmationTitle.textContent = title;
-    confirmationText.textContent = text;
-    onConfirmCallback = onConfirm;
-    confirmBtn.textContent = confirmText;
-    cancelBtn.parentElement.style.display = showCancel ? 'block' : 'none';
+  function showConfirmation(titleOrOptions, text, onConfirm, confirmText = 'Bestätigen', showCancel = true, modalClass = '') {
+    const options = typeof titleOrOptions === 'object' && titleOrOptions !== null
+      ? titleOrOptions
+      : {
+          title: titleOrOptions,
+          text,
+          onConfirm,
+          confirmText,
+          showCancel,
+          modalClass
+        };
 
-    confirmationModal.className = 'modal';
-    if(modalClass) {
-        confirmationModal.classList.add(modalClass);
+    const {
+      title = '',
+      text: message = '',
+      html = null,
+      onConfirm: confirmHandler = () => {},
+      onCancel,
+      confirmText: confirmLabel = 'Bestätigen',
+      cancelText = 'Abbrechen',
+      showCancel: shouldShowCancel = true,
+      hideConfirm = false,
+      modalClass: extraClass = '',
+      logOnConfirm = null,
+      logOnCancel = null,
+      focus = 'confirm'
+    } = options;
+
+    confirmationTitle.textContent = title;
+    if (html !== null) {
+      confirmationText.innerHTML = html;
+    } else {
+      confirmationText.textContent = message;
     }
 
+    onConfirmCallback = typeof confirmHandler === 'function' ? confirmHandler : () => {};
+    onCancelCallback = typeof onCancel === 'function' ? onCancel : null;
+
+    confirmBtn.textContent = confirmLabel;
+    cancelBtn.textContent = cancelText;
+
+    confirmBtn.parentElement.style.display = hideConfirm ? 'none' : 'block';
+    cancelBtn.parentElement.style.display = shouldShowCancel ? 'block' : 'none';
+
+    confirmationModal.className = 'modal';
+    if (extraClass) {
+      confirmationModal.classList.add(extraClass);
+    }
+
+    logConfirmHandler = typeof logOnConfirm === 'function'
+      ? logOnConfirm
+      : logOnConfirm
+        ? () => logAction(logOnConfirm)
+        : null;
+
+    logCancelHandler = typeof logOnCancel === 'function'
+      ? logOnCancel
+      : logOnCancel
+        ? () => logAction(logOnCancel)
+        : null;
+
     confirmationModal.style.display = 'flex';
+
+    requestAnimationFrame(() => {
+      if (focus === 'cancel' && shouldShowCancel) {
+        cancelBtn.focus();
+      } else if (!hideConfirm) {
+        confirmBtn.focus();
+      } else if (shouldShowCancel) {
+        cancelBtn.focus();
+      }
+    });
+  }
+
+  // Helper for informational modals without cancellation flow
+  function showInfoMessage({ title, text = '', html = null, confirmText = 'Okay', log = null, modalClass = '', focus = 'confirm' }) {
+    showConfirmation({
+      title,
+      text,
+      html,
+      confirmText,
+      showCancel: false,
+      modalClass,
+      logOnConfirm: log,
+      focus,
+      onConfirm: () => {}
+    });
   }
 
   // Hide confirmation modal
   function hideConfirmation() {
     confirmationModal.style.display = 'none';
     onConfirmCallback = null;
+    onCancelCallback = null;
+    logConfirmHandler = null;
+    logCancelHandler = null;
     confirmBtn.textContent = 'Bestätigen';
+    cancelBtn.textContent = 'Abbrechen';
+    confirmBtn.parentElement.style.display = 'block';
     cancelBtn.parentElement.style.display = 'block';
     confirmationModal.className = 'modal';
+    confirmationText.textContent = '';
   }
 
   // Add event listeners for confirmation modal
@@ -121,10 +212,21 @@ document.addEventListener("DOMContentLoaded", () => {
     if (onConfirmCallback) {
       onConfirmCallback();
     }
+    if (logConfirmHandler) {
+      logConfirmHandler();
+    }
     hideConfirmation();
   });
 
-  cancelBtn.addEventListener('click', hideConfirmation);
+  cancelBtn.addEventListener('click', () => {
+    if (onCancelCallback) {
+      onCancelCallback();
+    }
+    if (logCancelHandler) {
+      logCancelHandler();
+    }
+    hideConfirmation();
+  });
 
   // Load events enabled state
   const savedEventsEnabled = localStorage.getItem('eventsEnabled');
@@ -217,7 +319,12 @@ document.addEventListener("DOMContentLoaded", () => {
     jagerKillBtn.onclick = () => {
         const selected = jagerChoices.querySelector('.player-btn.selected');
         if (!selected) {
-            alert('Bitte einen Spieler zum Mitnehmen auswählen.');
+            showInfoMessage({
+                title: 'Auswahl erforderlich',
+                text: 'Bitte einen Spieler zum Mitnehmen auswählen.',
+                confirmText: 'Okay',
+                log: { type: 'error', label: 'Jäger-Auswahl fehlt', detail: 'Der letzte Schuss benötigt ein Ziel.' }
+            });
             return;
         }
         const target = selected.textContent;
@@ -233,7 +340,12 @@ document.addEventListener("DOMContentLoaded", () => {
                         if (!deadPlayers.includes(partner)) {
                             deadPlayers.push(partner);
                             handlePlayerDeath(partner);
-                            alert(`${partner} ist aus Liebeskummer gestorben!`);
+                            showInfoMessage({
+                                title: 'Liebespaar zerbrochen',
+                                text: `${partner} ist aus Liebeskummer gestorben!`,
+                                confirmText: 'Verstanden',
+                                log: { type: 'info', label: 'Liebende gefallen', detail: `${partner} starb aus Liebeskummer.` }
+                            });
                         }
                     }
                 });
@@ -585,7 +697,14 @@ document.addEventListener("DOMContentLoaded", () => {
         geistSendBtn.onclick = () => {
             const message = geistMessage.value;
             if (message.trim()) {
-                setTimeout(() => alert(`Eine Nachricht vom Geist von ${playerName}:\n\n${message}`), 1000);
+                setTimeout(() => {
+                    showInfoMessage({
+                        title: 'Nachricht vom Geist',
+                        text: `Eine Nachricht vom Geist von ${playerName}: ${message}`,
+                        confirmText: 'Weiter',
+                        log: { type: 'info', label: 'Geist hat gesprochen', detail: `${playerName} sendete eine Nachricht.` }
+                    });
+                }, 1000);
                 geist.messageSent = true;
             }
             geistModal.style.display = 'none';
@@ -1437,7 +1556,12 @@ document.addEventListener("DOMContentLoaded", () => {
     dayLynchBtn.onclick = () => {
       const selected = dayChoices.querySelector('.player-btn.selected');
       if (!selected) {
-        alert('Bitte wählt einen Bürgermeister.');
+        showInfoMessage({
+          title: 'Auswahl erforderlich',
+          text: 'Bitte wählt einen Bürgermeister.',
+          confirmText: 'Okay',
+          log: { type: 'error', label: 'Bürgermeisterwahl unvollständig', detail: 'Es wurde kein Kandidat ausgewählt.' }
+        });
         return;
       }
       const newMayor = selected.textContent;
@@ -1638,7 +1762,12 @@ document.addEventListener("DOMContentLoaded", () => {
       } else if (selectedWitchAction === "heal") {
         const victim = nightChoices.querySelector(".player-btn.selected");
         if (!victim) {
-          alert("Bitte ein Opfer zum Heilen auswählen.");
+          showInfoMessage({
+            title: 'Ziel erforderlich',
+            text: 'Bitte ein Opfer zum Heilen auswählen.',
+            confirmText: 'Okay',
+            log: { type: 'error', label: 'Heiltrank ohne Ziel', detail: 'Die Hexe muss ein Opfer zum Retten wählen.' }
+          });
           return;
         }
         const name = victim.textContent;
@@ -1654,7 +1783,12 @@ document.addEventListener("DOMContentLoaded", () => {
       } else if (selectedWitchAction === "kill") {
         const target = nightChoices.querySelector(".player-btn.selected");
         if (!target) {
-          alert("Bitte ein Ziel zum Töten auswählen.");
+          showInfoMessage({
+            title: 'Ziel erforderlich',
+            text: 'Bitte ein Ziel zum Töten auswählen.',
+            confirmText: 'Okay',
+            log: { type: 'error', label: 'Gifttrank ohne Ziel', detail: 'Die Hexe muss ein Opfer für den Gifttrank wählen.' }
+          });
           return;
         }
         const name = target.textContent;
@@ -1691,7 +1825,12 @@ document.addEventListener("DOMContentLoaded", () => {
         nightChoices.querySelectorAll(".player-btn.selected")
       ).map((b) => b.textContent);
       if (selected.length !== 2) {
-        alert("Bitte genau zwei Liebende auswählen.");
+        showInfoMessage({
+          title: 'Auswahl unvollständig',
+          text: 'Bitte genau zwei Liebende auswählen.',
+          confirmText: 'Okay',
+          log: { type: 'error', label: 'Liebespaar nicht gesetzt', detail: 'Amor benötigt zwei ausgewählte Personen.' }
+        });
         return;
       }
       showConfirmation("Liebespaar wählen?", `Willst du ${selected[0]} und ${selected[1]} wirklich zum Liebespaar machen?`, () => {
@@ -1702,7 +1841,12 @@ document.addEventListener("DOMContentLoaded", () => {
     } else if (role === "Seer") {
       const selected = nightChoices.querySelector(".player-btn.selected");
       if (!selected) {
-        alert("Bitte eine Person zum Ansehen auswählen.");
+        showInfoMessage({
+          title: 'Ziel erforderlich',
+          text: 'Bitte eine Person zum Ansehen auswählen.',
+          confirmText: 'Okay',
+          log: { type: 'error', label: 'Seher ohne Ziel', detail: 'Der Seher benötigt eine Auswahl für die Vision.' }
+        });
         return;
       }
       const name = selected.textContent;
@@ -1721,7 +1865,12 @@ document.addEventListener("DOMContentLoaded", () => {
     } else if (role === "Werwolf") {
       const selected = nightChoices.querySelectorAll(".player-btn.selected");
       if (selected.length === 0) {
-        alert("Bitte ein Opfer auswählen.");
+        showInfoMessage({
+          title: 'Auswahl erforderlich',
+          text: 'Bitte ein Opfer auswählen.',
+          confirmText: 'Okay',
+          log: { type: 'error', label: 'Kein Werwolf-Opfer gewählt', detail: 'Die Werwölfe müssen ein Opfer bestimmen.' }
+        });
         return;
       }
       const victimNames = Array.from(selected).map(btn => btn.textContent).join(' und ');
@@ -1774,7 +1923,12 @@ document.addEventListener("DOMContentLoaded", () => {
     } else if (role === "Stumme Jule") {
         const selected = nightChoices.querySelector(".player-btn.selected");
         if (!selected) {
-            alert("Bitte eine Person zum Schweigen auswählen.");
+            showInfoMessage({
+                title: 'Ziel erforderlich',
+                text: 'Bitte eine Person zum Schweigen auswählen.',
+                confirmText: 'Okay',
+                log: { type: 'error', label: 'Stumme Jule ohne Ziel', detail: 'Die Stumme Jule benötigt eine Auswahl.' }
+            });
             return;
         }
         const name = selected.textContent;
@@ -1787,7 +1941,12 @@ document.addEventListener("DOMContentLoaded", () => {
     } else if (role === "Inquisitor") {
       const selected = nightChoices.querySelector(".player-btn.selected");
       if (!selected) {
-        alert("Bitte eine Person zum Befragen auswählen.");
+        showInfoMessage({
+          title: 'Ziel erforderlich',
+          text: 'Bitte eine Person zum Befragen auswählen.',
+          confirmText: 'Okay',
+          log: { type: 'error', label: 'Inquisitor ohne Ziel', detail: 'Der Inquisitor benötigt eine Auswahl.' }
+        });
         return;
       }
       const name = selected.textContent;
@@ -1992,18 +2151,33 @@ document.addEventListener("DOMContentLoaded", () => {
       .map((n) => n.trim())
       .filter(Boolean);
     if (names.length === 0) {
-      alert("Keine Namen zum Speichern.");
+      showInfoMessage({
+        title: 'Speichern nicht möglich',
+        text: 'Keine Namen zum Speichern.',
+        confirmText: 'Okay',
+        log: { type: 'error', label: 'Speichern der Namen fehlgeschlagen', detail: 'Es wurden keine Namen eingegeben.' }
+      });
       return;
     }
     localStorage.setItem("werwolfSavedNames", JSON.stringify(names));
-    alert("Namen gespeichert!");
+    showInfoMessage({
+      title: 'Namen gespeichert',
+      text: 'Alle Spielernamen wurden lokal gesichert.',
+      confirmText: 'Okay',
+      log: { type: 'info', label: 'Namen gespeichert', detail: `${names.length} Namen abgelegt.` }
+    });
   });
 
   // Load names from localStorage
   loadNamesBtn.addEventListener("click", () => {
     const data = localStorage.getItem("werwolfSavedNames");
     if (!data) {
-      alert("Keine gespeicherten Namen gefunden.");
+      showInfoMessage({
+        title: 'Keine gespeicherten Namen',
+        text: 'Es wurden noch keine Namen gesichert.',
+        confirmText: 'Okay',
+        log: { type: 'info', label: 'Keine gespeicherten Namen', detail: 'Lokaler Speicher ohne Einträge.' }
+      });
       return;
     }
     try {
@@ -2011,7 +2185,12 @@ document.addEventListener("DOMContentLoaded", () => {
       playersTextarea.value = names.join("\n");
       playersTextarea.dispatchEvent(new Event("input"));
     } catch (e) {
-      alert("Fehler beim Laden der Namen.");
+      showInfoMessage({
+        title: 'Laden fehlgeschlagen',
+        text: 'Fehler beim Laden der Namen.',
+        confirmText: 'Okay',
+        log: { type: 'error', label: 'Fehler beim Laden der Namen', detail: e.message || 'Unbekannter Fehler.' }
+      });
     }
   });
 
@@ -2032,18 +2211,33 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     if (roleSetup.length === 0) {
-      alert("Keine Rollen zum Speichern.");
+      showInfoMessage({
+        title: 'Speichern nicht möglich',
+        text: 'Keine Rollen zum Speichern.',
+        confirmText: 'Okay',
+        log: { type: 'error', label: 'Speichern der Rollen fehlgeschlagen', detail: 'Keine Rollen mit Menge > 0 ausgewählt.' }
+      });
       return;
     }
     localStorage.setItem("werwolfSavedRoles", JSON.stringify(roleSetup));
-    alert("Rollen gespeichert!");
+    showInfoMessage({
+      title: 'Rollen gespeichert',
+      text: 'Die aktuelle Rollenverteilung wurde gesichert.',
+      confirmText: 'Okay',
+      log: { type: 'info', label: 'Rollen gespeichert', detail: `${roleSetup.length} Rolleneinträge gespeichert.` }
+    });
   });
 
   // Load roles from localStorage
   loadRolesBtn.addEventListener("click", () => {
     const data = localStorage.getItem("werwolfSavedRoles");
     if (!data) {
-      alert("Keine gespeicherten Rollen gefunden.");
+      showInfoMessage({
+        title: 'Keine gespeicherten Rollen',
+        text: 'Es wurden noch keine Rollen gesichert.',
+        confirmText: 'Okay',
+        log: { type: 'info', label: 'Keine gespeicherten Rollen', detail: 'Lokaler Speicher ohne Rollendaten.' }
+      });
       return;
     }
     try {
@@ -2082,14 +2276,24 @@ document.addEventListener("DOMContentLoaded", () => {
       });
 
     } catch (e) {
-      alert("Fehler beim Laden der Rollen.");
+      showInfoMessage({
+        title: 'Laden fehlgeschlagen',
+        text: 'Fehler beim Laden der Rollen.',
+        confirmText: 'Okay',
+        log: { type: 'error', label: 'Fehler beim Laden der Rollen', detail: e.message || 'Unbekannter Fehler.' }
+      });
     }
   });
 
   loadLastUsedBtn.addEventListener("click", () => {
     const data = localStorage.getItem("werwolfLastUsed");
     if (!data) {
-      alert("Keine zuletzt benutzten Optionen gefunden.");
+      showInfoMessage({
+        title: 'Keine zuletzt benutzten Optionen',
+        text: 'Es wurde noch kein Setup automatisch gesichert.',
+        confirmText: 'Okay',
+        log: { type: 'info', label: 'Keine zuletzt benutzten Optionen', detail: 'Noch kein automatischer Spielstand vorhanden.' }
+      });
       return;
     }
     try {
@@ -2115,7 +2319,12 @@ document.addEventListener("DOMContentLoaded", () => {
       });
 
     } catch (e) {
-      alert("Fehler beim Laden der zuletzt benutzten Optionen.");
+      showInfoMessage({
+        title: 'Laden fehlgeschlagen',
+        text: 'Fehler beim Laden der zuletzt benutzten Optionen.',
+        confirmText: 'Okay',
+        log: { type: 'error', label: 'Fehler beim Laden der zuletzt benutzten Optionen', detail: e.message || 'Unbekannter Fehler.' }
+      });
     } finally {
       isLoadingLastUsed = false;
     }
@@ -2125,19 +2334,22 @@ document.addEventListener("DOMContentLoaded", () => {
   addRoleBtn.addEventListener("click", () => addRoleRow("", 1, rolesContainerSpecial));
 
   assignBtn.addEventListener("click", () => {
-    // Get players
     const playersRaw = document.getElementById("players").value
       .split(/\n|\r/)
       .map((n) => n.trim())
       .filter(Boolean);
 
     if (playersRaw.length === 0) {
-      alert("Bitte mindestens einen Spielernamen eingeben.");
-      assignBtn.style.display = "inline-block"; // Show the button again
+      showInfoMessage({
+        title: 'Spieler erforderlich',
+        text: 'Bitte mindestens einen Spielernamen eingeben.',
+        confirmText: 'Okay',
+        log: { type: 'error', label: 'Rollenzuteilung abgebrochen', detail: 'Keine Spielernamen eingegeben.' }
+      });
+      assignBtn.style.display = "inline-block";
       return;
     }
 
-    // Build roles array respecting quantities
     let roles = [];
     const roleRows = [
         ...rolesContainerVillage.querySelectorAll(".role-row"),
@@ -2154,7 +2366,6 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
 
-    // Auto-save the setup
     const lastUsedOptions = {
       players: playersRaw,
       roles: roleSetup,
@@ -2164,165 +2375,188 @@ document.addEventListener("DOMContentLoaded", () => {
     roles = roles.filter(Boolean);
 
     if (roles.length === 0) {
-      alert("Bitte mindestens eine Rolle und Menge > 0 eingeben.");
-      assignBtn.style.display = "inline-block"; // Show the button again
+      showInfoMessage({
+        title: 'Rollen erforderlich',
+        text: 'Bitte mindestens eine Rolle und Menge > 0 eingeben.',
+        confirmText: 'Okay',
+        log: { type: 'error', label: 'Rollenzuteilung abgebrochen', detail: 'Keine Rollen ausgewählt.' }
+      });
+      assignBtn.style.display = "inline-block";
       return;
     }
 
-    // Check role count vs player count
+    const finalizeAssignment = () => {
+        // Shuffle roles
+        shuffleArray(roles);
+
+        // Map roles to players
+        players = playersRaw;
+        rolesAssigned = roles;
+        currentIndex = 0;
+
+        // Reset and set up special roles
+        henker = null;
+        geschwister = [];
+        geist.player = null;
+        geist.messageSent = false;
+        peaceDays = 0;
+        jagerShotUsed = false;
+        jagerDiedLastNight = null;
+        initializeMichaelJacksonAccusations();
+
+        const villageTeamRoles = ["Dorfbewohner", "Seer", "Jäger", "Hexe", "Stumme Jule", "Inquisitor", "Verfluchte", "Sündenbock", "Geschwister", "Geist", "Michael Jackson"];
+        const villagersForHenkerTarget = [];
+
+        players.forEach((p, i) => {
+            if (villageTeamRoles.includes(rolesAssigned[i])) {
+                villagersForHenkerTarget.push(p);
+            }
+            if (rolesAssigned[i] === 'Henker') {
+                henker = { player: p, target: null };
+            }
+            if (rolesAssigned[i] === 'Geschwister') {
+                geschwister.push(p);
+            }
+            if (rolesAssigned[i] === 'Geist') {
+                geist.player = p;
+            }
+        });
+
+        // Assign a target to the Henker (must not be the Henker themselves)
+        if (henker) {
+          const possibleTargets = villagersForHenkerTarget.filter(p => p !== henker.player);
+          if (possibleTargets.length > 0) {
+            henker.target = possibleTargets[Math.floor(Math.random() * possibleTargets.length)];
+            console.log(`Henker is ${henker.player}, target is ${henker.target}`);
+          } else {
+            console.log("No valid target for Henker!");
+          }
+        }
+
+        // Create and display reveal cards
+        const revealGrid = document.getElementById('reveal-grid');
+        revealGrid.innerHTML = ''; // Clear previous cards
+        let currentlyFlippedCard = null;
+
+        players.forEach((player, index) => {
+          const card = document.createElement('div');
+          card.className = 'reveal-card';
+          card.style.animationDelay = `${index * 0.05}s`;
+          card.onclick = () => {
+            if (currentlyFlippedCard && currentlyFlippedCard !== card) {
+              currentlyFlippedCard.classList.remove('flipped');
+            }
+            card.classList.toggle('flipped');
+            currentlyFlippedCard = card.classList.contains('flipped') ? card : null;
+          };
+
+          const inner = document.createElement('div');
+          inner.className = 'reveal-card-inner';
+
+          const front = document.createElement('div');
+          front.className = 'reveal-card-front';
+          front.textContent = player;
+
+          const back = document.createElement('div');
+          back.className = 'reveal-card-back';
+          const role = rolesAssigned[index];
+          const roleNameEl = document.createElement('span');
+          roleNameEl.className = 'role-name';
+          if (role === 'Dorfbewohner') {
+            roleNameEl.classList.add('long-text');
+          }
+          roleNameEl.textContent = role;
+          back.innerHTML = `<span class="player-name">${player}</span>`;
+          back.prepend(roleNameEl);
+
+          const infoBtn = document.createElement('button');
+          infoBtn.className = 'info-btn';
+          infoBtn.textContent = 'Info';
+          infoBtn.onclick = (e) => {
+            e.stopPropagation(); // Prevent card from flipping back
+            showRoleInfo(role);
+          };
+          back.appendChild(infoBtn);
+
+          inner.appendChild(front);
+          inner.appendChild(back);
+          card.appendChild(inner);
+          revealGrid.appendChild(card);
+        });
+
+        nightCounter = 0;
+        gameCheckpoints.length = 0;
+        captureGameCheckpoint('Spielstart: Rollen verteilt');
+
+        // Add Henker's target to their card
+        if (henker && henker.target) {
+          const cards = revealGrid.querySelectorAll('.reveal-card');
+          cards.forEach(card => {
+            const playerNameOnCard = card.querySelector('.player-name').textContent;
+            if (playerNameOnCard === henker.player) {
+              const backOfCard = card.querySelector('.reveal-card-back');
+              const targetEl = document.createElement('span');
+              targetEl.className = 'henker-target';
+              targetEl.innerHTML = `Dein Ziel ist: <strong>${henker.target}</strong>`;
+              backOfCard.appendChild(targetEl);
+            }
+          });
+        }
+
+        // Save the session
+        saveSession();
+
+        // Hide setup and show results
+        document.querySelector('.setup-container').style.display = 'none';
+        assignBtn.style.display = 'none';
+        loadLastUsedBtn.style.display = 'none';
+        document.getElementById('ergebnisse-title').style.display = 'block';
+        document.querySelector('.navigation-buttons').style.display = 'flex';
+        showRolesOverviewBtn.style.display = 'inline-block';
+        revealGrid.style.display = 'grid';
+    };
+
     if (roles.length < playersRaw.length) {
-      if (
-        !confirm(
-          "Es gibt weniger Rollen als Spieler. Einige Spieler bekommen 'Dorfbewohner'. Fortfahren?"
-        )
-      ) {
-        assignBtn.style.display = "inline-block"; // Show the button again
-        return;
-      }
-      // Fill remaining with default role
-      while (roles.length < playersRaw.length) {
-        roles.push("Dorfbewohner");
-      }
-    } else if (roles.length > playersRaw.length) {
-      if (
-        !confirm(
-          "Es gibt mehr Rollen als Spieler. Überschüssige Rollen werden ignoriert. Fortfahren?"
-        )
-      ) {
-        assignBtn.style.display = "inline-block"; // Show the button again
-        return;
-      }
-      roles = roles.slice(0, playersRaw.length);
-    }
-
-    // Shuffle roles
-    shuffleArray(roles);
-
-    // Map roles to players
-    players = playersRaw;
-    rolesAssigned = roles;
-    currentIndex = 0;
-
-    // Reset and set up special roles
-    henker = null;
-    geschwister = [];
-    geist.player = null;
-    geist.messageSent = false;
-    peaceDays = 0;
-    jagerShotUsed = false;
-    jagerDiedLastNight = null;
-    initializeMichaelJacksonAccusations();
-
-    const villageTeamRoles = ["Dorfbewohner", "Seer", "Jäger", "Hexe", "Stumme Jule", "Inquisitor", "Verfluchte", "Sündenbock", "Geschwister", "Geist", "Michael Jackson"];
-    const villagersForHenkerTarget = [];
-    
-    players.forEach((p, i) => {
-        if (villageTeamRoles.includes(rolesAssigned[i])) {
-            villagersForHenkerTarget.push(p);
-        }
-        if (rolesAssigned[i] === 'Henker') {
-            henker = { player: p, target: null };
-        }
-        if (rolesAssigned[i] === 'Geschwister') {
-            geschwister.push(p);
-        }
-        if (rolesAssigned[i] === 'Geist') {
-            geist.player = p;
-        }
-    });
-
-    // Assign a target to the Henker (must not be the Henker themselves)
-    if (henker) {
-      const possibleTargets = villagersForHenkerTarget.filter(p => p !== henker.player);
-      if (possibleTargets.length > 0) {
-        henker.target = possibleTargets[Math.floor(Math.random() * possibleTargets.length)];
-        console.log(`Henker is ${henker.player}, target is ${henker.target}`);
-      } else {
-        console.log("No valid target for Henker!");
-      }
-    }
-
-    // Create and display reveal cards
-    const revealGrid = document.getElementById('reveal-grid');
-    revealGrid.innerHTML = ''; // Clear previous cards
-    let currentlyFlippedCard = null;
-    
-    players.forEach((player, index) => {
-      const card = document.createElement('div');
-      card.className = 'reveal-card';
-      card.style.animationDelay = `${index * 0.05}s`;
-      card.onclick = () => {
-        if (currentlyFlippedCard && currentlyFlippedCard !== card) {
-          currentlyFlippedCard.classList.remove('flipped');
-        }
-        card.classList.toggle('flipped');
-        currentlyFlippedCard = card.classList.contains('flipped') ? card : null;
-      };
-
-      const inner = document.createElement('div');
-      inner.className = 'reveal-card-inner';
-
-      const front = document.createElement('div');
-      front.className = 'reveal-card-front';
-      front.textContent = player;
-
-      const back = document.createElement('div');
-      back.className = 'reveal-card-back';
-      const role = rolesAssigned[index];
-      const roleNameEl = document.createElement('span');
-      roleNameEl.className = 'role-name';
-      if (role === 'Dorfbewohner') {
-        roleNameEl.classList.add('long-text');
-      }
-      roleNameEl.textContent = role;
-      back.innerHTML = `<span class="player-name">${player}</span>`;
-      back.prepend(roleNameEl);
-
-      const infoBtn = document.createElement('button');
-      infoBtn.className = 'info-btn';
-      infoBtn.textContent = 'Info';
-      infoBtn.onclick = (e) => {
-        e.stopPropagation(); // Prevent card from flipping back
-        showRoleInfo(role);
-      };
-      back.appendChild(infoBtn);
-
-      inner.appendChild(front);
-      inner.appendChild(back);
-      card.appendChild(inner);
-      revealGrid.appendChild(card);
-    });
-
-    nightCounter = 0;
-    gameCheckpoints.length = 0;
-    captureGameCheckpoint('Spielstart: Rollen verteilt');
-
-    // Add Henker's target to their card
-    if (henker && henker.target) {
-      const cards = revealGrid.querySelectorAll('.reveal-card');
-      cards.forEach(card => {
-        const playerNameOnCard = card.querySelector('.player-name').textContent;
-        if (playerNameOnCard === henker.player) {
-          const backOfCard = card.querySelector('.reveal-card-back');
-          const targetEl = document.createElement('span');
-          targetEl.className = 'henker-target';
-          targetEl.innerHTML = `Dein Ziel ist: <strong>${henker.target}</strong>`;
-          backOfCard.appendChild(targetEl);
-        }
+      showConfirmation({
+        title: 'Dorfbewohner auffüllen?',
+        text: "Es gibt weniger Rollen als Spieler. Einige Spieler bekommen 'Dorfbewohner'. Fortfahren?",
+        confirmText: 'Fortfahren',
+        cancelText: 'Abbrechen',
+        onConfirm: () => {
+          while (roles.length < playersRaw.length) {
+            roles.push('Dorfbewohner');
+          }
+          finalizeAssignment();
+        },
+        onCancel: () => {
+          assignBtn.style.display = 'inline-block';
+        },
+        logOnConfirm: { type: 'info', label: 'Rollenzuteilung fortgesetzt', detail: 'Fehlende Plätze mit Dorfbewohnern aufgefüllt.' },
+        logOnCancel: { type: 'info', label: 'Rollenzuteilung abgebrochen', detail: 'Zu wenige Rollen vorhanden.' }
       });
+      return;
     }
 
-    // Save the session
-    saveSession();
+    if (roles.length > playersRaw.length) {
+      showConfirmation({
+        title: 'Überschüssige Rollen ignorieren?',
+        text: "Es gibt mehr Rollen als Spieler. Überschüssige Rollen werden ignoriert. Fortfahren?",
+        confirmText: 'Fortfahren',
+        cancelText: 'Abbrechen',
+        onConfirm: () => {
+          roles = roles.slice(0, playersRaw.length);
+          finalizeAssignment();
+        },
+        onCancel: () => {
+          assignBtn.style.display = 'inline-block';
+        },
+        logOnConfirm: { type: 'info', label: 'Rollenzuteilung fortgesetzt', detail: 'Überschüssige Rollen verworfen.' },
+        logOnCancel: { type: 'info', label: 'Rollenzuteilung abgebrochen', detail: 'Zu viele Rollen ausgewählt.' }
+      });
+      return;
+    }
 
-    // Hide setup and show results
-    document.querySelector('.setup-container').style.display = 'none';
-    assignBtn.style.display = 'none';
-    loadLastUsedBtn.style.display = 'none';
-    document.getElementById('ergebnisse-title').style.display = 'block';
-    document.querySelector('.navigation-buttons').style.display = 'flex';
-    showRolesOverviewBtn.style.display = 'inline-block';
-    revealGrid.style.display = 'grid';
+    finalizeAssignment();
   });
 
   function updatePlayerCardVisuals() {
@@ -3615,7 +3849,12 @@ document.addEventListener("DOMContentLoaded", () => {
       const playerToChange = adminChangeRolePlayerSelect ? adminChangeRolePlayerSelect.value : '';
       const newRole = adminChangeRoleRoleSelect ? adminChangeRoleRoleSelect.value : '';
       if (!playerToChange || !newRole) {
-        alert('Bitte einen Spieler und eine Rolle auswählen.');
+        showInfoMessage({
+          title: 'Auswahl erforderlich',
+          text: 'Bitte einen Spieler und eine Rolle auswählen.',
+          confirmText: 'Okay',
+          log: { type: 'error', label: 'Admin-Aktion abgebrochen', detail: 'Keine Auswahl für den Rollenwechsel getroffen.' }
+        });
         return;
       }
 
@@ -3660,7 +3899,12 @@ document.addEventListener("DOMContentLoaded", () => {
     adminRevivePlayerBtn.addEventListener('click', () => {
       const playerToRevive = adminRevivePlayerSelect ? adminRevivePlayerSelect.value : '';
       if (!playerToRevive) {
-        alert('Bitte einen Spieler auswählen.');
+        showInfoMessage({
+          title: 'Auswahl erforderlich',
+          text: 'Bitte einen Spieler auswählen.',
+          confirmText: 'Okay',
+          log: { type: 'error', label: 'Admin-Aktion abgebrochen', detail: 'Keine Auswahl für die Wiederbelebung getroffen.' }
+        });
         return;
       }
 
@@ -3715,7 +3959,12 @@ document.addEventListener("DOMContentLoaded", () => {
     adminKillPlayerBtn.addEventListener('click', () => {
       const playerToKill = adminKillPlayerSelect ? adminKillPlayerSelect.value : '';
       if (!playerToKill) {
-        alert('Bitte einen Spieler auswählen.');
+        showInfoMessage({
+          title: 'Auswahl erforderlich',
+          text: 'Bitte einen Spieler auswählen.',
+          confirmText: 'Okay',
+          log: { type: 'error', label: 'Admin-Aktion abgebrochen', detail: 'Keine Auswahl für die Eliminierung getroffen.' }
+        });
         return;
       }
 
@@ -3755,7 +4004,14 @@ document.addEventListener("DOMContentLoaded", () => {
         populateAdminKillSelect();
         populateAdminReviveSelect();
 
-        loverAlerts.forEach(message => alert(message));
+        if (loverAlerts.length > 0) {
+          showInfoMessage({
+            title: 'Liebende trauern',
+            html: loverAlerts.join('<br>'),
+            confirmText: 'Verstanden',
+            log: { type: 'info', label: 'Liebende betroffen', detail: loverAlerts.join(' | ') }
+          });
+        }
 
         recordAction({
           type: 'admin',

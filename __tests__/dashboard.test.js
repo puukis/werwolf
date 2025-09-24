@@ -134,4 +134,39 @@ describe('Narrator dashboard integrations', () => {
     expect(testApi.getState().deadPlayers).toEqual([]);
     expect(testApi.getActionLog()[0].label).toContain('Makro: Alle Spieler wiederbeleben');
   });
+
+  test('saving a session surfaces the confirmation modal', () => {
+    const modal = document.getElementById('confirmation-modal');
+    expect(modal.style.display).not.toBe('flex');
+
+    document.getElementById('save-game-btn').click();
+
+    expect(window.alert).not.toHaveBeenCalled();
+    expect(modal.style.display).toBe('flex');
+    expect(document.getElementById('confirm-btn').textContent).toBe('Okay');
+
+    document.getElementById('confirm-btn').click();
+
+    const latest = testApi.getActionLog()[0];
+    expect(latest.label).toBe('Session gespeichert');
+    expect(latest.type).toBe('info');
+  });
+
+  test('saving empty player names logs an error via modal', () => {
+    const playersInput = document.getElementById('players');
+    playersInput.value = '';
+
+    document.getElementById('save-names-manually').click();
+
+    const modal = document.getElementById('confirmation-modal');
+    expect(window.alert).not.toHaveBeenCalled();
+    expect(modal.style.display).toBe('flex');
+    expect(document.getElementById('confirmation-title').textContent).toBe('Speichern nicht möglich');
+
+    document.getElementById('confirm-btn').click();
+
+    const latest = testApi.getActionLog()[0];
+    expect(latest.type).toBe('error');
+    expect(latest.label).toBe('Speichern der Namen fehlgeschlagen');
+  });
 });
