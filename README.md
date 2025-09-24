@@ -1,5 +1,6 @@
 # Werwolf 🐺
 
+[![CI](https://github.com/puukis/werwolf/actions/workflows/ci.yml/badge.svg)](https://github.com/puukis/werwolf/actions/workflows/ci.yml)
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](https://choosealicense.com/licenses/mit/)
 
 A web-based role-playing game of deception and deduction. This is a digital version of the popular party game "Mafia" or "Werewolf," designed for a seamless and immersive experience.
