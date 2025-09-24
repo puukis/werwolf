@@ -312,6 +312,12 @@ input[type="text"]:focus {
   transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
 }
 
+.job-row .job-name {
+  flex: 1 1 auto;
+  font-weight: 600;
+  color: var(--text-color);
+}
+
 .role-row .remove-role {
   background: #ff4d4f;
   border: none;
@@ -1363,6 +1369,12 @@ body.night-active main.container {
 .reveal-card-back .player-name {
   font-size: 0.9rem;
   opacity: 0.9;
+}
+
+.job-label {
+  font-size: 0.85rem;
+  opacity: 0.9;
+  margin-top: 0.25rem;
 }
 
 .info-btn {
