@@ -19,6 +19,11 @@ A web-based role-playing game of deception and deduction. This is a digital vers
   - [4. Day Phase](#4-day-phase)
   - [5. Winning](#5-winning)
 - [🎭 Roles](#-roles)
+- [🎤 Narrator Toolkit](#-narrator-toolkit)
+  - [Dashboard Overview](#dashboard-overview)
+  - [Timer Controls & Checkpoints](#timer-controls--checkpoints)
+  - [Macros & Quick Actions](#macros--quick-actions)
+  - [Recovery & Session Management](#recovery--session-management)
 - [🛠️ Tech Stack](#-tech-stack)
 - [🚀 Getting Started](#-getting-started)
 - [🤝 Contributing](#-contributing)
@@ -92,6 +97,37 @@ During the night, players with special roles will be prompted to perform their a
 - **Jäger (Hunter)**: When eliminated, the Hunter can take one last shot to eliminate another player.
 - **Trickster**: A neutral role whose goal is to get lynched by the villagers.
 - **Stumme Jule**: Can choose one player each night to silence for the following day.
+
+---
+
+## 🎤 Narrator Toolkit
+
+The Erzähler tools keep the flow of the evening under control and give you recovery options when something unexpected happens. All controls live in the right-hand admin panel.
+
+### Dashboard Overview
+
+- **Phase & counts**: The dashboard highlights the active phase, night/day counters, and remaining players per faction so you can pace discussions and reveal moments.
+- **Spotlight & status**: Dedicated rows surface the current Bürgermeister, Michael-Jackson spotlight target, silenced speaker, and any pending revenge or Blood Moon effects.
+- **Action log**: Every modal confirmation, macro, and admin change writes to the timeline. Use it as a quick audit trail or to brief co-hosts who join mid-game.
+
+### Timer Controls & Checkpoints
+
+- **Phase timers**: Pause or resume the automatic day/night timers from the admin panel. When timers are paused, an entry is logged so everyone knows why the game is waiting.
+- **Automatic checkpoints**: The game saves snapshots after role assignment, at the start of each night, and when sessions are loaded. You’ll see these in the checkpoint list with descriptive labels.
+- **Rollback**: Use the “Letzten Checkpoint wiederherstellen” button to return to the last snapshot. A summary appears in the timeline so the group understands what changed.
+
+### Macros & Quick Actions
+
+- **Preset actions**: Macros cover common narrator chores such as reviving everyone, refreshing witch potions, or undoing the previous night. Run a macro from the dropdown to apply it immediately.
+- **Admin edits**: Quick actions let you change roles, revive players, eliminate troublemakers, or toggle the Blood Moon. Every change logs its detail so you can retrace steps later.
+- **Sandbox support**: The sandbox macro captures the current selection in the night UI and echoes it to the log. It’s handy for dry runs or explaining special phases.
+
+### Recovery & Session Management
+
+- **Run locally**: Clone the repository, open `index.html` in a browser, and you’re ready to facilitate offline. No server setup is required.
+- **Session saving**: Use the “Spiel speichern” button in the sessions sidebar to store the full state (players, roles, potions, timers). Saved sessions appear in the list for one-click recovery.
+- **Manual backups**: From the setup screen you can store and reload player name lists or role configurations. Each attempt now surfaces a modal so you always know whether the operation succeeded.
+- **Checkpoint workflow**: Before major reveals, consider triggering a manual macro checkpoint (e.g., via the sandbox). If a misclick happens, roll back and continue without breaking immersion.
 
 ---
 
