@@ -438,6 +438,139 @@ document.addEventListener("DOMContentLoaded", () => {
   let dayLynchBtn = document.getElementById('day-lynch-btn');
   let daySkipBtn = document.getElementById('day-skip-btn');
 
+  const phaseTimerManager = (() => {
+    let timers = new Map();
+    let paused = false;
+    let onChange = () => {};
+    let counter = 0;
+
+    function notifyChange() {
+      onChange();
+    }
+
+    function schedule(callback, delay, label = 'Timer') {
+      counter += 1;
+      const id = counter;
+      const timer = {
+        id,
+        callback,
+        delay,
+        remaining: delay,
+        label,
+        start: Date.now(),
+        timeoutId: null
+      };
+
+      const run = () => {
+        if (paused) return;
+        timers.delete(id);
+        callback();
+        notifyChange();
+      };
+
+      timer.run = run;
+
+      if (!paused) {
+        timer.timeoutId = setTimeout(run, delay);
+      }
+
+      timers.set(id, timer);
+      notifyChange();
+      return id;
+    }
+
+    function pause() {
+      if (paused) return false;
+      paused = true;
+      const now = Date.now();
+      timers.forEach(timer => {
+        if (timer.timeoutId) {
+          clearTimeout(timer.timeoutId);
+          timer.timeoutId = null;
+          const elapsed = now - timer.start;
+          timer.remaining = Math.max(0, timer.remaining - elapsed);
+        }
+      });
+      notifyChange();
+      return true;
+    }
+
+    function resume() {
+      if (!paused) return false;
+      paused = false;
+      const now = Date.now();
+      timers.forEach(timer => {
+        timer.start = now;
+        if (timer.remaining <= 0) {
+          timer.timeoutId = setTimeout(() => {
+            timers.delete(timer.id);
+            timer.callback();
+            notifyChange();
+          }, 0);
+        } else {
+          timer.timeoutId = setTimeout(() => {
+            timers.delete(timer.id);
+            timer.callback();
+            notifyChange();
+          }, timer.remaining);
+        }
+      });
+      notifyChange();
+      return true;
+    }
+
+    function cancel(id) {
+      const timer = timers.get(id);
+      if (!timer) return false;
+      if (timer.timeoutId) {
+        clearTimeout(timer.timeoutId);
+      }
+      timers.delete(id);
+      notifyChange();
+      return true;
+    }
+
+    function cancelAll() {
+      timers.forEach(timer => {
+        if (timer.timeoutId) {
+          clearTimeout(timer.timeoutId);
+        }
+      });
+      timers.clear();
+      notifyChange();
+    }
+
+    function list() {
+      const now = Date.now();
+      return Array.from(timers.values()).map(timer => {
+        let remaining = timer.remaining;
+        if (!paused && timer.timeoutId) {
+          const elapsed = now - timer.start;
+          remaining = Math.max(0, timer.remaining - elapsed);
+        }
+        return { id: timer.id, label: timer.label, remaining };
+      });
+    }
+
+    function setOnChange(handler) {
+      onChange = typeof handler === 'function' ? handler : () => {};
+    }
+
+    function isPaused() {
+      return paused;
+    }
+
+    return { schedule, pause, resume, cancel, cancelAll, list, setOnChange, isPaused };
+  })();
+
+  const gameCheckpoints = [];
+  let isRestoringCheckpoint = false;
+  let nightCounter = 0;
+
+  function queuePhaseTimer(callback, delay, label = 'Timer') {
+    return phaseTimerManager.schedule(callback, delay, label);
+  }
+
   function handlePlayerDeath(playerName, options = {}) {
     const { silent = false } = options;
     if (silent) {
@@ -458,6 +591,8 @@ document.addEventListener("DOMContentLoaded", () => {
             geistModal.style.display = 'none';
         };
     }
+
+    renderNarratorDashboard();
   }
 
   function renderPlayerChoices(selectLimit = 1, customList = null) {
@@ -785,6 +920,7 @@ document.addEventListener("DOMContentLoaded", () => {
       intro += `<p>🤫 ${silencedPlayer} wurde zum Schweigen gebracht und darf nicht reden oder abstimmen.</p>`;
     } else if (silencedPlayer && deadPlayers.includes(silencedPlayer)) {
       silencedPlayer = null;
+      renderNarratorDashboard();
     }
 
     if (mayor) {
@@ -984,6 +1120,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     result.shouldEliminate = entry.accusationCount >= 2;
+    renderNarratorDashboard();
     return result;
   }
 
@@ -1036,7 +1173,8 @@ document.addEventListener("DOMContentLoaded", () => {
     daySkipBtn.onclick = () => {
       if (checkGameOver()) return;
       if (!checkGameOver(true)) {
-        setTimeout(() => endDayPhase(), 3000);
+        phaseTimerManager.cancelAll();
+        queuePhaseTimer(() => endDayPhase(), 3000, 'Tagphase endet automatisch');
       }
     };
 
@@ -1120,7 +1258,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 daySkipBtn.onclick = () => {
                   if (checkGameOver()) return;
                   if (!checkGameOver(true)) {
-                    setTimeout(() => endDayPhase(), 3000);
+                    phaseTimerManager.cancelAll();
+                    queuePhaseTimer(() => endDayPhase(), 3000, 'Tagphase endet automatisch');
                   }
                 };
             };
@@ -1171,7 +1310,8 @@ document.addEventListener("DOMContentLoaded", () => {
             daySkipBtn.onclick = () => {
               if (checkGameOver()) return;
               if (!checkGameOver(true)) {
-                setTimeout(() => endDayPhase(), 3000);
+                phaseTimerManager.cancelAll();
+                queuePhaseTimer(() => endDayPhase(), 3000, 'Tagphase endet automatisch');
               }
             };
         };
@@ -1194,7 +1334,8 @@ document.addEventListener("DOMContentLoaded", () => {
       daySkipBtn.style.display = 'block';
       daySkipBtn.onclick = () => {
         if (!checkGameOver(true)) {
-          setTimeout(() => endDayPhase(), 3000);
+          phaseTimerManager.cancelAll();
+          queuePhaseTimer(() => endDayPhase(), 3000, 'Tagphase endet automatisch');
         }
       };
     }
@@ -1302,6 +1443,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const newMayor = selected.textContent;
       showConfirmation("Bürgermeister wählen?", `Willst du ${newMayor} wirklich zum Bürgermeister wählen?`, () => {
         mayor = newMayor;
+        renderNarratorDashboard();
         dayText.innerHTML = `<p><strong>${mayor}</strong> ist jetzt der Bürgermeister!</p>`;
         dayChoices.innerHTML = '';
         dayLynchBtn.style.display = 'none';
@@ -1323,6 +1465,8 @@ document.addEventListener("DOMContentLoaded", () => {
     } else {
       renderAccusationSelection();
     }
+
+    renderNarratorDashboard();
   }
 
   function showGraveyardModal() {
@@ -1428,8 +1572,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (checkGameOver()) return;
 
+    phaseTimerManager.cancelAll();
+    captureGameCheckpoint(`Start Tag ${dayCount}`);
+
     document.querySelector('.container').classList.add('hidden');
-    
+
     showGraveyardModal();
   }
   
@@ -1437,14 +1584,17 @@ document.addEventListener("DOMContentLoaded", () => {
     dayMode = false;
     dayOverlay.classList.remove('show');
     document.querySelector('.container').classList.remove('hidden');
-    
+
     // Reset for next night
     currentNightVictims = [];
-    
+
     // Start the next night phase after a short delay
-    setTimeout(() => {
+    phaseTimerManager.cancelAll();
+    queuePhaseTimer(() => {
       startNightBtn.click();
-    }, 1000);
+    }, 1000, 'Neue Nacht starten');
+
+    renderNarratorDashboard();
   }
 
   function moveToNextNightStep() {
@@ -1461,11 +1611,14 @@ document.addEventListener("DOMContentLoaded", () => {
       startNightBtn.style.display = "none";
       console.log("Tote Spieler:", deadPlayers);
       console.log("Liebespaare:", lovers);
-      
+
+      renderNarratorDashboard();
+
       // Start the day phase
-      setTimeout(() => {
+      phaseTimerManager.cancelAll();
+      queuePhaseTimer(() => {
         startDayPhase();
-      }, 1000);
+      }, 1000, 'Tagphase vorbereiten');
     }
   }
 
@@ -1627,6 +1780,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const name = selected.textContent;
         showConfirmation("Spieler stumm schalten?", `Willst du ${name} wirklich für den nächsten Tag stumm schalten?`, () => {
             silencedPlayer = name;
+            renderNarratorDashboard();
             moveToNextNightStep();
         });
         return; // Wait for confirmation
@@ -1726,6 +1880,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     localStorage.setItem('bloodMoonPityTimer', bloodMoonPityTimer);
     updateBloodMoonOdds();
+    renderNarratorDashboard();
   }
 
   startNightBtn.addEventListener("click", () => {
@@ -1758,9 +1913,13 @@ document.addEventListener("DOMContentLoaded", () => {
     currentNightVictims = [];
     nightMode = true;
     nightIndex = 0;
-    
+
     // Trigger random events
     triggerRandomEvents();
+
+    phaseTimerManager.cancelAll();
+    nightCounter += 1;
+    captureGameCheckpoint(`Start Nacht ${nightCounter}`);
 
     nightOverlay.style.display = "flex";
     showNightStep();
@@ -2099,14 +2258,14 @@ document.addEventListener("DOMContentLoaded", () => {
         card.classList.toggle('flipped');
         currentlyFlippedCard = card.classList.contains('flipped') ? card : null;
       };
-      
+
       const inner = document.createElement('div');
       inner.className = 'reveal-card-inner';
-      
+
       const front = document.createElement('div');
       front.className = 'reveal-card-front';
       front.textContent = player;
-      
+
       const back = document.createElement('div');
       back.className = 'reveal-card-back';
       const role = rolesAssigned[index];
@@ -2118,7 +2277,7 @@ document.addEventListener("DOMContentLoaded", () => {
       roleNameEl.textContent = role;
       back.innerHTML = `<span class="player-name">${player}</span>`;
       back.prepend(roleNameEl);
-      
+
       const infoBtn = document.createElement('button');
       infoBtn.className = 'info-btn';
       infoBtn.textContent = 'Info';
@@ -2133,6 +2292,10 @@ document.addEventListener("DOMContentLoaded", () => {
       card.appendChild(inner);
       revealGrid.appendChild(card);
     });
+
+    nightCounter = 0;
+    gameCheckpoints.length = 0;
+    captureGameCheckpoint('Spielstart: Rollen verteilt');
 
     // Add Henker's target to their card
     if (henker && henker.target) {
@@ -2260,6 +2423,7 @@ document.addEventListener("DOMContentLoaded", () => {
       dayMode: dayMode,
       nightSteps: nightSteps,
       nightIndex: nightIndex,
+      nightCounter: nightCounter,
       michaelJacksonAccusations: Object.entries(michaelJacksonAccusations).reduce((acc, [player, data]) => {
         const rawDays = Array.isArray(data?.daysAccused) ? data.daysAccused : [];
         const days = Array.from(new Set(rawDays
@@ -2358,10 +2522,15 @@ document.addEventListener("DOMContentLoaded", () => {
     dayMode = session.dayMode || false;
     nightSteps = session.nightSteps || [];
     nightIndex = session.nightIndex || 0;
+    nightCounter = session.nightCounter || 0;
     initializeMichaelJacksonAccusations(session.michaelJacksonAccusations || {});
     dayAnnouncements = [];
     currentDayAdditionalParagraphs = [];
     dayIntroHtml = '';
+
+    phaseTimerManager.cancelAll();
+    gameCheckpoints.length = 0;
+    captureGameCheckpoint('Session geladen');
 
     playersTextarea.value = session.players.join('\n');
 
@@ -2484,6 +2653,458 @@ document.addEventListener("DOMContentLoaded", () => {
   const macroDescriptionEl = document.getElementById('admin-macro-description');
   const defaultMacroDescription = macroDescriptionEl ? macroDescriptionEl.textContent : '';
 
+  const narratorDashboard = document.getElementById('narrator-dashboard');
+  const dashboardPhaseEl = document.getElementById('dashboard-phase');
+  const dashboardTeamCountsEl = document.getElementById('dashboard-team-counts');
+  const dashboardRoleCountsEl = document.getElementById('dashboard-role-counts');
+  const dashboardMayorEl = document.getElementById('dashboard-mayor');
+  const dashboardSpotlightEl = document.getElementById('dashboard-spotlights');
+  const dashboardSilencedEl = document.getElementById('dashboard-silenced');
+  const dashboardEventsEl = document.getElementById('dashboard-events');
+
+  const pauseTimersBtn = document.getElementById('admin-pause-timers-btn');
+  const skipStepBtn = document.getElementById('admin-skip-step-btn');
+  const rollbackCheckpointBtn = document.getElementById('admin-rollback-checkpoint-btn');
+
+  const sandboxSelect = document.getElementById('sandbox-elimination-select');
+  const sandboxSimulateBtn = document.getElementById('sandbox-simulate-btn');
+  const sandboxResultEl = document.getElementById('sandbox-result');
+
+  function getLivingPlayers() {
+    return players.filter(player => !deadPlayers.includes(player));
+  }
+
+  function getLivingRoleData() {
+    const data = [];
+    players.forEach((player, index) => {
+      if (!deadPlayers.includes(player)) {
+        data.push({ player, role: rolesAssigned[index] });
+      }
+    });
+    return data;
+  }
+
+  function getPlayerRoleName(playerName) {
+    const index = players.indexOf(playerName);
+    return index >= 0 ? rolesAssigned[index] : null;
+  }
+
+  function getTeamKey(roleName) {
+    if (!roleName) return 'special';
+    if (categorizedRoles.werwolf.includes(roleName)) return 'werwolf';
+    if (categorizedRoles.village.includes(roleName)) return 'village';
+    return 'special';
+  }
+
+  function buildTeamCounts(livingPlayers = getLivingPlayers()) {
+    return livingPlayers.reduce((acc, player) => {
+      const roleName = getPlayerRoleName(player);
+      const team = getTeamKey(roleName);
+      acc[team] = (acc[team] || 0) + 1;
+      return acc;
+    }, { village: 0, werwolf: 0, special: 0 });
+  }
+
+  function getRoleCounts(livingData) {
+    return livingData.reduce((acc, { role }) => {
+      if (!role) return acc;
+      acc[role] = (acc[role] || 0) + 1;
+      return acc;
+    }, {});
+  }
+
+  function getSpotlightPlayers() {
+    return Object.entries(michaelJacksonAccusations || {})
+      .filter(([player, data]) => data && data.hasSpotlight && !deadPlayers.includes(player))
+      .map(([player]) => player);
+  }
+
+  function formatMillisecondsToSeconds(ms) {
+    if (!Number.isFinite(ms)) return '0s';
+    if (ms >= 1000) {
+      return `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)}s`;
+    }
+    return `${Math.max(0, Math.round(ms))}ms`;
+  }
+
+  function renderNarratorDashboard() {
+    if (!dashboardPhaseEl) {
+      return;
+    }
+
+    const livingData = getLivingRoleData();
+    const livingPlayers = livingData.map(entry => entry.player);
+    const teamCounts = buildTeamCounts(livingPlayers);
+
+    if (dashboardTeamCountsEl) {
+      dashboardTeamCountsEl.textContent = `Dorfbewohner: ${teamCounts.village} | Werwölfe: ${teamCounts.werwolf} | Sonderrollen: ${teamCounts.special}`;
+    }
+
+    if (dashboardPhaseEl) {
+      let phaseText = 'Setup';
+      if (nightMode) {
+        const currentRole = nightSteps[nightIndex] || 'Nachtende';
+        const label = nightCounter > 0 ? nightCounter : Math.max(1, dayCount + (nightMode ? 1 : 0));
+        phaseText = `Nacht ${label} – ${currentRole}`;
+      } else if (dayMode) {
+        const label = Math.max(dayCount, 1);
+        phaseText = `Tag ${label}`;
+      } else if (players.length > 0) {
+        phaseText = nightCounter > 0 || dayCount > 0 ? 'Zwischenphase' : 'Bereit';
+      }
+      dashboardPhaseEl.textContent = phaseText;
+    }
+
+    if (dashboardRoleCountsEl) {
+      dashboardRoleCountsEl.innerHTML = '';
+      const roleCounts = getRoleCounts(livingData);
+      const entries = Object.entries(roleCounts).sort((a, b) => {
+        if (b[1] === a[1]) {
+          return a[0].localeCompare(b[0], 'de');
+        }
+        return b[1] - a[1];
+      });
+      if (entries.length === 0) {
+        const li = document.createElement('li');
+        li.textContent = 'Keine aktiven Rollen';
+        dashboardRoleCountsEl.appendChild(li);
+      } else {
+        entries.forEach(([role, count]) => {
+          const li = document.createElement('li');
+          li.textContent = `${role}: ${count}`;
+          dashboardRoleCountsEl.appendChild(li);
+        });
+      }
+    }
+
+    if (dashboardMayorEl) {
+      if (mayor) {
+        const mayorStatus = deadPlayers.includes(mayor) ? `${mayor} (tot)` : mayor;
+        dashboardMayorEl.textContent = `Bürgermeister: ${mayorStatus}`;
+      } else {
+        dashboardMayorEl.textContent = 'Bürgermeister: –';
+      }
+    }
+
+    if (dashboardSpotlightEl) {
+      const spotlightPlayers = getSpotlightPlayers();
+      dashboardSpotlightEl.textContent = spotlightPlayers.length
+        ? `Spotlight: ${spotlightPlayers.join(', ')}`
+        : 'Spotlight: –';
+    }
+
+    if (dashboardSilencedEl) {
+      if (silencedPlayer && !deadPlayers.includes(silencedPlayer)) {
+        dashboardSilencedEl.textContent = `Stumm: ${silencedPlayer}`;
+      } else {
+        dashboardSilencedEl.textContent = 'Stumm: –';
+      }
+    }
+
+    if (dashboardEventsEl) {
+      dashboardEventsEl.innerHTML = '';
+      const events = [];
+      const timers = phaseTimerManager.list();
+      if (phaseTimerManager.isPaused()) {
+        events.push('Timer pausiert');
+      }
+      timers.forEach(timer => {
+        events.push(`Timer: ${timer.label} (${formatMillisecondsToSeconds(timer.remaining)})`);
+      });
+      if (bloodMoonActive) {
+        events.push('Blutmond aktiv');
+      }
+      if (currentNightVictims.length > 0) {
+        events.push(`Ausstehende Nachtopfer: ${currentNightVictims.join(', ')}`);
+      }
+      if (jagerDiedLastNight) {
+        events.push(`Jäger-Revanche offen: ${jagerDiedLastNight}`);
+      }
+      if (gameCheckpoints.length > 0) {
+        const lastCheckpoint = gameCheckpoints[gameCheckpoints.length - 1];
+        const timeLabel = lastCheckpoint.timestamp
+          ? new Date(lastCheckpoint.timestamp).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+          : '';
+        events.push(`Letzter Checkpoint: ${lastCheckpoint.label}${timeLabel ? ` (${timeLabel})` : ''}`);
+      }
+      if (events.length === 0) {
+        events.push('Keine offenen Ereignisse');
+      }
+      events.forEach(text => {
+        const li = document.createElement('li');
+        li.textContent = text;
+        dashboardEventsEl.appendChild(li);
+      });
+    }
+
+    if (pauseTimersBtn) {
+      const timers = phaseTimerManager.list();
+      const hasTimers = timers.length > 0;
+      pauseTimersBtn.textContent = phaseTimerManager.isPaused()
+        ? 'Phase-Timer fortsetzen'
+        : 'Phase-Timer pausieren';
+      pauseTimersBtn.disabled = !hasTimers && !phaseTimerManager.isPaused();
+    }
+
+    if (skipStepBtn) {
+      skipStepBtn.disabled = !(nightMode || dayMode);
+    }
+
+    if (rollbackCheckpointBtn) {
+      rollbackCheckpointBtn.disabled = gameCheckpoints.length === 0;
+    }
+
+    if (sandboxSelect) {
+      const selectedValues = new Set(Array.from(sandboxSelect.selectedOptions).map(opt => opt.value));
+      sandboxSelect.innerHTML = '';
+      livingPlayers.forEach(player => {
+        const option = document.createElement('option');
+        option.value = player;
+        option.textContent = player;
+        if (selectedValues.has(player)) {
+          option.selected = true;
+        }
+        sandboxSelect.appendChild(option);
+      });
+      if (sandboxResultEl && sandboxSelect.selectedOptions.length === 0) {
+        sandboxResultEl.textContent = '';
+      }
+    }
+  }
+
+  phaseTimerManager.setOnChange(renderNarratorDashboard);
+
+  function createStateSnapshot() {
+    return {
+      players: players.slice(),
+      rolesAssigned: rolesAssigned.slice(),
+      deadPlayers: deadPlayers.slice(),
+      lovers: lovers.map(pair => pair.slice()),
+      silencedPlayer,
+      healRemaining,
+      poisonRemaining,
+      bloodMoonActive,
+      dayCount,
+      mayor,
+      accused: accused.slice(),
+      nightMode,
+      dayMode,
+      nightSteps: nightSteps.slice(),
+      nightIndex,
+      currentNightVictims: currentNightVictims.slice(),
+      michaelJacksonAccusations: JSON.parse(JSON.stringify(michaelJacksonAccusations || {})),
+      henker: henker ? { ...henker } : null,
+      geschwister: geschwister.slice(),
+      geist: geist ? { ...geist } : { player: null, messageSent: false },
+      peaceDays,
+      jagerShotUsed,
+      jagerDiedLastNight,
+      nightCounter
+    };
+  }
+
+  function captureGameCheckpoint(label) {
+    if (isRestoringCheckpoint) return;
+    const snapshot = {
+      label,
+      timestamp: Date.now(),
+      state: createStateSnapshot()
+    };
+    gameCheckpoints.push(snapshot);
+    if (gameCheckpoints.length > 20) {
+      gameCheckpoints.shift();
+    }
+    renderNarratorDashboard();
+  }
+
+  function applyStateSnapshot(snapshot) {
+    players = snapshot.players.slice();
+    rolesAssigned = snapshot.rolesAssigned.slice();
+    deadPlayers = snapshot.deadPlayers.slice();
+    lovers = snapshot.lovers.map(pair => pair.slice());
+    silencedPlayer = snapshot.silencedPlayer;
+    healRemaining = snapshot.healRemaining;
+    poisonRemaining = snapshot.poisonRemaining;
+    bloodMoonActive = snapshot.bloodMoonActive;
+    dayCount = snapshot.dayCount;
+    mayor = snapshot.mayor;
+    accused = snapshot.accused.slice();
+    nightMode = snapshot.nightMode;
+    dayMode = snapshot.dayMode;
+    nightSteps = snapshot.nightSteps.slice();
+    nightIndex = snapshot.nightIndex;
+    currentNightVictims = snapshot.currentNightVictims.slice();
+    michaelJacksonAccusations = JSON.parse(JSON.stringify(snapshot.michaelJacksonAccusations || {}));
+    henker = snapshot.henker ? { ...snapshot.henker } : null;
+    geschwister = snapshot.geschwister.slice();
+    geist = snapshot.geist ? { ...snapshot.geist } : { player: null, messageSent: false };
+    peaceDays = typeof snapshot.peaceDays === 'number' ? snapshot.peaceDays : 0;
+    jagerShotUsed = !!snapshot.jagerShotUsed;
+    jagerDiedLastNight = snapshot.jagerDiedLastNight || null;
+    nightCounter = snapshot.nightCounter || 0;
+
+    updatePlayerCardVisuals();
+    populateAdminKillSelect();
+    populateAdminReviveSelect();
+    populateAdminChangeRoleSelects();
+    syncBloodMoonUI({ silent: true });
+
+    if (nightMode) {
+      nightOverlay.style.display = 'flex';
+      showNightStep();
+    } else {
+      nightOverlay.style.display = 'none';
+    }
+
+    if (dayMode) {
+      dayOverlay.style.display = 'flex';
+      if (dayCount === 1 && !mayor) {
+        electMayor();
+      } else {
+        startNormalDayPhase();
+      }
+    } else {
+      dayOverlay.style.display = 'none';
+    }
+
+    renderNarratorDashboard();
+  }
+
+  function restoreLastCheckpoint() {
+    if (gameCheckpoints.length === 0) {
+      return null;
+    }
+    const checkpoint = gameCheckpoints.pop();
+    phaseTimerManager.cancelAll();
+    isRestoringCheckpoint = true;
+    try {
+      applyStateSnapshot(checkpoint.state);
+    } finally {
+      isRestoringCheckpoint = false;
+    }
+    logAction({ type: 'admin', label: 'Checkpoint wiederhergestellt', detail: checkpoint.label });
+    return checkpoint;
+  }
+
+  function evaluateHypotheticalWinner(deadSet) {
+    if (henker && henker.target && deadSet.has(henker.target) && henker.player && !deadSet.has(henker.player)) {
+      return 'Henker gewinnt';
+    }
+
+    const livingPlayers = players.filter(player => !deadSet.has(player));
+    const livingWerewolves = livingPlayers.filter(player => getTeamKey(getPlayerRoleName(player)) === 'werwolf');
+
+    if (lovers.length > 0) {
+      const livingLovers = lovers.flat().filter(player => livingPlayers.includes(player));
+      if (livingLovers.length > 0 && livingLovers.length === livingPlayers.length) {
+        return 'Die Liebenden gewinnen';
+      }
+    }
+
+    const friedenstifterAlive = players.some((player, index) => rolesAssigned[index] === 'Friedenstifter' && !deadSet.has(player));
+    if (friedenstifterAlive && peaceDays >= 4) {
+      return 'Friedenstifter gewinnt';
+    }
+
+    if (livingWerewolves.length === 0) {
+      return 'Dorfbewohner gewinnen';
+    }
+
+    if (livingWerewolves.length >= livingPlayers.length - livingWerewolves.length) {
+      return 'Werwölfe gewinnen';
+    }
+
+    return null;
+  }
+
+  function simulateEliminationImpact(playersToEliminate) {
+    const livingPlayers = getLivingPlayers();
+    const eliminationSet = new Set();
+    playersToEliminate.forEach(player => {
+      if (livingPlayers.includes(player)) {
+        eliminationSet.add(player);
+      }
+    });
+
+    if (eliminationSet.size === 0) {
+      return {
+        eliminationChain: [],
+        additionalDeaths: [],
+        finalTeamCounts: buildTeamCounts(livingPlayers),
+        spotlightLost: [],
+        mayorLost: false,
+        winner: null
+      };
+    }
+
+    const additionalDeaths = new Set();
+    lovers.forEach(pair => {
+      if (pair.some(name => eliminationSet.has(name))) {
+        pair.forEach(name => {
+          if (livingPlayers.includes(name)) {
+            if (!eliminationSet.has(name)) {
+              additionalDeaths.add(name);
+            }
+            eliminationSet.add(name);
+          }
+        });
+      }
+    });
+
+    const eliminationChain = Array.from(eliminationSet);
+    const hypotheticalDead = new Set(deadPlayers);
+    eliminationChain.forEach(name => hypotheticalDead.add(name));
+
+    const finalLiving = players.filter(name => !hypotheticalDead.has(name));
+    const finalTeamCounts = buildTeamCounts(finalLiving);
+    const spotlightLost = getSpotlightPlayers().filter(name => eliminationSet.has(name));
+    const mayorLost = mayor ? eliminationSet.has(mayor) : false;
+    const winner = evaluateHypotheticalWinner(hypotheticalDead);
+
+    return {
+      eliminationChain,
+      additionalDeaths: Array.from(additionalDeaths),
+      finalTeamCounts,
+      spotlightLost,
+      mayorLost,
+      winner
+    };
+  }
+
+  function runSandboxSimulation() {
+    if (!sandboxSelect || !sandboxResultEl) {
+      return;
+    }
+
+    const selected = Array.from(sandboxSelect.selectedOptions).map(option => option.value);
+    if (selected.length === 0) {
+      sandboxResultEl.textContent = 'Bitte mindestens einen lebenden Spieler auswählen.';
+      return;
+    }
+
+    const impact = simulateEliminationImpact(selected);
+    if (impact.eliminationChain.length === 0) {
+      sandboxResultEl.textContent = 'Alle ausgewählten Spieler sind bereits ausgeschieden.';
+      return;
+    }
+
+    const lines = [];
+    lines.push(`Simulierte Eliminierungen: ${impact.eliminationChain.join(', ')}`);
+    if (impact.additionalDeaths.length > 0) {
+      lines.push(`Zusätzliche Verluste: ${impact.additionalDeaths.join(', ')}`);
+    }
+    lines.push(`Teamverteilung danach: Dorfbewohner ${impact.finalTeamCounts.village}, Werwölfe ${impact.finalTeamCounts.werwolf}, Spezial ${impact.finalTeamCounts.special}`);
+    if (impact.mayorLost) {
+      lines.push('Der Bürgermeister würde sterben.');
+    }
+    if (impact.spotlightLost.length > 0) {
+      lines.push(`Spotlight-Spieler betroffen: ${impact.spotlightLost.join(', ')}`);
+    }
+    lines.push(impact.winner ? `Möglicher Sieg: ${impact.winner}` : 'Keine Fraktion würde sofort gewinnen.');
+
+    sandboxResultEl.innerHTML = lines.map(text => `<p>${text}</p>`).join('');
+  }
+
   const actionLog = [];
   const undoStack = [];
   const redoStack = [];
@@ -2602,6 +3223,7 @@ document.addEventListener("DOMContentLoaded", () => {
       actionLog.pop();
     }
     updateTimelineUI();
+    renderNarratorDashboard();
   }
 
   function recordAction({ type = 'admin', label, detail = '', undo, redo }) {
@@ -2840,6 +3462,72 @@ document.addEventListener("DOMContentLoaded", () => {
   populateMacroSelect();
   updateTimelineUI();
   updateUndoHistoryUI();
+
+  if (pauseTimersBtn) {
+    pauseTimersBtn.addEventListener('click', () => {
+      const timers = phaseTimerManager.list();
+      if (phaseTimerManager.isPaused()) {
+        const resumed = phaseTimerManager.resume();
+        if (resumed) {
+          logAction({ type: 'admin', label: 'Phase-Timer fortgesetzt', detail: `${timers.length} Timer reaktiviert.` });
+        }
+      } else {
+        if (timers.length === 0) {
+          logAction({ type: 'info', label: 'Keine Timer aktiv', detail: 'Es gibt derzeit keine laufenden Phase-Timer.' });
+          return;
+        }
+        const paused = phaseTimerManager.pause();
+        if (paused) {
+          logAction({ type: 'admin', label: 'Phase-Timer pausiert', detail: `${timers.length} Timer angehalten.` });
+        }
+      }
+    });
+  }
+
+  if (skipStepBtn) {
+    skipStepBtn.addEventListener('click', () => {
+      if (nightMode) {
+        const currentRole = nightSteps[nightIndex] || 'Nachtende';
+        phaseTimerManager.cancelAll();
+        logAction({ type: 'admin', label: 'Schritt übersprungen', detail: `Nachtaktion: ${currentRole}` });
+        moveToNextNightStep();
+      } else if (dayMode) {
+        phaseTimerManager.cancelAll();
+        logAction({ type: 'admin', label: 'Schritt übersprungen', detail: `Tag ${Math.max(dayCount, 1)}` });
+        endDayPhase();
+      } else {
+        logAction({ type: 'info', label: 'Keine Phase aktiv', detail: 'Es läuft derzeit keine Phase, die übersprungen werden könnte.' });
+      }
+    });
+  }
+
+  if (rollbackCheckpointBtn) {
+    rollbackCheckpointBtn.addEventListener('click', () => {
+      if (gameCheckpoints.length === 0) {
+        logAction({ type: 'info', label: 'Kein Checkpoint verfügbar', detail: 'Es existiert kein gespeicherter Spielstand.' });
+        return;
+      }
+      restoreLastCheckpoint();
+    });
+  }
+
+  if (sandboxSimulateBtn) {
+    sandboxSimulateBtn.addEventListener('click', () => {
+      runSandboxSimulation();
+      if (sandboxSelect) {
+        const selection = Array.from(sandboxSelect.selectedOptions).map(option => option.value);
+        logAction({ type: 'info', label: 'Sandbox-Simulation', detail: selection.length ? `Auswahl: ${selection.join(', ')}` : 'Keine Auswahl' });
+      }
+    });
+  }
+
+  if (sandboxSelect) {
+    sandboxSelect.addEventListener('change', () => {
+      if (sandboxSelect.selectedOptions.length === 0 && sandboxResultEl) {
+        sandboxResultEl.textContent = '';
+      }
+    });
+  }
 
   if (macroSelect) {
     macroSelect.addEventListener('change', () => {
@@ -3191,5 +3879,126 @@ document.addEventListener("DOMContentLoaded", () => {
 
   rolesOverviewShowAllBtn.addEventListener('click', displayAllRolesInOverview);
 
+  if (typeof window !== 'undefined') {
+    window.__WERWOLF_TEST__ = {
+      getState() {
+        return {
+          players: players.slice(),
+          rolesAssigned: rolesAssigned.slice(),
+          deadPlayers: deadPlayers.slice(),
+          lovers: lovers.map(pair => pair.slice()),
+          silencedPlayer,
+          healRemaining,
+          poisonRemaining,
+          bloodMoonActive,
+          dayCount,
+          mayor,
+          nightMode,
+          dayMode,
+          nightSteps: nightSteps.slice(),
+          nightIndex,
+          currentNightVictims: currentNightVictims.slice(),
+          michaelJacksonAccusations: JSON.parse(JSON.stringify(michaelJacksonAccusations || {})),
+          jagerDiedLastNight,
+          nightCounter,
+          peaceDays,
+          actionLog: actionLog.slice()
+        };
+      },
+      setState(partial = {}) {
+        if (Array.isArray(partial.players)) {
+          players = partial.players.slice();
+        }
+        if (Array.isArray(partial.rolesAssigned)) {
+          rolesAssigned = partial.rolesAssigned.slice();
+        }
+        if (Array.isArray(partial.deadPlayers)) {
+          deadPlayers = partial.deadPlayers.slice();
+        }
+        if (Array.isArray(partial.lovers)) {
+          lovers = partial.lovers.map(pair => pair.slice());
+        }
+        if ('silencedPlayer' in partial) {
+          silencedPlayer = partial.silencedPlayer;
+        }
+        if ('healRemaining' in partial) {
+          healRemaining = partial.healRemaining;
+        }
+        if ('poisonRemaining' in partial) {
+          poisonRemaining = partial.poisonRemaining;
+        }
+        if ('bloodMoonActive' in partial) {
+          bloodMoonActive = partial.bloodMoonActive;
+        }
+        if ('dayCount' in partial) {
+          dayCount = partial.dayCount;
+        }
+        if ('mayor' in partial) {
+          mayor = partial.mayor;
+        }
+        if ('nightMode' in partial) {
+          nightMode = partial.nightMode;
+        }
+        if ('dayMode' in partial) {
+          dayMode = partial.dayMode;
+        }
+        if (Array.isArray(partial.nightSteps)) {
+          nightSteps = partial.nightSteps.slice();
+        }
+        if ('nightIndex' in partial) {
+          nightIndex = partial.nightIndex;
+        }
+        if (Array.isArray(partial.currentNightVictims)) {
+          currentNightVictims = partial.currentNightVictims.slice();
+        }
+        if ('michaelJacksonAccusations' in partial) {
+          michaelJacksonAccusations = JSON.parse(JSON.stringify(partial.michaelJacksonAccusations || {}));
+        }
+        if ('jagerDiedLastNight' in partial) {
+          jagerDiedLastNight = partial.jagerDiedLastNight;
+        }
+        if ('nightCounter' in partial) {
+          nightCounter = partial.nightCounter;
+        }
+        if ('peaceDays' in partial) {
+          peaceDays = partial.peaceDays;
+        }
+        renderNarratorDashboard();
+      },
+      renderNarratorDashboard,
+      getDashboardSnapshot() {
+        return {
+          phase: dashboardPhaseEl ? dashboardPhaseEl.textContent : '',
+          teamCounts: dashboardTeamCountsEl ? dashboardTeamCountsEl.textContent : '',
+          roleCounts: dashboardRoleCountsEl
+            ? Array.from(dashboardRoleCountsEl.querySelectorAll('li')).map(li => li.textContent)
+            : [],
+          mayor: dashboardMayorEl ? dashboardMayorEl.textContent : '',
+          spotlight: dashboardSpotlightEl ? dashboardSpotlightEl.textContent : '',
+          silenced: dashboardSilencedEl ? dashboardSilencedEl.textContent : '',
+          events: dashboardEventsEl
+            ? Array.from(dashboardEventsEl.querySelectorAll('li')).map(li => li.textContent)
+            : []
+        };
+      },
+      handlePlayerDeath,
+      electMayor,
+      advanceNight,
+      runMacro(id) {
+        const macro = adminMacros.find(entry => entry.id === id);
+        if (!macro) {
+          return false;
+        }
+        const result = macro.execute();
+        return !!result;
+      },
+      getActionLog() {
+        return actionLog.slice();
+      },
+      phaseTimerManager
+    };
+  }
+
+  renderNarratorDashboard();
 
 });
