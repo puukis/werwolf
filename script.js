@@ -278,6 +278,9 @@ document.addEventListener("DOMContentLoaded", () => {
   let poisonRemaining = 1;
   let selectedWitchAction = null;
   let bloodMoonActive = false;
+  let bodyguardProtectionTarget = null;
+  let bodyguardSavedTarget = null;
+  let bodyguardPlayers = [];
 
   // New roles state
   let henker = null; // { player: "Name", target: "Name" }
@@ -416,6 +419,10 @@ document.addEventListener("DOMContentLoaded", () => {
     michaelJacksonAccusations = synced;
   }
 
+  function updateBodyguardPlayers() {
+    bodyguardPlayers = players.filter((player, index) => rolesAssigned[index] === 'Bodyguard');
+  }
+
 
   let players = [];
   let rolesAssigned = [];
@@ -491,7 +498,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   const categorizedRoles = {
-      village: ["Dorfbewohner", "Seer", "Jäger", "Hexe", "Stumme Jule", "Inquisitor", "Sündenbock", "Geschwister", "Geist"],
+      village: ["Dorfbewohner", "Bodyguard", "Seer", "Jäger", "Hexe", "Stumme Jule", "Inquisitor", "Sündenbock", "Geschwister", "Geist"],
       werwolf: ["Werwolf", "Verfluchte"],
       special: ["Amor", "Trickster", "Henker", "Friedenstifter", "Michael Jackson"]
   };
@@ -503,6 +510,7 @@ document.addEventListener("DOMContentLoaded", () => {
     Hexe: "Hat einen Heil- und einen Gifttrank.",
     Seer: "Kann jede Nacht die Rolle eines Spielers sehen.",
     Jäger: "Darf vor seinem Tod einen Spieler erschießen.",
+    Bodyguard: "Wählt jede Nacht eine Person und schützt sie vor Angriffen der Werwölfe.",
     Amor: "Verknüpft zwei Liebende, die gemeinsam gewinnen.",
     Trickster: "Gewinnt, wenn er gelyncht wird, bevor die Werwölfe gewinnen.",
     "Stumme Jule": "Wählt jede Nacht jemanden, der bis zum nächsten Tag nicht reden darf.",
@@ -517,8 +525,9 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   /* -------------------- Erste Nacht Logik -------------------- */
-  const nightSequence = ["Henker", "Geschwister", "Amor", "Seer", "Inquisitor", "Werwolf", "Hexe", "Stumme Jule"];
+  const nightSequence = ["Bodyguard", "Henker", "Geschwister", "Amor", "Seer", "Inquisitor", "Werwolf", "Hexe", "Stumme Jule"];
   const nightTexts = {
+    Bodyguard: "Der Bodyguard wacht auf. Bitte wähle eine Person zum Beschützen.",
     Henker: "Der Henker wacht auf und erfährt sein Ziel.",
     Amor: "Amor wacht auf. Bitte wähle zwei Liebende.",
     Seer: "Der Seher wacht auf. Bitte wähle eine Person zum Ansehen.",
@@ -903,6 +912,8 @@ document.addEventListener("DOMContentLoaded", () => {
       witchActions.style.display = "flex";
       nightChoices.innerHTML = "";
       nightChoices.style.display = "none";
+    } else if (role === "Bodyguard") {
+      renderPlayerChoices(1, players.filter((p) => !deadPlayers.includes(p)));
     } else if (role === "Seer") {
       // Show living players for Seer to check - no clear button needed
       renderPlayerChoices(1, players.filter((p) => !deadPlayers.includes(p)));
@@ -1754,7 +1765,28 @@ document.addEventListener("DOMContentLoaded", () => {
     // Only check for dead players at the start of the night phase
     
     // Handle selections before moving on
-    if (role === "Hexe") {
+    if (role === "Bodyguard") {
+      const selected = nightChoices.querySelector(".player-btn.selected");
+      if (!selected) {
+        showInfoMessage({
+          title: 'Ziel erforderlich',
+          text: 'Bitte wähle eine Person zum Beschützen aus.',
+          confirmText: 'Okay',
+          log: { type: 'error', label: 'Bodyguard ohne Ziel', detail: 'Der Bodyguard benötigt eine Auswahl.' }
+        });
+        return;
+      }
+      const name = selected.textContent;
+      showConfirmation('Schutz bestätigen?', `Willst du ${name} in dieser Nacht beschützen?`, () => {
+        bodyguardProtectionTarget = name;
+        bodyguardSavedTarget = null;
+        resultOutput.innerHTML += `<br>Der Bodyguard beschützt ${name}.`;
+        logAction({ type: 'night', label: 'Bodyguard schützt', detail: name });
+        renderNarratorDashboard();
+        moveToNextNightStep();
+      });
+      return;
+    } else if (role === "Hexe") {
       if (!selectedWitchAction) {
         // Witch skipped actions, so just proceed
         moveToNextNightStep();
@@ -1877,6 +1909,14 @@ document.addEventListener("DOMContentLoaded", () => {
       showConfirmation("Opfer auswählen?", `Willst du ${victimNames} wirklich fressen?`, () => {
         selected.forEach(victimBtn => {
           const victim = victimBtn.textContent;
+
+          if (bodyguardProtectionTarget === victim) {
+            bodyguardSavedTarget = victim;
+            resultOutput.innerHTML += `<br>Der Bodyguard hat ${victim} vor den Werwölfen gerettet!`;
+            logAction({ type: 'night', label: 'Bodyguard Rettung', detail: victim });
+            return;
+          }
+
           const victimIndex = players.indexOf(victim);
           const victimRole = rolesAssigned[victimIndex];
 
@@ -1917,6 +1957,8 @@ document.addEventListener("DOMContentLoaded", () => {
             }
           });
         });
+        bodyguardProtectionTarget = null;
+        renderNarratorDashboard();
         moveToNextNightStep();
       });
       return; // Wait for confirmation
@@ -2070,6 +2112,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Reset state for new night
     currentNightVictims = [];
+    bodyguardProtectionTarget = null;
+    bodyguardSavedTarget = null;
     nightMode = true;
     nightIndex = 0;
 
@@ -2402,9 +2446,11 @@ document.addEventListener("DOMContentLoaded", () => {
         peaceDays = 0;
         jagerShotUsed = false;
         jagerDiedLastNight = null;
+        bodyguardProtectionTarget = null;
+        bodyguardSavedTarget = null;
         initializeMichaelJacksonAccusations();
 
-        const villageTeamRoles = ["Dorfbewohner", "Seer", "Jäger", "Hexe", "Stumme Jule", "Inquisitor", "Verfluchte", "Sündenbock", "Geschwister", "Geist", "Michael Jackson"];
+        const villageTeamRoles = ["Dorfbewohner", "Bodyguard", "Seer", "Jäger", "Hexe", "Stumme Jule", "Inquisitor", "Verfluchte", "Sündenbock", "Geschwister", "Geist", "Michael Jackson"];
         const villagersForHenkerTarget = [];
 
         players.forEach((p, i) => {
@@ -2421,6 +2467,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 geist.player = p;
             }
         });
+
+        updateBodyguardPlayers();
 
         // Assign a target to the Henker (must not be the Henker themselves)
         if (henker) {
@@ -2680,7 +2728,10 @@ document.addEventListener("DOMContentLoaded", () => {
           lastAccusationDay
         };
         return acc;
-      }, {})
+      }, {}),
+      bodyguardPlayers: bodyguardPlayers.slice(),
+      bodyguardProtectionTarget,
+      bodyguardSavedTarget
     };
 
     let sessions = JSON.parse(localStorage.getItem('werwolfSessions')) || [];
@@ -2758,6 +2809,12 @@ document.addEventListener("DOMContentLoaded", () => {
     nightIndex = session.nightIndex || 0;
     nightCounter = session.nightCounter || 0;
     initializeMichaelJacksonAccusations(session.michaelJacksonAccusations || {});
+    updateBodyguardPlayers();
+    if (Array.isArray(session.bodyguardPlayers)) {
+      bodyguardPlayers = session.bodyguardPlayers.slice();
+    }
+    bodyguardProtectionTarget = session.bodyguardProtectionTarget || null;
+    bodyguardSavedTarget = session.bodyguardSavedTarget || null;
     dayAnnouncements = [];
     currentDayAdditionalParagraphs = [];
     dayIntroHtml = '';
@@ -3048,6 +3105,12 @@ document.addEventListener("DOMContentLoaded", () => {
       if (bloodMoonActive) {
         events.push('Blutmond aktiv');
       }
+      if (nightMode && bodyguardProtectionTarget) {
+        events.push(`Bodyguard schützt: ${bodyguardProtectionTarget}`);
+      }
+      if (bodyguardSavedTarget) {
+        events.push(`Bodyguard Rettung: ${bodyguardSavedTarget}`);
+      }
       if (currentNightVictims.length > 0) {
         events.push(`Ausstehende Nachtopfer: ${currentNightVictims.join(', ')}`);
       }
@@ -3133,7 +3196,10 @@ document.addEventListener("DOMContentLoaded", () => {
       peaceDays,
       jagerShotUsed,
       jagerDiedLastNight,
-      nightCounter
+      nightCounter,
+      bodyguardPlayers: bodyguardPlayers.slice(),
+      bodyguardProtectionTarget,
+      bodyguardSavedTarget
     };
   }
 
@@ -3176,6 +3242,12 @@ document.addEventListener("DOMContentLoaded", () => {
     jagerShotUsed = !!snapshot.jagerShotUsed;
     jagerDiedLastNight = snapshot.jagerDiedLastNight || null;
     nightCounter = snapshot.nightCounter || 0;
+    updateBodyguardPlayers();
+    if (Array.isArray(snapshot.bodyguardPlayers)) {
+      bodyguardPlayers = snapshot.bodyguardPlayers.slice();
+    }
+    bodyguardProtectionTarget = snapshot.bodyguardProtectionTarget || null;
+    bodyguardSavedTarget = snapshot.bodyguardSavedTarget || null;
 
     updatePlayerCardVisuals();
     populateAdminKillSelect();
@@ -3349,7 +3421,8 @@ document.addEventListener("DOMContentLoaded", () => {
     undo: 'Undo',
     redo: 'Redo',
     info: 'Info',
-    error: 'Fehler'
+    error: 'Fehler',
+    night: 'Nacht'
   };
 
   function formatTimestamp(date) {
@@ -3875,6 +3948,7 @@ document.addEventListener("DOMContentLoaded", () => {
         rolesAssigned[playerIndex] = newRole;
         updateRevealCardRoleText(playerToChange, newRole);
         initializeMichaelJacksonAccusations();
+        updateBodyguardPlayers();
 
         recordAction({
           type: 'admin',
@@ -3883,10 +3957,12 @@ document.addEventListener("DOMContentLoaded", () => {
           undo: () => {
             rolesAssigned[playerIndex] = previousRole;
             updateRevealCardRoleText(playerToChange, previousRole || '');
+            updateBodyguardPlayers();
           },
           redo: () => {
             rolesAssigned[playerIndex] = newRole;
             updateRevealCardRoleText(playerToChange, newRole);
+            updateBodyguardPlayers();
           }
         });
 
@@ -4158,15 +4234,21 @@ document.addEventListener("DOMContentLoaded", () => {
           jagerDiedLastNight,
           nightCounter,
           peaceDays,
-          actionLog: actionLog.slice()
+          actionLog: actionLog.slice(),
+          bodyguardPlayers: bodyguardPlayers.slice(),
+          bodyguardProtectionTarget,
+          bodyguardSavedTarget
         };
       },
       setState(partial = {}) {
+        let recalcBodyguards = false;
         if (Array.isArray(partial.players)) {
           players = partial.players.slice();
+          recalcBodyguards = true;
         }
         if (Array.isArray(partial.rolesAssigned)) {
           rolesAssigned = partial.rolesAssigned.slice();
+          recalcBodyguards = true;
         }
         if (Array.isArray(partial.deadPlayers)) {
           deadPlayers = partial.deadPlayers.slice();
@@ -4218,6 +4300,18 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if ('peaceDays' in partial) {
           peaceDays = partial.peaceDays;
+        }
+        if (Array.isArray(partial.bodyguardPlayers)) {
+          bodyguardPlayers = partial.bodyguardPlayers.slice();
+        }
+        if ('bodyguardProtectionTarget' in partial) {
+          bodyguardProtectionTarget = partial.bodyguardProtectionTarget;
+        }
+        if ('bodyguardSavedTarget' in partial) {
+          bodyguardSavedTarget = partial.bodyguardSavedTarget;
+        }
+        if (recalcBodyguards) {
+          updateBodyguardPlayers();
         }
         renderNarratorDashboard();
       },
