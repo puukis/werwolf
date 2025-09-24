@@ -53,9 +53,6 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     });
   }
-
-  // Load existing sessions on startup
-  loadSessions();
   
   // Theme toggle button
   const themeToggle = document.getElementById('theme-toggle');
@@ -90,6 +87,69 @@ document.addEventListener("DOMContentLoaded", () => {
   const witchActions = document.getElementById("witch-actions");
   const eventsEnabledCheckbox = document.getElementById('events-enabled');
   const revealDeadRolesCheckbox = document.getElementById('reveal-dead-roles');
+  const bodyguardJobChanceInput = document.getElementById('bodyguard-job-chance');
+  const bodyguardJobChanceDisplay = document.getElementById('bodyguard-job-chance-display');
+  const JOB_CONFIG_STORAGE_KEY = 'werwolfJobConfig';
+  const defaultJobConfig = { bodyguardChance: 0 };
+  let jobConfig = loadJobConfig();
+
+  function loadJobConfig() {
+    try {
+      const raw = localStorage.getItem(JOB_CONFIG_STORAGE_KEY);
+      if (!raw) {
+        return { ...defaultJobConfig };
+      }
+      const parsed = JSON.parse(raw);
+      const rawChance = typeof parsed.bodyguardChance === 'number'
+        ? parsed.bodyguardChance
+        : defaultJobConfig.bodyguardChance;
+      const normalized = Number.isFinite(rawChance)
+        ? Math.min(Math.max(rawChance, 0), 1)
+        : defaultJobConfig.bodyguardChance;
+      return { bodyguardChance: normalized };
+    } catch (error) {
+      return { ...defaultJobConfig };
+    }
+  }
+
+  function saveJobConfig() {
+    try {
+      const payload = {
+        bodyguardChance: Math.min(Math.max(jobConfig.bodyguardChance || 0, 0), 1)
+      };
+      localStorage.setItem(JOB_CONFIG_STORAGE_KEY, JSON.stringify(payload));
+    } catch (error) {
+      // Ignore storage errors
+    }
+  }
+
+  function updateBodyguardChanceUI(percent, { save = false } = {}) {
+    const numeric = Number(percent);
+    const sanitized = Number.isFinite(numeric)
+      ? Math.min(Math.max(Math.round(numeric), 0), 100)
+      : 0;
+    jobConfig.bodyguardChance = sanitized / 100;
+    if (bodyguardJobChanceInput && bodyguardJobChanceInput.value !== String(sanitized)) {
+      bodyguardJobChanceInput.value = String(sanitized);
+    }
+    if (bodyguardJobChanceDisplay) {
+      bodyguardJobChanceDisplay.textContent = `${sanitized}%`;
+    }
+    if (save) {
+      saveJobConfig();
+    }
+  }
+
+  updateBodyguardChanceUI(jobConfig.bodyguardChance * 100, { save: false });
+
+  if (bodyguardJobChanceInput) {
+    bodyguardJobChanceInput.addEventListener('input', () => {
+      updateBodyguardChanceUI(bodyguardJobChanceInput.value, { save: true });
+    });
+  }
+
+  // Load existing sessions on startup
+  loadSessions();
 
   // Confirmation Modal Elements
   const confirmationModal = document.getElementById('confirmation-modal');
@@ -279,6 +339,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let selectedWitchAction = null;
   let bloodMoonActive = false;
   let bodyguardProtectionTarget = null;
+  let bodyguardProtectionNight = null;
   let bodyguardSavedTarget = null;
   let bodyguardPlayers = [];
 
@@ -419,13 +480,137 @@ document.addEventListener("DOMContentLoaded", () => {
     michaelJacksonAccusations = synced;
   }
 
+  function ensureJobsStructure() {
+    if (!Array.isArray(jobsAssigned)) {
+      jobsAssigned = [];
+    }
+    if (jobsAssigned.length !== players.length) {
+      const previous = jobsAssigned;
+      jobsAssigned = players.map((_, index) => Array.isArray(previous[index]) ? previous[index] : []);
+    } else {
+      jobsAssigned = jobsAssigned.map(entry => Array.isArray(entry) ? entry : []);
+    }
+  }
+
+  function getPlayerJobs(index) {
+    ensureJobsStructure();
+    if (!Array.isArray(jobsAssigned[index])) {
+      jobsAssigned[index] = [];
+    }
+    return jobsAssigned[index];
+  }
+
+  function formatRoleWithJobs(role, jobs) {
+    if (!role) {
+      return Array.isArray(jobs) && jobs.length ? jobs.join(' & ') : '';
+    }
+    if (!Array.isArray(jobs) || jobs.length === 0) {
+      return role;
+    }
+    return `${role} & ${jobs.join(' & ')}`;
+  }
+
+  function findBodyguardHolderIndex() {
+    ensureJobsStructure();
+    for (let i = 0; i < jobsAssigned.length; i += 1) {
+      const jobs = jobsAssigned[i];
+      if (Array.isArray(jobs) && jobs.includes('Bodyguard')) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  function assignBodyguardJobToIndex(index) {
+    if (typeof index !== 'number' || index < 0 || index >= players.length) {
+      return false;
+    }
+    ensureJobsStructure();
+    const currentIndex = findBodyguardHolderIndex();
+    if (currentIndex === index) {
+      return true;
+    }
+    if (currentIndex !== -1) {
+      const currentJobs = jobsAssigned[currentIndex];
+      const pos = currentJobs.indexOf('Bodyguard');
+      if (pos !== -1) {
+        currentJobs.splice(pos, 1);
+      }
+    }
+    const jobs = getPlayerJobs(index);
+    if (!jobs.includes('Bodyguard')) {
+      jobs.push('Bodyguard');
+    }
+    return true;
+  }
+
+  function assignBodyguardJobByChance() {
+    if (!jobConfig || typeof jobConfig.bodyguardChance !== 'number') {
+      return null;
+    }
+    const chance = Math.min(Math.max(jobConfig.bodyguardChance, 0), 1);
+    if (chance <= 0) {
+      return null;
+    }
+    const existingIndex = findBodyguardHolderIndex();
+    if (existingIndex !== -1) {
+      return players[existingIndex] || null;
+    }
+    if (Math.random() >= chance) {
+      return null;
+    }
+    const eligible = players
+      .map((player, index) => ({ player, index }))
+      .filter(({ index }) => bodyguardEligibleRoles.has(rolesAssigned[index]));
+    if (eligible.length === 0) {
+      return null;
+    }
+    const choice = eligible[Math.floor(Math.random() * eligible.length)];
+    assignBodyguardJobToIndex(choice.index);
+    return choice.player;
+  }
+
+  function removeBodyguardJobFromIndex(index) {
+    ensureJobsStructure();
+    if (typeof index !== 'number' || index < 0 || index >= jobsAssigned.length) {
+      return;
+    }
+    const jobs = jobsAssigned[index];
+    if (!Array.isArray(jobs)) {
+      return;
+    }
+    const pos = jobs.indexOf('Bodyguard');
+    if (pos !== -1) {
+      jobs.splice(pos, 1);
+    }
+  }
+
+  function hasActiveBodyguard() {
+    ensureJobsStructure();
+    return players.some((player, index) => {
+      if (deadPlayers.includes(player)) {
+        return false;
+      }
+      const jobs = jobsAssigned[index];
+      return Array.isArray(jobs) && jobs.includes('Bodyguard');
+    });
+  }
+
   function updateBodyguardPlayers() {
-    bodyguardPlayers = players.filter((player, index) => rolesAssigned[index] === 'Bodyguard');
+    ensureJobsStructure();
+    bodyguardPlayers = players.filter((player, index) => {
+      if (deadPlayers.includes(player)) {
+        return false;
+      }
+      const jobs = jobsAssigned[index];
+      return Array.isArray(jobs) && jobs.includes('Bodyguard');
+    });
   }
 
 
   let players = [];
   let rolesAssigned = [];
+  let jobsAssigned = [];
   let currentIndex = 0;
   let revealed = false;
 
@@ -498,7 +683,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   const categorizedRoles = {
-      village: ["Dorfbewohner", "Bodyguard", "Seer", "Jäger", "Hexe", "Stumme Jule", "Inquisitor", "Sündenbock", "Geschwister", "Geist"],
+      village: ["Dorfbewohner", "Seer", "Jäger", "Hexe", "Stumme Jule", "Inquisitor", "Sündenbock", "Geschwister", "Geist"],
       werwolf: ["Werwolf", "Verfluchte"],
       special: ["Amor", "Trickster", "Henker", "Friedenstifter", "Michael Jackson"]
   };
@@ -510,7 +695,6 @@ document.addEventListener("DOMContentLoaded", () => {
     Hexe: "Hat einen Heil- und einen Gifttrank.",
     Seer: "Kann jede Nacht die Rolle eines Spielers sehen.",
     Jäger: "Darf vor seinem Tod einen Spieler erschießen.",
-    Bodyguard: "Wählt jede Nacht eine Person und schützt sie vor Angriffen der Werwölfe.",
     Amor: "Verknüpft zwei Liebende, die gemeinsam gewinnen.",
     Trickster: "Gewinnt, wenn er gelyncht wird, bevor die Werwölfe gewinnen.",
     "Stumme Jule": "Wählt jede Nacht jemanden, der bis zum nächsten Tag nicht reden darf.",
@@ -523,6 +707,25 @@ document.addEventListener("DOMContentLoaded", () => {
     Friedenstifter: "Gewinnt, wenn für zwei aufeinanderfolgende Runden (Tag und Nacht) niemand stirbt.",
     "Michael Jackson": "Dorfbewohner-Sonderrolle: Ab der ersten Beschuldigung zählt seine Stimme doppelt, bei der zweiten Beschuldigung stirbt er sofort."
   };
+
+  const jobDescriptions = {
+    Bodyguard: "Wählt jede Nacht eine Person und schützt sie vor Angriffen der Werwölfe."
+  };
+
+  const bodyguardEligibleRoles = new Set([
+    "Dorfbewohner",
+    "Seer",
+    "Jäger",
+    "Hexe",
+    "Stumme Jule",
+    "Inquisitor",
+    "Verfluchte",
+    "Sündenbock",
+    "Geschwister",
+    "Geist",
+    "Michael Jackson",
+    "Friedenstifter"
+  ]);
 
   /* -------------------- Erste Nacht Logik -------------------- */
   const nightSequence = ["Bodyguard", "Henker", "Geschwister", "Amor", "Seer", "Inquisitor", "Werwolf", "Hexe", "Stumme Jule"];
@@ -688,6 +891,38 @@ document.addEventListener("DOMContentLoaded", () => {
   let isRestoringCheckpoint = false;
   let nightCounter = 0;
 
+  function isBodyguardProtectionActive() {
+    if (!nightMode) {
+      return false;
+    }
+    if (!bodyguardProtectionTarget) {
+      return false;
+    }
+    if (typeof bodyguardProtectionNight === 'number') {
+      return bodyguardProtectionNight === nightCounter;
+    }
+    return true;
+  }
+
+  function isPlayerProtectedThisNight(playerName) {
+    if (!playerName) {
+      return false;
+    }
+    if (!isBodyguardProtectionActive()) {
+      return false;
+    }
+    return bodyguardProtectionTarget === playerName;
+  }
+
+  function registerBodyguardSave(target, { source = null, logLabel = null } = {}) {
+    bodyguardSavedTarget = target;
+    const detail = source ? `${target} – ${source}` : target;
+    const sourceText = source ? ` vor ${source}` : '';
+    resultOutput.innerHTML += `<br>Der Bodyguard hat ${target}${sourceText} gerettet!`;
+    logAction({ type: 'night', label: logLabel || 'Bodyguard Rettung', detail });
+    renderNarratorDashboard();
+  }
+
   function queuePhaseTimer(callback, delay, label = 'Timer') {
     return phaseTimerManager.schedule(callback, delay, label);
   }
@@ -720,6 +955,7 @@ document.addEventListener("DOMContentLoaded", () => {
         };
     }
 
+    updateBodyguardPlayers();
     renderNarratorDashboard();
   }
 
@@ -1779,6 +2015,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const name = selected.textContent;
       showConfirmation('Schutz bestätigen?', `Willst du ${name} in dieser Nacht beschützen?`, () => {
         bodyguardProtectionTarget = name;
+        bodyguardProtectionNight = nightCounter;
         bodyguardSavedTarget = null;
         resultOutput.innerHTML += `<br>Der Bodyguard beschützt ${name}.`;
         logAction({ type: 'night', label: 'Bodyguard schützt', detail: name });
@@ -1825,6 +2062,14 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         const name = target.textContent;
         showConfirmation("Gifttrank einsetzen?", `Willst du ${name} wirklich vergiften? Dieser Trank kann nur einmal pro Spiel verwendet werden.`, () => {
+          const protectedTarget = isPlayerProtectedThisNight(name);
+          if (protectedTarget) {
+            poisonRemaining--;
+            resultOutput.innerHTML += `<br>Die Hexe hat versucht, ${name} zu vergiften!`;
+            registerBodyguardSave(name, { source: 'der Hexe', logLabel: 'Bodyguard Rettung (Hexe)' });
+            moveToNextNightStep();
+            return;
+          }
           if (!deadPlayers.includes(name)) {
             deadPlayers.push(name);
             currentNightVictims.push(name);
@@ -1910,10 +2155,8 @@ document.addEventListener("DOMContentLoaded", () => {
         selected.forEach(victimBtn => {
           const victim = victimBtn.textContent;
 
-          if (bodyguardProtectionTarget === victim) {
-            bodyguardSavedTarget = victim;
-            resultOutput.innerHTML += `<br>Der Bodyguard hat ${victim} vor den Werwölfen gerettet!`;
-            logAction({ type: 'night', label: 'Bodyguard Rettung', detail: victim });
+          if (isPlayerProtectedThisNight(victim)) {
+            registerBodyguardSave(victim, { source: 'den Werwölfen' });
             return;
           }
 
@@ -1957,7 +2200,6 @@ document.addEventListener("DOMContentLoaded", () => {
             }
           });
         });
-        bodyguardProtectionTarget = null;
         renderNarratorDashboard();
         moveToNextNightStep();
       });
@@ -2094,14 +2336,18 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
     
-    const uniqueLivingRoles = Array.from(new Set(livingPlayerRoles));
-    
+    const livingRoleSet = new Set(livingPlayerRoles);
+    const bodyguardActive = hasActiveBodyguard();
+
     // Filter night sequence based on available living roles
     nightSteps = nightSequence.filter((r) => {
-      if (r === "Amor" || r === "Geschwister" || r === "Henker") {
-        return uniqueLivingRoles.includes(r) && dayCount === 0;
+      if (r === "Bodyguard") {
+        return bodyguardActive;
       }
-      return uniqueLivingRoles.includes(r);
+      if (r === "Amor" || r === "Geschwister" || r === "Henker") {
+        return livingRoleSet.has(r) && dayCount === 0;
+      }
+      return livingRoleSet.has(r);
     });
 
     if (nightSteps.length === 0) {
@@ -2113,7 +2359,9 @@ document.addEventListener("DOMContentLoaded", () => {
     // Reset state for new night
     currentNightVictims = [];
     bodyguardProtectionTarget = null;
+    bodyguardProtectionNight = null;
     bodyguardSavedTarget = null;
+    updateBodyguardPlayers();
     nightMode = true;
     nightIndex = 0;
 
@@ -2351,16 +2599,29 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const allCategorizedRoles = [...categorizedRoles.village, ...categorizedRoles.werwolf, ...categorizedRoles.special];
 
+      let legacyBodyguardRole = false;
       lastUsed.roles.forEach(role => {
         const qty = role.quantity || 0;
-        if (categorizedRoles.village.includes(role.name)) {
-            addRoleRow(role.name, qty, rolesContainerVillage);
-        } else if (categorizedRoles.werwolf.includes(role.name)) {
-            addRoleRow(role.name, qty, rolesContainerWerwolf);
+        const roleName = role.name === 'Bodyguard' ? 'Dorfbewohner' : role.name;
+        if (role.name === 'Bodyguard') {
+          legacyBodyguardRole = true;
+        }
+        if (categorizedRoles.village.includes(roleName)) {
+            addRoleRow(roleName, qty, rolesContainerVillage);
+        } else if (categorizedRoles.werwolf.includes(roleName)) {
+            addRoleRow(roleName, qty, rolesContainerWerwolf);
         } else { // Special or custom roles
-            addRoleRow(role.name, qty, rolesContainerSpecial);
+            addRoleRow(roleName, qty, rolesContainerSpecial);
         }
       });
+
+      if (lastUsed.jobConfig && typeof lastUsed.jobConfig.bodyguardChance === 'number') {
+        jobConfig.bodyguardChance = Math.min(Math.max(lastUsed.jobConfig.bodyguardChance, 0), 1);
+        updateBodyguardChanceUI(jobConfig.bodyguardChance * 100, { save: true });
+      } else if (legacyBodyguardRole) {
+        jobConfig.bodyguardChance = 1;
+        updateBodyguardChanceUI(100, { save: true });
+      }
 
     } catch (e) {
       showInfoMessage({
@@ -2413,6 +2674,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const lastUsedOptions = {
       players: playersRaw,
       roles: roleSetup,
+      jobConfig: { bodyguardChance: jobConfig.bodyguardChance }
     };
     localStorage.setItem('werwolfLastUsed', JSON.stringify(lastUsedOptions));
 
@@ -2436,7 +2698,19 @@ document.addEventListener("DOMContentLoaded", () => {
         // Map roles to players
         players = playersRaw;
         rolesAssigned = roles;
+        jobsAssigned = players.map(() => []);
         currentIndex = 0;
+
+        const legacyBodyguardIndices = [];
+        rolesAssigned.forEach((role, index) => {
+          if (role === 'Bodyguard') {
+            legacyBodyguardIndices.push(index);
+            rolesAssigned[index] = 'Dorfbewohner';
+          }
+        });
+        if (legacyBodyguardIndices.length > 0) {
+          assignBodyguardJobToIndex(legacyBodyguardIndices[0]);
+        }
 
         // Reset and set up special roles
         henker = null;
@@ -2447,10 +2721,13 @@ document.addEventListener("DOMContentLoaded", () => {
         jagerShotUsed = false;
         jagerDiedLastNight = null;
         bodyguardProtectionTarget = null;
+        bodyguardProtectionNight = null;
         bodyguardSavedTarget = null;
         initializeMichaelJacksonAccusations();
 
-        const villageTeamRoles = ["Dorfbewohner", "Bodyguard", "Seer", "Jäger", "Hexe", "Stumme Jule", "Inquisitor", "Verfluchte", "Sündenbock", "Geschwister", "Geist", "Michael Jackson"];
+        assignBodyguardJobByChance();
+
+        const villageTeamRoles = ["Dorfbewohner", "Seer", "Jäger", "Hexe", "Stumme Jule", "Inquisitor", "Verfluchte", "Sündenbock", "Geschwister", "Geist", "Michael Jackson"];
         const villagersForHenkerTarget = [];
 
         players.forEach((p, i) => {
@@ -2508,12 +2785,13 @@ document.addEventListener("DOMContentLoaded", () => {
           const back = document.createElement('div');
           back.className = 'reveal-card-back';
           const role = rolesAssigned[index];
+          const jobs = getPlayerJobs(index);
           const roleNameEl = document.createElement('span');
           roleNameEl.className = 'role-name';
           if (role === 'Dorfbewohner') {
             roleNameEl.classList.add('long-text');
           }
-          roleNameEl.textContent = role;
+          roleNameEl.textContent = formatRoleWithJobs(role, jobs);
           back.innerHTML = `<span class="player-name">${player}</span>`;
           back.prepend(roleNameEl);
 
@@ -2522,7 +2800,7 @@ document.addEventListener("DOMContentLoaded", () => {
           infoBtn.textContent = 'Info';
           infoBtn.onclick = (e) => {
             e.stopPropagation(); // Prevent card from flipping back
-            showRoleInfo(role);
+            showRoleInfo(role, { jobs });
           };
           back.appendChild(infoBtn);
 
@@ -2618,15 +2896,35 @@ document.addEventListener("DOMContentLoaded", () => {
         card.classList.remove('dead');
       }
     });
+    updateBodyguardPlayers();
   }
 
-  function showRoleInfo(role) {
+  function showRoleInfo(role, { jobs = [] } = {}) {
     const modal = document.getElementById('role-info-modal');
     const title = document.getElementById('role-info-title');
     const desc = document.getElementById('role-info-desc');
 
-    title.textContent = role;
-    desc.textContent = roleDescriptions[role] || "Keine Beschreibung für diese Rolle verfügbar.";
+    const normalizedRole = role || 'Unbekannte Rolle';
+    const jobList = Array.isArray(jobs) ? jobs.filter(Boolean) : [];
+    const titleText = jobList.length
+      ? `${normalizedRole} (${jobList.join(' + ')})`
+      : normalizedRole;
+
+    title.textContent = titleText;
+
+    const baseDescription = roleDescriptions[normalizedRole] || roleDescriptions[role] || "Keine Beschreibung für diese Rolle verfügbar.";
+    const jobTextSnippets = jobList
+      .map(job => jobDescriptions[job])
+      .filter(Boolean);
+
+    if (jobTextSnippets.length > 0) {
+      const jobHtml = jobTextSnippets
+        .map(text => `<span class="job-description">${text}</span>`)
+        .join('<br>');
+      desc.innerHTML = `${baseDescription}<br><br><strong>Jobs:</strong><br>${jobHtml}`;
+    } else {
+      desc.textContent = baseDescription;
+    }
 
     modal.style.display = 'flex';
   }
@@ -2731,7 +3029,10 @@ document.addEventListener("DOMContentLoaded", () => {
       }, {}),
       bodyguardPlayers: bodyguardPlayers.slice(),
       bodyguardProtectionTarget,
-      bodyguardSavedTarget
+      bodyguardProtectionNight,
+      bodyguardSavedTarget,
+      jobsAssigned: jobsAssigned.map(jobs => Array.isArray(jobs) ? jobs.slice() : []),
+      jobConfig: { bodyguardChance: jobConfig.bodyguardChance }
     };
 
     let sessions = JSON.parse(localStorage.getItem('werwolfSessions')) || [];
@@ -2792,8 +3093,38 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function applySession(session) {
-    players = session.players;
-    rolesAssigned = session.rolesAssigned;
+    players = Array.isArray(session.players) ? session.players.slice() : [];
+    rolesAssigned = Array.isArray(session.rolesAssigned) ? session.rolesAssigned.slice() : [];
+    jobsAssigned = Array.isArray(session.jobsAssigned)
+      ? session.jobsAssigned.map(entry => Array.isArray(entry) ? entry.slice() : [])
+      : players.map(() => []);
+
+    ensureJobsStructure();
+
+    const legacyBodyguardIndices = [];
+    rolesAssigned.forEach((role, index) => {
+      if (role === 'Bodyguard') {
+        legacyBodyguardIndices.push(index);
+        rolesAssigned[index] = 'Dorfbewohner';
+      }
+    });
+    if (legacyBodyguardIndices.length > 0) {
+      assignBodyguardJobToIndex(legacyBodyguardIndices[0]);
+    }
+
+    if (Array.isArray(session.bodyguardPlayers) && session.bodyguardPlayers.length > 0) {
+      session.bodyguardPlayers.forEach(name => {
+        const idx = players.indexOf(name);
+        if (idx !== -1) {
+          assignBodyguardJobToIndex(idx);
+        }
+      });
+    }
+
+    if (session.jobConfig && typeof session.jobConfig.bodyguardChance === 'number') {
+      jobConfig.bodyguardChance = Math.min(Math.max(session.jobConfig.bodyguardChance, 0), 1);
+      updateBodyguardChanceUI(jobConfig.bodyguardChance * 100, { save: true });
+    }
     deadPlayers = session.deadPlayers || [];
     lovers = session.lovers || [];
     silencedPlayer = session.silencedPlayer || null;
@@ -2810,10 +3141,10 @@ document.addEventListener("DOMContentLoaded", () => {
     nightCounter = session.nightCounter || 0;
     initializeMichaelJacksonAccusations(session.michaelJacksonAccusations || {});
     updateBodyguardPlayers();
-    if (Array.isArray(session.bodyguardPlayers)) {
-      bodyguardPlayers = session.bodyguardPlayers.slice();
-    }
     bodyguardProtectionTarget = session.bodyguardProtectionTarget || null;
+    bodyguardProtectionNight = Number.isFinite(session.bodyguardProtectionNight)
+      ? session.bodyguardProtectionNight
+      : null;
     bodyguardSavedTarget = session.bodyguardSavedTarget || null;
     dayAnnouncements = [];
     currentDayAdditionalParagraphs = [];
@@ -2827,7 +3158,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const roleCounts = {};
     session.roles.forEach(r => {
-        roleCounts[r.name] = r.quantity;
+        const name = r.name === 'Bodyguard' ? 'Dorfbewohner' : r.name;
+        roleCounts[name] = (roleCounts[name] || 0) + r.quantity;
     });
 
     rolesContainerVillage.innerHTML = "";
@@ -2882,12 +3214,13 @@ document.addEventListener("DOMContentLoaded", () => {
       const back = document.createElement('div');
       back.className = 'reveal-card-back';
       const role = rolesAssigned[index];
+      const jobs = getPlayerJobs(index);
       const roleNameEl = document.createElement('span');
       roleNameEl.className = 'role-name';
       if (role === 'Dorfbewohner') {
         roleNameEl.classList.add('long-text');
       }
-      roleNameEl.textContent = role;
+      roleNameEl.textContent = formatRoleWithJobs(role, jobs);
       back.innerHTML = `<span class="player-name">${player}</span>`;
       back.prepend(roleNameEl);
       
@@ -2896,7 +3229,7 @@ document.addEventListener("DOMContentLoaded", () => {
       infoBtn.textContent = 'Info';
       infoBtn.onclick = (e) => {
         e.stopPropagation(); // Prevent card from flipping back
-        showRoleInfo(role);
+        showRoleInfo(role, { jobs });
       };
       back.appendChild(infoBtn);
 
@@ -2969,7 +3302,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const data = [];
     players.forEach((player, index) => {
       if (!deadPlayers.includes(player)) {
-        data.push({ player, role: rolesAssigned[index] });
+        const jobs = getPlayerJobs(index);
+        data.push({ player, role: rolesAssigned[index], jobs: Array.isArray(jobs) ? jobs.slice() : [] });
       }
     });
     return data;
@@ -2997,9 +3331,16 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function getRoleCounts(livingData) {
-    return livingData.reduce((acc, { role }) => {
-      if (!role) return acc;
-      acc[role] = (acc[role] || 0) + 1;
+    return livingData.reduce((acc, { role, jobs }) => {
+      if (role) {
+        acc[role] = (acc[role] || 0) + 1;
+      }
+      if (Array.isArray(jobs)) {
+        jobs.forEach(job => {
+          const key = `${job} (Job)`;
+          acc[key] = (acc[key] || 0) + 1;
+        });
+      }
       return acc;
     }, {});
   }
@@ -3105,7 +3446,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (bloodMoonActive) {
         events.push('Blutmond aktiv');
       }
-      if (nightMode && bodyguardProtectionTarget) {
+      if (isBodyguardProtectionActive()) {
         events.push(`Bodyguard schützt: ${bodyguardProtectionTarget}`);
       }
       if (bodyguardSavedTarget) {
@@ -3199,7 +3540,10 @@ document.addEventListener("DOMContentLoaded", () => {
       nightCounter,
       bodyguardPlayers: bodyguardPlayers.slice(),
       bodyguardProtectionTarget,
-      bodyguardSavedTarget
+      bodyguardProtectionNight,
+      bodyguardSavedTarget,
+      jobsAssigned: jobsAssigned.map(jobs => Array.isArray(jobs) ? jobs.slice() : []),
+      jobConfig: { bodyguardChance: jobConfig.bodyguardChance }
     };
   }
 
@@ -3220,6 +3564,36 @@ document.addEventListener("DOMContentLoaded", () => {
   function applyStateSnapshot(snapshot) {
     players = snapshot.players.slice();
     rolesAssigned = snapshot.rolesAssigned.slice();
+    jobsAssigned = Array.isArray(snapshot.jobsAssigned)
+      ? snapshot.jobsAssigned.map(entry => Array.isArray(entry) ? entry.slice() : [])
+      : players.map(() => []);
+
+    ensureJobsStructure();
+
+    const legacyBodyguards = [];
+    rolesAssigned.forEach((role, index) => {
+      if (role === 'Bodyguard') {
+        legacyBodyguards.push(index);
+        rolesAssigned[index] = 'Dorfbewohner';
+      }
+    });
+    if (legacyBodyguards.length > 0) {
+      assignBodyguardJobToIndex(legacyBodyguards[0]);
+    }
+
+    if (Array.isArray(snapshot.bodyguardPlayers) && snapshot.bodyguardPlayers.length > 0) {
+      snapshot.bodyguardPlayers.forEach(name => {
+        const idx = players.indexOf(name);
+        if (idx !== -1) {
+          assignBodyguardJobToIndex(idx);
+        }
+      });
+    }
+
+    if (snapshot.jobConfig && typeof snapshot.jobConfig.bodyguardChance === 'number') {
+      jobConfig.bodyguardChance = Math.min(Math.max(snapshot.jobConfig.bodyguardChance, 0), 1);
+      updateBodyguardChanceUI(jobConfig.bodyguardChance * 100, { save: true });
+    }
     deadPlayers = snapshot.deadPlayers.slice();
     lovers = snapshot.lovers.map(pair => pair.slice());
     silencedPlayer = snapshot.silencedPlayer;
@@ -3243,10 +3617,10 @@ document.addEventListener("DOMContentLoaded", () => {
     jagerDiedLastNight = snapshot.jagerDiedLastNight || null;
     nightCounter = snapshot.nightCounter || 0;
     updateBodyguardPlayers();
-    if (Array.isArray(snapshot.bodyguardPlayers)) {
-      bodyguardPlayers = snapshot.bodyguardPlayers.slice();
-    }
     bodyguardProtectionTarget = snapshot.bodyguardProtectionTarget || null;
+    bodyguardProtectionNight = Number.isFinite(snapshot.bodyguardProtectionNight)
+      ? snapshot.bodyguardProtectionNight
+      : null;
     bodyguardSavedTarget = snapshot.bodyguardSavedTarget || null;
 
     updatePlayerCardVisuals();
@@ -3542,7 +3916,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  function updateRevealCardRoleText(playerName, roleName) {
+  function updateRevealCardRoleText(playerName, roleName, jobs = []) {
     const revealGrid = document.getElementById('reveal-grid');
     if (!revealGrid) return;
     const cards = revealGrid.querySelectorAll('.reveal-card');
@@ -3552,8 +3926,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const backOfCard = card.querySelector('.reveal-card-back');
         const roleNameEl = backOfCard ? backOfCard.querySelector('.role-name') : null;
         if (roleNameEl) {
-          roleNameEl.textContent = roleName || '';
-          if (roleName === 'Dorfbewohner') {
+          const displayName = formatRoleWithJobs(roleName, Array.isArray(jobs) ? jobs : []);
+          roleNameEl.textContent = displayName || '';
+          if (roleName === 'Dorfbewohner' && (!Array.isArray(jobs) || jobs.length === 0)) {
             roleNameEl.classList.add('long-text');
           } else {
             roleNameEl.classList.remove('long-text');
@@ -3615,10 +3990,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
     adminChangeRoleRoleSelect.innerHTML = '';
     const allRoles = [...categorizedRoles.village, ...categorizedRoles.werwolf, ...categorizedRoles.special];
-    allRoles.forEach(r => {
+    const roleOptionValues = [...allRoles, 'Bodyguard'];
+    roleOptionValues.forEach(r => {
       const option = document.createElement('option');
       option.value = r;
-      option.textContent = r;
+      option.textContent = r === 'Bodyguard' ? 'Bodyguard (Job)' : r;
       adminChangeRoleRoleSelect.appendChild(option);
     });
   }
@@ -3938,35 +4314,66 @@ document.addEventListener("DOMContentLoaded", () => {
           return;
         }
 
-        const previousRole = rolesAssigned[playerIndex];
-        if (previousRole === newRole) {
-          logAction({ type: 'info', label: 'Keine Rollenänderung notwendig', detail: `${playerToChange} besitzt bereits die Rolle ${newRole}.` });
-          showConfirmation('Keine Änderung', `${playerToChange} hat bereits die Rolle ${newRole}.`, () => {}, 'Okay', false);
+        let previousRole = rolesAssigned[playerIndex];
+        const previousJobs = getPlayerJobs(playerIndex).slice();
+        if (previousRole === 'Bodyguard') {
+          previousRole = 'Dorfbewohner';
+          if (!previousJobs.includes('Bodyguard')) {
+            previousJobs.push('Bodyguard');
+          }
+        }
+
+        const appliedRole = newRole === 'Bodyguard' ? 'Dorfbewohner' : newRole;
+        const hasBodyguardJob = previousJobs.includes('Bodyguard');
+        const wantsBodyguard = newRole === 'Bodyguard';
+
+        if (appliedRole === previousRole && hasBodyguardJob === wantsBodyguard) {
+          const labelText = formatRoleWithJobs(previousRole, previousJobs);
+          logAction({ type: 'info', label: 'Keine Rollenänderung notwendig', detail: `${playerToChange} besitzt bereits ${labelText}.` });
+          showConfirmation('Keine Änderung', `${playerToChange} hat bereits ${labelText}.`, () => {}, 'Okay', false);
           return;
         }
 
-        rolesAssigned[playerIndex] = newRole;
-        updateRevealCardRoleText(playerToChange, newRole);
+        rolesAssigned[playerIndex] = appliedRole;
+        if (wantsBodyguard) {
+          assignBodyguardJobToIndex(playerIndex);
+        } else {
+          removeBodyguardJobFromIndex(playerIndex);
+        }
+        const newJobs = getPlayerJobs(playerIndex).slice();
+
+        updateRevealCardRoleText(playerToChange, appliedRole, newJobs);
         initializeMichaelJacksonAccusations();
         updateBodyguardPlayers();
+
+        const previousLabel = formatRoleWithJobs(previousRole, previousJobs);
+        const newLabel = formatRoleWithJobs(appliedRole, newJobs);
 
         recordAction({
           type: 'admin',
           label: `Rollenwechsel: ${playerToChange}`,
-          detail: `${previousRole || 'Unbekannt'} → ${newRole}`,
+          detail: `${previousLabel || 'Unbekannt'} → ${newLabel}`,
           undo: () => {
             rolesAssigned[playerIndex] = previousRole;
-            updateRevealCardRoleText(playerToChange, previousRole || '');
+            removeBodyguardJobFromIndex(playerIndex);
+            if (previousJobs.includes('Bodyguard')) {
+              assignBodyguardJobToIndex(playerIndex);
+            }
+            updateRevealCardRoleText(playerToChange, previousRole || '', getPlayerJobs(playerIndex));
             updateBodyguardPlayers();
           },
           redo: () => {
-            rolesAssigned[playerIndex] = newRole;
-            updateRevealCardRoleText(playerToChange, newRole);
+            rolesAssigned[playerIndex] = appliedRole;
+            removeBodyguardJobFromIndex(playerIndex);
+            if (newJobs.includes('Bodyguard')) {
+              assignBodyguardJobToIndex(playerIndex);
+            }
+            updateRevealCardRoleText(playerToChange, appliedRole, getPlayerJobs(playerIndex));
             updateBodyguardPlayers();
           }
         });
 
-        showConfirmation('Rolle geändert', `Die Rolle von ${playerToChange} wurde zu ${newRole} geändert.`, () => {}, 'Okay', false);
+        showConfirmation('Rolle geändert', `Die Rolle von ${playerToChange} wurde zu ${newLabel} geändert.`, () => {}, 'Okay', false);
       });
     });
   }
@@ -4170,7 +4577,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const list = document.createElement('ul');
     players.forEach((player, index) => {
         const item = document.createElement('li');
-        item.textContent = `${player}: ${rolesAssigned[index]}`;
+        const jobs = getPlayerJobs(index);
+        const label = formatRoleWithJobs(rolesAssigned[index], jobs);
+        item.textContent = `${player}: ${label}`;
         if (deadPlayers.includes(player)) {
             item.classList.add('dead');
         }
@@ -4198,11 +4607,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const playerIndex = players.indexOf(selectedPlayer);
     const role = rolesAssigned[playerIndex];
+    const jobs = getPlayerJobs(playerIndex);
 
     rolesOverviewContent.innerHTML = '';
     const p = document.createElement('p');
     p.className = 'single-role-display';
-    p.textContent = `${selectedPlayer}: ${role}`;
+    p.textContent = `${selectedPlayer}: ${formatRoleWithJobs(role, jobs)}`;
     if (deadPlayers.includes(selectedPlayer)) {
         p.classList.add('dead');
     }
@@ -4237,7 +4647,10 @@ document.addEventListener("DOMContentLoaded", () => {
           actionLog: actionLog.slice(),
           bodyguardPlayers: bodyguardPlayers.slice(),
           bodyguardProtectionTarget,
-          bodyguardSavedTarget
+          bodyguardProtectionNight,
+          bodyguardSavedTarget,
+          jobsAssigned: jobsAssigned.map(jobs => Array.isArray(jobs) ? jobs.slice() : []),
+          jobConfig: { bodyguardChance: jobConfig.bodyguardChance }
         };
       },
       setState(partial = {}) {
@@ -4248,6 +4661,10 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if (Array.isArray(partial.rolesAssigned)) {
           rolesAssigned = partial.rolesAssigned.slice();
+          recalcBodyguards = true;
+        }
+        if (Array.isArray(partial.jobsAssigned)) {
+          jobsAssigned = partial.jobsAssigned.map(entry => Array.isArray(entry) ? entry.slice() : []);
           recalcBodyguards = true;
         }
         if (Array.isArray(partial.deadPlayers)) {
@@ -4301,17 +4718,48 @@ document.addEventListener("DOMContentLoaded", () => {
         if ('peaceDays' in partial) {
           peaceDays = partial.peaceDays;
         }
-        if (Array.isArray(partial.bodyguardPlayers)) {
-          bodyguardPlayers = partial.bodyguardPlayers.slice();
-        }
         if ('bodyguardProtectionTarget' in partial) {
           bodyguardProtectionTarget = partial.bodyguardProtectionTarget;
+        }
+        if ('bodyguardProtectionNight' in partial) {
+          bodyguardProtectionNight = Number.isFinite(partial.bodyguardProtectionNight)
+            ? partial.bodyguardProtectionNight
+            : null;
         }
         if ('bodyguardSavedTarget' in partial) {
           bodyguardSavedTarget = partial.bodyguardSavedTarget;
         }
-        if (recalcBodyguards) {
+        if (partial.jobConfig && typeof partial.jobConfig.bodyguardChance === 'number') {
+          jobConfig.bodyguardChance = Math.min(Math.max(partial.jobConfig.bodyguardChance, 0), 1);
+          updateBodyguardChanceUI(jobConfig.bodyguardChance * 100, { save: true });
+        }
+
+        if (recalcBodyguards || Array.isArray(partial.jobsAssigned) || Array.isArray(partial.bodyguardPlayers)) {
+          ensureJobsStructure();
+          const legacyBodyguards = [];
+          rolesAssigned.forEach((role, index) => {
+            if (role === 'Bodyguard') {
+              legacyBodyguards.push(index);
+              rolesAssigned[index] = 'Dorfbewohner';
+            }
+          });
+          if (legacyBodyguards.length > 0) {
+            assignBodyguardJobToIndex(legacyBodyguards[0]);
+          }
+          if (Array.isArray(partial.bodyguardPlayers)) {
+            partial.bodyguardPlayers.forEach(name => {
+              const idx = players.indexOf(name);
+              if (idx !== -1) {
+                assignBodyguardJobToIndex(idx);
+              }
+            });
+          }
           updateBodyguardPlayers();
+          recalcBodyguards = false;
+        } else if (recalcBodyguards) {
+          ensureJobsStructure();
+          updateBodyguardPlayers();
+          recalcBodyguards = false;
         }
         renderNarratorDashboard();
       },
