@@ -88,14 +88,20 @@ document.addEventListener("DOMContentLoaded", () => {
   const revealDeadRolesCheckbox = document.getElementById('reveal-dead-roles');
   const bloodMoonChanceInput = document.getElementById('blood-moon-chance');
   const bloodMoonChanceDisplay = document.getElementById('blood-moon-chance-display');
+  const phoenixPulseChanceInput = document.getElementById('phoenix-pulse-chance');
+  const phoenixPulseChanceDisplay = document.getElementById('phoenix-pulse-chance-display');
   const bodyguardJobChanceInput = document.getElementById('bodyguard-job-chance');
   const bodyguardJobChanceDisplay = document.getElementById('bodyguard-job-chance-display');
   const JOB_CONFIG_STORAGE_KEY = 'werwolfJobConfig';
   const BLOOD_MOON_CONFIG_STORAGE_KEY = 'werwolfBloodMoonConfig';
+  const DEFAULT_PHOENIX_PULSE_CHANCE = 0.05;
+  const PHOENIX_PULSE_CONFIG_STORAGE_KEY = 'werwolfPhoenixPulseConfig';
   const defaultJobConfig = { bodyguardChance: 0 };
   const defaultBloodMoonConfig = { baseChance: 0.2 };
+  const defaultPhoenixPulseConfig = { chance: DEFAULT_PHOENIX_PULSE_CHANCE };
   let jobConfig = loadJobConfig();
   let bloodMoonConfig = loadBloodMoonConfig();
+  let phoenixPulseConfig = loadPhoenixPulseConfig();
 
   function loadJobConfig() {
     try {
@@ -157,6 +163,36 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function loadPhoenixPulseConfig() {
+    try {
+      const raw = localStorage.getItem(PHOENIX_PULSE_CONFIG_STORAGE_KEY);
+      if (!raw) {
+        return { ...defaultPhoenixPulseConfig };
+      }
+      const parsed = JSON.parse(raw);
+      const rawChance = typeof parsed.chance === 'number'
+        ? parsed.chance
+        : defaultPhoenixPulseConfig.chance;
+      const normalized = Number.isFinite(rawChance)
+        ? Math.min(Math.max(rawChance, 0), 1)
+        : defaultPhoenixPulseConfig.chance;
+      return { chance: normalized };
+    } catch (error) {
+      return { ...defaultPhoenixPulseConfig };
+    }
+  }
+
+  function savePhoenixPulseConfig() {
+    try {
+      const payload = {
+        chance: Math.min(Math.max(phoenixPulseConfig.chance || 0, 0), 1)
+      };
+      localStorage.setItem(PHOENIX_PULSE_CONFIG_STORAGE_KEY, JSON.stringify(payload));
+    } catch (error) {
+      // Ignore storage errors
+    }
+  }
+
   function setBloodMoonBaseChance(percent, { save = false } = {}) {
     const numeric = Number(percent);
     const sanitizedPercent = Number.isFinite(numeric)
@@ -173,6 +209,31 @@ document.addEventListener("DOMContentLoaded", () => {
     if (save) {
       saveBloodMoonConfig();
     }
+  }
+
+  function setPhoenixPulseChance(percent, { save = false } = {}) {
+    const numeric = Number(percent);
+    const sanitizedPercent = Number.isFinite(numeric)
+      ? Math.min(Math.max(Math.round(numeric), 0), 100)
+      : Math.round((defaultPhoenixPulseConfig.chance || 0) * 100);
+    const normalized = sanitizedPercent / 100;
+    phoenixPulseConfig.chance = normalized;
+    if (phoenixPulseChanceInput && phoenixPulseChanceInput.value !== String(sanitizedPercent)) {
+      phoenixPulseChanceInput.value = String(sanitizedPercent);
+    }
+    if (phoenixPulseChanceDisplay) {
+      phoenixPulseChanceDisplay.textContent = `${sanitizedPercent}%`;
+    }
+    if (save) {
+      savePhoenixPulseConfig();
+    }
+  }
+
+  function getPhoenixPulseChance() {
+    const chance = Number.isFinite(phoenixPulseConfig?.chance)
+      ? phoenixPulseConfig.chance
+      : defaultPhoenixPulseConfig.chance;
+    return Math.min(Math.max(chance, 0), 1);
   }
 
   function getBloodMoonChance(pityTimer) {
@@ -204,6 +265,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (bodyguardJobChanceInput) {
     bodyguardJobChanceInput.addEventListener('input', () => {
+      updateBodyguardChanceUI(bodyguardJobChanceInput.value, { save: false });
+    });
+    bodyguardJobChanceInput.addEventListener('change', () => {
       updateBodyguardChanceUI(bodyguardJobChanceInput.value, { save: true });
     });
   }
@@ -212,8 +276,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (bloodMoonChanceInput) {
     bloodMoonChanceInput.addEventListener('input', () => {
+      setBloodMoonBaseChance(bloodMoonChanceInput.value, { save: false });
+      updateBloodMoonOdds();
+    });
+    bloodMoonChanceInput.addEventListener('change', () => {
       setBloodMoonBaseChance(bloodMoonChanceInput.value, { save: true });
       updateBloodMoonOdds();
+    });
+  }
+
+  setPhoenixPulseChance((phoenixPulseConfig.chance || 0) * 100, { save: false });
+
+  if (phoenixPulseChanceInput) {
+    phoenixPulseChanceInput.addEventListener('input', () => {
+      setPhoenixPulseChance(phoenixPulseChanceInput.value, { save: false });
+    });
+    phoenixPulseChanceInput.addEventListener('change', () => {
+      setPhoenixPulseChance(phoenixPulseChanceInput.value, { save: true });
     });
   }
 
@@ -402,8 +481,6 @@ document.addEventListener("DOMContentLoaded", () => {
     winOverlay.classList.add('show');
     winBtn.onclick = () => location.reload();
   }
-
-  const PHOENIX_PULSE_CHANCE = 0.05;
 
   // State tracking
   let lovers = [];
@@ -2537,7 +2614,7 @@ document.addEventListener("DOMContentLoaded", () => {
     localStorage.setItem('bloodMoonPityTimer', bloodMoonPityTimer);
     updateBloodMoonOdds();
 
-    if (Math.random() < PHOENIX_PULSE_CHANCE) {
+    if (Math.random() < getPhoenixPulseChance()) {
       phoenixPulsePending = true;
       setPhoenixPulseCharged(true);
       updatePhoenixPulseStatus();
