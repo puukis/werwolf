@@ -320,6 +320,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const graveyardModal = document.getElementById('graveyard-modal');
   const graveyardGrid = document.getElementById('graveyard-grid');
   const graveyardCloseBtn = document.getElementById('graveyard-close-btn');
+  const phoenixPulseOverlay = document.getElementById('phoenix-pulse-overlay');
+  const phoenixPulseMessage = document.getElementById('phoenix-pulse-message');
+  const phoenixPulseStatus = document.getElementById('phoenix-pulse-status');
 
   function showWin(title, message) {
     winTitle.textContent = title;
@@ -328,6 +331,8 @@ document.addEventListener("DOMContentLoaded", () => {
     winOverlay.classList.add('show');
     winBtn.onclick = () => location.reload();
   }
+
+  const PHOENIX_PULSE_CHANCE = 0.05;
 
   // State tracking
   let lovers = [];
@@ -338,6 +343,9 @@ document.addEventListener("DOMContentLoaded", () => {
   let poisonRemaining = 1;
   let selectedWitchAction = null;
   let bloodMoonActive = false;
+  let phoenixPulsePending = false;
+  let phoenixPulseJustResolved = false;
+  let phoenixPulseRevivedPlayers = [];
   let bodyguardProtectionTarget = null;
   let bodyguardProtectionNight = null;
   let bodyguardSavedTarget = null;
@@ -925,6 +933,56 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function queuePhaseTimer(callback, delay, label = 'Timer') {
     return phaseTimerManager.schedule(callback, delay, label);
+  }
+
+  function setPhoenixPulseCharged(isCharged) {
+    document.body.classList.toggle('phoenix-pulse-charged', !!isCharged);
+  }
+
+  function updatePhoenixPulseStatus() {
+    if (!phoenixPulseStatus) {
+      return;
+    }
+
+    phoenixPulseStatus.classList.remove('active', 'resolved');
+
+    if (phoenixPulsePending) {
+      phoenixPulseStatus.textContent = 'Phoenix Pulse: bereit';
+      phoenixPulseStatus.classList.add('active');
+    } else if (phoenixPulseJustResolved && phoenixPulseRevivedPlayers.length > 0) {
+      const revivedList = phoenixPulseRevivedPlayers.join(', ');
+      phoenixPulseStatus.textContent = `Phoenix Pulse: ${revivedList} zurück`; 
+      phoenixPulseStatus.classList.add('resolved');
+    } else {
+      phoenixPulseStatus.textContent = 'Phoenix Pulse: –';
+    }
+  }
+
+  function playPhoenixPulseAnimation(revivedPlayers = []) {
+    return new Promise((resolve) => {
+      if (!phoenixPulseOverlay) {
+        resolve();
+        return;
+      }
+
+      const revivedList = revivedPlayers.length > 0
+        ? revivedPlayers.join(', ')
+        : '';
+      if (phoenixPulseMessage) {
+        phoenixPulseMessage.textContent = revivedList
+          ? `${revivedList} steigen wie ein Phönix aus der Asche empor!`
+          : 'Die Phoenix Pulse lodert durch das Dorf.';
+      }
+
+      phoenixPulseOverlay.classList.remove('active');
+      void phoenixPulseOverlay.offsetWidth; // force reflow to restart animation
+      phoenixPulseOverlay.classList.add('active');
+
+      setTimeout(() => {
+        phoenixPulseOverlay.classList.remove('active');
+        resolve();
+      }, 3200);
+    });
   }
 
   function handlePlayerDeath(playerName, options = {}) {
@@ -1927,6 +1985,58 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
+  function applyPhoenixPulseRevival() {
+    if (!phoenixPulsePending) {
+      phoenixPulseJustResolved = false;
+      phoenixPulseRevivedPlayers = [];
+      updatePhoenixPulseStatus();
+      return [];
+    }
+
+    const victims = currentNightVictims.slice();
+    if (victims.length === 0) {
+      phoenixPulsePending = false;
+      phoenixPulseJustResolved = false;
+      phoenixPulseRevivedPlayers = [];
+      setPhoenixPulseCharged(false);
+      updatePhoenixPulseStatus();
+      renderNarratorDashboard();
+      return [];
+    }
+
+    const revived = victims.filter(name => deadPlayers.includes(name));
+    if (victims.length > 0) {
+      deadPlayers = deadPlayers.filter(player => !victims.includes(player));
+      currentNightVictims = [];
+      updatePlayerCardVisuals();
+      populateAdminKillSelect();
+      populateAdminReviveSelect();
+      checkGameOver(true);
+    }
+    if (revived.includes(jagerDiedLastNight)) {
+      jagerDiedLastNight = null;
+    }
+    if (revived.length > 0) {
+      if (resultOutput) {
+        resultOutput.innerHTML += `<br><strong>🔥 Phoenix Pulse:</strong> ${revived.join(', ')} kehren zurück!`;
+      }
+      logAction({
+        type: 'event',
+        label: 'Phoenix Pulse',
+        detail: `Wiederbelebt: ${revived.join(', ')}`
+      });
+    }
+
+    phoenixPulsePending = false;
+    phoenixPulseJustResolved = revived.length > 0;
+    phoenixPulseRevivedPlayers = revived;
+    setPhoenixPulseCharged(false);
+    updatePhoenixPulseStatus();
+    renderNarratorDashboard();
+
+    return revived;
+  }
+
   function startDayPhase() {
     dayMode = true;
     dayCount++;
@@ -1934,6 +2044,17 @@ document.addEventListener("DOMContentLoaded", () => {
     dayAnnouncements = [];
     currentDayAdditionalParagraphs = [];
     dayIntroHtml = '';
+
+    const revivedByPhoenix = applyPhoenixPulseRevival();
+    if (revivedByPhoenix.length > 0) {
+      const revivedList = revivedByPhoenix.join(', ');
+      dayAnnouncements.push(`
+        <div class="phoenix-announcement">
+          <h4>🔥 Phoenix Pulse</h4>
+          <p>${revivedList} wurden in den Morgenstunden wiederbelebt.</p>
+        </div>
+      `);
+    }
 
     if (currentNightVictims.length === 0) {
         peaceDays++;
@@ -1946,9 +2067,18 @@ document.addEventListener("DOMContentLoaded", () => {
     phaseTimerManager.cancelAll();
     captureGameCheckpoint(`Start Tag ${dayCount}`);
 
-    document.querySelector('.container').classList.add('hidden');
+    const continueToDay = () => {
+      document.querySelector('.container').classList.add('hidden');
+      showGraveyardModal();
+    };
 
-    showGraveyardModal();
+    if (revivedByPhoenix.length > 0) {
+      playPhoenixPulseAnimation(revivedByPhoenix).then(() => {
+        continueToDay();
+      });
+    } else {
+      continueToDay();
+    }
   }
   
   function endDayPhase() {
@@ -2297,11 +2427,18 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function triggerRandomEvents() {
+    phoenixPulsePending = false;
+    phoenixPulseJustResolved = false;
+    phoenixPulseRevivedPlayers = [];
+    setPhoenixPulseCharged(false);
+    updatePhoenixPulseStatus();
+
     // If blood moon was manually triggered by admin, keep it active and skip random check.
     if (bloodMoonActive === true) {
         // Reset pity timer as the blood moon is happening
         localStorage.setItem('bloodMoonPityTimer', 0);
         updateBloodMoonOdds();
+        renderNarratorDashboard();
         return;
     }
 
@@ -2309,6 +2446,7 @@ document.addEventListener("DOMContentLoaded", () => {
     bloodMoonActive = false;
 
     if (!eventsEnabledCheckbox.checked) {
+      renderNarratorDashboard();
       return;
     }
 
@@ -2323,6 +2461,20 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     localStorage.setItem('bloodMoonPityTimer', bloodMoonPityTimer);
     updateBloodMoonOdds();
+
+    if (Math.random() < PHOENIX_PULSE_CHANCE) {
+      phoenixPulsePending = true;
+      setPhoenixPulseCharged(true);
+      updatePhoenixPulseStatus();
+      if (resultOutput) {
+        resultOutput.innerHTML += '<br><strong>🔥 Phoenix Pulse:</strong> Eine uralte Energie sammelt sich in dieser Nacht.';
+      }
+      logAction({
+        type: 'event',
+        label: 'Phoenix Pulse geladen',
+        detail: 'Event aktiviert – Nachtopfer werden bei Tagesanbruch wiederbelebt.'
+      });
+    }
     renderNarratorDashboard();
   }
 
@@ -2996,6 +3148,9 @@ document.addEventListener("DOMContentLoaded", () => {
       healRemaining: healRemaining,
       poisonRemaining: poisonRemaining,
       bloodMoonActive: bloodMoonActive,
+      phoenixPulsePending,
+      phoenixPulseJustResolved,
+      phoenixPulseRevivedPlayers: phoenixPulseRevivedPlayers.slice(),
       dayCount: dayCount,
       mayor: mayor,
       accused: accused.slice(),
@@ -3131,6 +3286,13 @@ document.addEventListener("DOMContentLoaded", () => {
     healRemaining = session.healRemaining !== undefined ? session.healRemaining : 1;
     poisonRemaining = session.poisonRemaining !== undefined ? session.poisonRemaining : 1;
     bloodMoonActive = session.bloodMoonActive || false;
+    phoenixPulsePending = !!session.phoenixPulsePending;
+    phoenixPulseJustResolved = !!session.phoenixPulseJustResolved;
+    phoenixPulseRevivedPlayers = Array.isArray(session.phoenixPulseRevivedPlayers)
+      ? session.phoenixPulseRevivedPlayers.slice()
+      : [];
+    setPhoenixPulseCharged(phoenixPulsePending);
+    updatePhoenixPulseStatus();
     dayCount = session.dayCount || 0;
     mayor = session.mayor || null;
     accused = Array.isArray(session.accused) ? session.accused.slice() : [];
@@ -3446,6 +3608,12 @@ document.addEventListener("DOMContentLoaded", () => {
       if (bloodMoonActive) {
         events.push('Blutmond aktiv');
       }
+      if (phoenixPulsePending) {
+        events.push('Phoenix Pulse geladen');
+      }
+      if (phoenixPulseJustResolved && phoenixPulseRevivedPlayers.length > 0) {
+        events.push(`Phoenix Pulse: ${phoenixPulseRevivedPlayers.join(', ')} wiederbelebt`);
+      }
       if (isBodyguardProtectionActive()) {
         events.push(`Bodyguard schützt: ${bodyguardProtectionTarget}`);
       }
@@ -3522,6 +3690,9 @@ document.addEventListener("DOMContentLoaded", () => {
       healRemaining,
       poisonRemaining,
       bloodMoonActive,
+      phoenixPulsePending,
+      phoenixPulseJustResolved,
+      phoenixPulseRevivedPlayers: phoenixPulseRevivedPlayers.slice(),
       dayCount,
       mayor,
       accused: accused.slice(),
@@ -3600,6 +3771,13 @@ document.addEventListener("DOMContentLoaded", () => {
     healRemaining = snapshot.healRemaining;
     poisonRemaining = snapshot.poisonRemaining;
     bloodMoonActive = snapshot.bloodMoonActive;
+    phoenixPulsePending = !!snapshot.phoenixPulsePending;
+    phoenixPulseJustResolved = !!snapshot.phoenixPulseJustResolved;
+    phoenixPulseRevivedPlayers = Array.isArray(snapshot.phoenixPulseRevivedPlayers)
+      ? snapshot.phoenixPulseRevivedPlayers.slice()
+      : [];
+    setPhoenixPulseCharged(phoenixPulsePending);
+    updatePhoenixPulseStatus();
     dayCount = snapshot.dayCount;
     mayor = snapshot.mayor;
     accused = snapshot.accused.slice();
@@ -4655,6 +4833,7 @@ document.addEventListener("DOMContentLoaded", () => {
       },
       setState(partial = {}) {
         let recalcBodyguards = false;
+        let phoenixStateChanged = false;
         if (Array.isArray(partial.players)) {
           players = partial.players.slice();
           recalcBodyguards = true;
@@ -4684,6 +4863,18 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if ('bloodMoonActive' in partial) {
           bloodMoonActive = partial.bloodMoonActive;
+        }
+        if ('phoenixPulsePending' in partial) {
+          phoenixPulsePending = !!partial.phoenixPulsePending;
+          phoenixStateChanged = true;
+        }
+        if ('phoenixPulseJustResolved' in partial) {
+          phoenixPulseJustResolved = !!partial.phoenixPulseJustResolved;
+          phoenixStateChanged = true;
+        }
+        if (Array.isArray(partial.phoenixPulseRevivedPlayers)) {
+          phoenixPulseRevivedPlayers = partial.phoenixPulseRevivedPlayers.slice();
+          phoenixStateChanged = true;
         }
         if ('dayCount' in partial) {
           dayCount = partial.dayCount;
@@ -4732,6 +4923,11 @@ document.addEventListener("DOMContentLoaded", () => {
         if (partial.jobConfig && typeof partial.jobConfig.bodyguardChance === 'number') {
           jobConfig.bodyguardChance = Math.min(Math.max(partial.jobConfig.bodyguardChance, 0), 1);
           updateBodyguardChanceUI(jobConfig.bodyguardChance * 100, { save: true });
+        }
+
+        if (phoenixStateChanged) {
+          setPhoenixPulseCharged(phoenixPulsePending);
+          updatePhoenixPulseStatus();
         }
 
         if (recalcBodyguards || Array.isArray(partial.jobsAssigned) || Array.isArray(partial.bodyguardPlayers)) {
@@ -4797,6 +4993,7 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
+  updatePhoenixPulseStatus();
   renderNarratorDashboard();
 
 });
