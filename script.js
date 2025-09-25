@@ -24,7 +24,6 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("players").value = "";
   // Initialize theme
   initTheme();
-  updateBloodMoonOdds();
 
   // Sidebar elements and toggle
   const sessionsSidebar = document.getElementById('sessions-sidebar');
@@ -87,11 +86,16 @@ document.addEventListener("DOMContentLoaded", () => {
   const witchActions = document.getElementById("witch-actions");
   const eventsEnabledCheckbox = document.getElementById('events-enabled');
   const revealDeadRolesCheckbox = document.getElementById('reveal-dead-roles');
+  const bloodMoonChanceInput = document.getElementById('blood-moon-chance');
+  const bloodMoonChanceDisplay = document.getElementById('blood-moon-chance-display');
   const bodyguardJobChanceInput = document.getElementById('bodyguard-job-chance');
   const bodyguardJobChanceDisplay = document.getElementById('bodyguard-job-chance-display');
   const JOB_CONFIG_STORAGE_KEY = 'werwolfJobConfig';
+  const BLOOD_MOON_CONFIG_STORAGE_KEY = 'werwolfBloodMoonConfig';
   const defaultJobConfig = { bodyguardChance: 0 };
+  const defaultBloodMoonConfig = { baseChance: 0.2 };
   let jobConfig = loadJobConfig();
+  let bloodMoonConfig = loadBloodMoonConfig();
 
   function loadJobConfig() {
     try {
@@ -123,6 +127,62 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function loadBloodMoonConfig() {
+    try {
+      const raw = localStorage.getItem(BLOOD_MOON_CONFIG_STORAGE_KEY);
+      if (!raw) {
+        return { ...defaultBloodMoonConfig };
+      }
+      const parsed = JSON.parse(raw);
+      const rawChance = typeof parsed.baseChance === 'number'
+        ? parsed.baseChance
+        : defaultBloodMoonConfig.baseChance;
+      const normalized = Number.isFinite(rawChance)
+        ? Math.min(Math.max(rawChance, 0), 1)
+        : defaultBloodMoonConfig.baseChance;
+      return { baseChance: normalized };
+    } catch (error) {
+      return { ...defaultBloodMoonConfig };
+    }
+  }
+
+  function saveBloodMoonConfig() {
+    try {
+      const payload = {
+        baseChance: Math.min(Math.max(bloodMoonConfig.baseChance || 0, 0), 1)
+      };
+      localStorage.setItem(BLOOD_MOON_CONFIG_STORAGE_KEY, JSON.stringify(payload));
+    } catch (error) {
+      // Ignore storage errors
+    }
+  }
+
+  function setBloodMoonBaseChance(percent, { save = false } = {}) {
+    const numeric = Number(percent);
+    const sanitizedPercent = Number.isFinite(numeric)
+      ? Math.min(Math.max(Math.round(numeric), 0), 100)
+      : Math.round((defaultBloodMoonConfig.baseChance || 0) * 100);
+    const normalized = sanitizedPercent / 100;
+    bloodMoonConfig.baseChance = normalized;
+    if (bloodMoonChanceInput && bloodMoonChanceInput.value !== String(sanitizedPercent)) {
+      bloodMoonChanceInput.value = String(sanitizedPercent);
+    }
+    if (bloodMoonChanceDisplay) {
+      bloodMoonChanceDisplay.textContent = `${sanitizedPercent}%`;
+    }
+    if (save) {
+      saveBloodMoonConfig();
+    }
+  }
+
+  function getBloodMoonChance(pityTimer) {
+    const timer = Number.isFinite(pityTimer) ? Math.max(pityTimer, 0) : 0;
+    const baseChance = Number.isFinite(bloodMoonConfig?.baseChance)
+      ? Math.min(Math.max(bloodMoonConfig.baseChance, 0), 1)
+      : defaultBloodMoonConfig.baseChance;
+    return Math.min(baseChance + timer * 0.1, 1);
+  }
+
   function updateBodyguardChanceUI(percent, { save = false } = {}) {
     const numeric = Number(percent);
     const sanitized = Number.isFinite(numeric)
@@ -147,6 +207,17 @@ document.addEventListener("DOMContentLoaded", () => {
       updateBodyguardChanceUI(bodyguardJobChanceInput.value, { save: true });
     });
   }
+
+  setBloodMoonBaseChance(bloodMoonConfig.baseChance * 100, { save: false });
+
+  if (bloodMoonChanceInput) {
+    bloodMoonChanceInput.addEventListener('input', () => {
+      setBloodMoonBaseChance(bloodMoonChanceInput.value, { save: true });
+      updateBloodMoonOdds();
+    });
+  }
+
+  updateBloodMoonOdds();
 
   // Load existing sessions on startup
   loadSessions();
@@ -2418,8 +2489,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // to prevent multiple event listeners from stacking up
 
   function updateBloodMoonOdds() {
-    const bloodMoonPityTimer = parseInt(localStorage.getItem('bloodMoonPityTimer') || '0');
-    const bloodMoonChance = Math.min(0.2 + bloodMoonPityTimer * 0.1, 1);
+    const rawTimer = parseInt(localStorage.getItem('bloodMoonPityTimer') || '0', 10);
+    const pityTimer = Number.isFinite(rawTimer) ? Math.max(rawTimer, 0) : 0;
+    const bloodMoonChance = getBloodMoonChance(pityTimer);
     const oddsEl = document.getElementById('blood-moon-odds');
     if (oddsEl) {
       oddsEl.textContent = `Blutmond-Chance diese Nacht: ${Math.round(bloodMoonChance * 100)}%`;
@@ -2450,8 +2522,11 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    let bloodMoonPityTimer = parseInt(localStorage.getItem('bloodMoonPityTimer') || '0');
-    const bloodMoonChance = Math.min(0.2 + bloodMoonPityTimer * 0.1, 1);
+    let bloodMoonPityTimer = parseInt(localStorage.getItem('bloodMoonPityTimer') || '0', 10);
+    if (!Number.isFinite(bloodMoonPityTimer) || bloodMoonPityTimer < 0) {
+      bloodMoonPityTimer = 0;
+    }
+    const bloodMoonChance = getBloodMoonChance(bloodMoonPityTimer);
 
     if (Math.random() < bloodMoonChance) {
       bloodMoonActive = true;
