@@ -19,6 +19,23 @@
         <div class="cloud cloud-2"></div>
         <div class="cloud cloud-3"></div>
     </div>
+    <div id="phoenix-pulse-overlay" class="phoenix-pulse-overlay" aria-hidden="true">
+        <div class="phoenix-pulse-backdrop"></div>
+        <div class="phoenix-pulse-orb">
+            <div class="phoenix-core"></div>
+            <div class="phoenix-ring ring-1"></div>
+            <div class="phoenix-ring ring-2"></div>
+            <div class="phoenix-ring ring-3"></div>
+            <div class="phoenix-spark spark-1"></div>
+            <div class="phoenix-spark spark-2"></div>
+            <div class="phoenix-spark spark-3"></div>
+            <div class="phoenix-spark spark-4"></div>
+        </div>
+        <div class="phoenix-pulse-text">
+            <h3>Phoenix Pulse</h3>
+            <p id="phoenix-pulse-message">Die Phoenix Pulse lodert durch das Dorf.</p>
+        </div>
+    </div>
     <aside id="sessions-sidebar" class="sessions-sidebar">
         <h2>Gespeicherte Sessions</h2>
         <ul id="sessions-list"></ul>
@@ -37,6 +54,7 @@
             <h1>Werwolf</h1>
             <p class="subtitle">Rollenverteiler für das Werwolf-Spiel</p>
             <div id="blood-moon-odds" class="blood-moon-odds"></div>
+            <div id="phoenix-pulse-status" class="phoenix-pulse-status" aria-live="polite">Phoenix Pulse: –</div>
             <div class="event-toggle">
                 <label for="events-enabled">Random Events an</label>
                 <input type="checkbox" id="events-enabled" checked>
