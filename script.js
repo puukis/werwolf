@@ -1001,6 +1001,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let dayMode = false;
   let nightSteps = [];
   let nightIndex = 0;
+  let nightStepHistory = [];
   
   // Day phase variables
   let votes = {};
@@ -1336,6 +1337,27 @@ document.addEventListener("DOMContentLoaded", () => {
     nightChoices.style.display = "flex";
   }
 
+  function captureNightStepSnapshot(role) {
+    if (isRestoringCheckpoint) {
+      return;
+    }
+
+    const lastEntry = nightStepHistory[nightStepHistory.length - 1];
+    if (lastEntry && lastEntry.index === nightIndex) {
+      return;
+    }
+
+    while (nightStepHistory.length > 0 && nightStepHistory[nightStepHistory.length - 1].index >= nightIndex) {
+      nightStepHistory.pop();
+    }
+
+    nightStepHistory.push({
+      index: nightIndex,
+      role,
+      state: createStateSnapshot()
+    });
+  }
+
   function showNightStep() {
     // Skip to next step if no more steps
     if (nightIndex >= nightSteps.length) {
@@ -1351,10 +1373,10 @@ document.addEventListener("DOMContentLoaded", () => {
     
     // Special case for Werewolves - they act as a team
     if (role === "Werwolf") {
-      const hasLivingWerewolf = rolesAssigned.some((r, i) => 
+      const hasLivingWerewolf = rolesAssigned.some((r, i) =>
         r === role && !deadPlayers.includes(players[i])
       );
-      
+
       if (!hasLivingWerewolf) {
         // Skip to next night step if no living werewolves
         if (nightIndex < nightSteps.length - 1) {
@@ -1364,7 +1386,9 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
     }
-    
+
+    captureNightStepSnapshot(role);
+
     nightRoleEl.textContent = role;
     nightRoleEl.setAttribute('data-role', role);
     nightTextEl.textContent = nightTexts[role] || "Wacht auf.";
@@ -1504,6 +1528,8 @@ document.addEventListener("DOMContentLoaded", () => {
       nightChoices.innerHTML = "";
       nightChoices.style.display = "none";
     }
+
+    renderNarratorDashboard();
   }
 
   function renderDayChoices(customList = null) {
@@ -2361,6 +2387,7 @@ document.addEventListener("DOMContentLoaded", () => {
       console.log("Tote Spieler:", deadPlayers);
       console.log("Liebespaare:", lovers);
 
+      nightStepHistory = [];
       renderNarratorDashboard();
 
       // Start the day phase
@@ -2776,6 +2803,7 @@ document.addEventListener("DOMContentLoaded", () => {
     nightCounter += 1;
     captureGameCheckpoint(`Start Nacht ${nightCounter}`);
 
+    nightStepHistory = [];
     nightOverlay.style.display = "flex";
     showNightStep();
     startNightBtn.style.display = "none";
@@ -3770,7 +3798,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const pauseTimersBtn = document.getElementById('admin-pause-timers-btn');
   const skipStepBtn = document.getElementById('admin-skip-step-btn');
+  const stepBackBtn = document.getElementById('admin-step-back-btn');
   const rollbackCheckpointBtn = document.getElementById('admin-rollback-checkpoint-btn');
+  const defaultStepBackText = stepBackBtn ? stepBackBtn.textContent : 'Zum vorherigen Schritt';
 
   const sandboxSelect = document.getElementById('sandbox-elimination-select');
   const sandboxSimulateBtn = document.getElementById('sandbox-simulate-btn');
@@ -3976,6 +4006,20 @@ document.addEventListener("DOMContentLoaded", () => {
       skipStepBtn.disabled = !(nightMode || dayMode);
     }
 
+    if (stepBackBtn) {
+      if (nightMode && nightStepHistory.length > 1) {
+        const previousEntry = nightStepHistory[nightStepHistory.length - 2];
+        const targetLabel = previousEntry && previousEntry.role
+          ? previousEntry.role
+          : 'vorherigen Schritt';
+        stepBackBtn.disabled = false;
+        stepBackBtn.textContent = `Zurück zu ${targetLabel}`;
+      } else {
+        stepBackBtn.disabled = true;
+        stepBackBtn.textContent = defaultStepBackText;
+      }
+    }
+
     if (rollbackCheckpointBtn) {
       rollbackCheckpointBtn.disabled = gameCheckpoints.length === 0;
     }
@@ -4052,7 +4096,11 @@ document.addEventListener("DOMContentLoaded", () => {
     renderNarratorDashboard();
   }
 
-  function applyStateSnapshot(snapshot) {
+  function applyStateSnapshot(snapshot, { resetNightHistory = true } = {}) {
+    if (resetNightHistory) {
+      nightStepHistory = [];
+    }
+
     players = snapshot.players.slice();
     rolesAssigned = snapshot.rolesAssigned.slice();
     jobsAssigned = Array.isArray(snapshot.jobsAssigned)
@@ -4679,6 +4727,33 @@ document.addEventListener("DOMContentLoaded", () => {
       } else {
         logAction({ type: 'info', label: 'Keine Phase aktiv', detail: 'Es läuft derzeit keine Phase, die übersprungen werden könnte.' });
       }
+    });
+  }
+
+  if (stepBackBtn) {
+    stepBackBtn.addEventListener('click', () => {
+      if (!nightMode || nightStepHistory.length <= 1) {
+        return;
+      }
+
+      const currentEntry = nightStepHistory.pop();
+      const previousEntry = nightStepHistory[nightStepHistory.length - 1];
+
+      if (!previousEntry) {
+        if (currentEntry) {
+          nightStepHistory.push(currentEntry);
+        }
+        return;
+      }
+
+      phaseTimerManager.cancelAll();
+      logAction({
+        type: 'admin',
+        label: 'Schritt zurück',
+        detail: `Nachtaktion: ${previousEntry.role || 'Unbekannt'}`
+      });
+
+      applyStateSnapshot(previousEntry.state, { resetNightHistory: false });
     });
   }
 
