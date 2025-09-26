@@ -770,6 +770,99 @@ document.addEventListener("DOMContentLoaded", () => {
   let currentIndex = 0;
   let revealed = false;
 
+  let roleLayoutCustomized = false;
+  let lastSuggestionSnapshot = null;
+  let suppressCustomizationTracking = false;
+
+  function markLayoutCustomized() {
+    if (!suppressCustomizationTracking) {
+      roleLayoutCustomized = true;
+    }
+  }
+
+  function setRowQuantity(row, qty) {
+    const display = row.querySelector(".qty-display");
+    if (display) {
+      display.textContent = qty;
+    }
+  }
+
+  function findRoleRow(container, roleName) {
+    return Array.from(container.querySelectorAll(".role-row")).find((row) => {
+      const inputEl = row.querySelector('input[type="text"]');
+      return inputEl && inputEl.value.trim() === roleName;
+    }) || null;
+  }
+
+  function getRoleLayoutSnapshot() {
+    const readContainer = (container) => {
+      const result = {};
+      Array.from(container.querySelectorAll(".role-row")).forEach((row) => {
+        const inputEl = row.querySelector('input[type="text"]');
+        const qtyEl = row.querySelector(".qty-display");
+        if (!inputEl) {
+          return;
+        }
+        const name = inputEl.value.trim();
+        if (!name) {
+          return;
+        }
+        const qty = parseInt(qtyEl && qtyEl.textContent, 10);
+        result[name] = Number.isFinite(qty) ? qty : 0;
+      });
+      return result;
+    };
+
+    return {
+      village: readContainer(rolesContainerVillage),
+      werwolf: readContainer(rolesContainerWerwolf),
+      special: readContainer(rolesContainerSpecial)
+    };
+  }
+
+  function buildSuggestionSnapshot(suggestion) {
+    const snapshot = { village: {}, werwolf: {}, special: {} };
+
+    categorizedRoles.village.forEach((role) => {
+      snapshot.village[role] = suggestion[role] || 0;
+    });
+    categorizedRoles.werwolf.forEach((role) => {
+      snapshot.werwolf[role] = suggestion[role] || 0;
+    });
+    categorizedRoles.special.forEach((role) => {
+      snapshot.special[role] = suggestion[role] || 0;
+    });
+
+    return snapshot;
+  }
+
+  function snapshotsEqual(a, b) {
+    if (!a || !b) {
+      return false;
+    }
+
+    const categories = ["village", "werwolf", "special"];
+    return categories.every((category) => {
+      const rolesA = a[category] || {};
+      const rolesB = b[category] || {};
+      const keysA = Object.keys(rolesA);
+      const keysB = Object.keys(rolesB);
+      if (keysA.length !== keysB.length) {
+        return false;
+      }
+      return keysA.every((roleName) => {
+        return rolesB.hasOwnProperty(roleName) && rolesA[roleName] === rolesB[roleName];
+      });
+    });
+  }
+
+  function layoutMatchesLastSuggestion() {
+    if (!lastSuggestionSnapshot) {
+      return false;
+    }
+    return snapshotsEqual(getRoleLayoutSnapshot(), lastSuggestionSnapshot);
+  }
+
   // Helper to create a role input row
   function addRoleRow(value = "", qty = 1, container) {
     const row = document.createElement("div");
@@ -803,12 +896,18 @@ document.addEventListener("DOMContentLoaded", () => {
       if (current > 0) {
         current -= 1;
         qtyDisplay.textContent = current;
+        markLayoutCustomized();
       }
     });
 
     plusBtn.addEventListener("click", () => {
       let current = parseInt(qtyDisplay.textContent, 10);
       qtyDisplay.textContent = current + 1;
+      markLayoutCustomized();
+    });
+
+    input.addEventListener("input", () => {
+      markLayoutCustomized();
     });
 
     qtyControls.appendChild(minusBtn);
@@ -829,6 +928,7 @@ document.addEventListener("DOMContentLoaded", () => {
     removeBtn.className = "remove-role";
     removeBtn.addEventListener("click", () => {
       container.removeChild(row);
+      markLayoutCustomized();
     });
 
     row.appendChild(infoBtn);
@@ -2701,21 +2801,75 @@ document.addEventListener("DOMContentLoaded", () => {
     8: { Dorfbewohner: 2, Werwolf: 2, Seer: 1, Hexe: 1, Amor: 1, Jäger: 1 },
   };
 
-  function applyRoleSuggestion(count) {
+  function applyRoleSuggestion(count, { forceOverwrite = false } = {}) {
     const suggestion = roleSuggestions[count] || {};
-    rolesContainerVillage.innerHTML = "";
-    rolesContainerWerwolf.innerHTML = "";
-    rolesContainerSpecial.innerHTML = "";
+    const suggestionSnapshot = buildSuggestionSnapshot(suggestion);
+    const previousSuggestionSnapshot = lastSuggestionSnapshot;
+    const currentSnapshot = getRoleLayoutSnapshot();
+    const matchesLast = previousSuggestionSnapshot && snapshotsEqual(currentSnapshot, previousSuggestionSnapshot);
 
-    categorizedRoles.village.forEach(role => {
-        addRoleRow(role, suggestion[role] || 0, rolesContainerVillage);
-    });
-    categorizedRoles.werwolf.forEach(role => {
-        addRoleRow(role, suggestion[role] || 0, rolesContainerWerwolf);
-    });
-    categorizedRoles.special.forEach(role => {
-        addRoleRow(role, suggestion[role] || 0, rolesContainerSpecial);
-    });
+    if (matchesLast) {
+      roleLayoutCustomized = false;
+    }
+
+    const shouldOverwrite = forceOverwrite || !roleLayoutCustomized;
+
+    if (shouldOverwrite) {
+      suppressCustomizationTracking = true;
+      try {
+        rolesContainerVillage.innerHTML = "";
+        rolesContainerWerwolf.innerHTML = "";
+        rolesContainerSpecial.innerHTML = "";
+
+        categorizedRoles.village.forEach((role) => {
+          addRoleRow(role, suggestion[role] || 0, rolesContainerVillage);
+        });
+        categorizedRoles.werwolf.forEach((role) => {
+          addRoleRow(role, suggestion[role] || 0, rolesContainerWerwolf);
+        });
+        categorizedRoles.special.forEach((role) => {
+          addRoleRow(role, suggestion[role] || 0, rolesContainerSpecial);
+        });
+      } finally {
+        suppressCustomizationTracking = false;
+      }
+
+      lastSuggestionSnapshot = suggestionSnapshot;
+      roleLayoutCustomized = false;
+      return;
+    }
+
+    const mergeCategory = (categoryKey, rolesList, container) => {
+      rolesList.forEach((roleName) => {
+        const desiredQty = suggestion[roleName] || 0;
+        const previousQty = previousSuggestionSnapshot && previousSuggestionSnapshot[categoryKey]
+          ? previousSuggestionSnapshot[categoryKey][roleName]
+          : undefined;
+        const currentQty = currentSnapshot[categoryKey]
+          ? currentSnapshot[categoryKey][roleName]
+          : undefined;
+        const row = findRoleRow(container, roleName);
+
+        if (!row) {
+          return;
+        }
+
+        if (typeof previousQty === 'number' && currentQty === previousQty) {
+          setRowQuantity(row, desiredQty);
+        }
+      });
+    };
+
+    suppressCustomizationTracking = true;
+    try {
+      mergeCategory("village", categorizedRoles.village, rolesContainerVillage);
+      mergeCategory("werwolf", categorizedRoles.werwolf, rolesContainerWerwolf);
+      mergeCategory("special", categorizedRoles.special, rolesContainerSpecial);
+    } finally {
+      suppressCustomizationTracking = false;
+    }
+
+    lastSuggestionSnapshot = suggestionSnapshot;
   }
 
   playersTextarea.addEventListener("input", () => {
@@ -2724,7 +2878,9 @@ document.addEventListener("DOMContentLoaded", () => {
       .split(/\n|\r/)
       .map((n) => n.trim())
       .filter(Boolean).length;
-    applyRoleSuggestion(count);
+    const matchesDefaultLayout = layoutMatchesLastSuggestion();
+    const forceOverwrite = matchesDefaultLayout || !roleLayoutCustomized;
+    applyRoleSuggestion(count, { forceOverwrite });
   });
 
   // Initial role setup
@@ -2871,6 +3027,9 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       });
 
+      lastSuggestionSnapshot = null;
+      roleLayoutCustomized = true;
+
     } catch (e) {
       showInfoMessage({
         title: 'Laden fehlgeschlagen',
@@ -2927,6 +3086,9 @@ document.addEventListener("DOMContentLoaded", () => {
         updateBodyguardChanceUI(100, { save: true });
       }
 
+      lastSuggestionSnapshot = null;
+      roleLayoutCustomized = true;
+
     } catch (e) {
       showInfoMessage({
         title: 'Laden fehlgeschlagen',
@@ -2940,7 +3102,10 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
 
-  addRoleBtn.addEventListener("click", () => addRoleRow("", 1, rolesContainerSpecial));
+  addRoleBtn.addEventListener("click", () => {
+    addRoleRow("", 1, rolesContainerSpecial);
+    markLayoutCustomized();
+  });
 
   assignBtn.addEventListener("click", () => {
     const playersRaw = document.getElementById("players").value
@@ -3489,6 +3654,9 @@ document.addEventListener("DOMContentLoaded", () => {
     categorizedRoles.special.forEach(role => {
         addRoleRow(role, roleCounts[role] || 0, rolesContainerSpecial);
     });
+
+    lastSuggestionSnapshot = null;
+    roleLayoutCustomized = true;
 
     // Hide setup and show results
     document.querySelector('.setup-container').style.display = 'none';
