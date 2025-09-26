@@ -85,6 +85,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const nightChoices = document.getElementById("night-choices");
   const witchActions = document.getElementById("witch-actions");
   const eventsEnabledCheckbox = document.getElementById('events-enabled');
+  const bloodMoonEnabledCheckbox = document.getElementById('blood-moon-enabled');
+  const phoenixPulseEnabledCheckbox = document.getElementById('phoenix-pulse-enabled');
   const revealDeadRolesCheckbox = document.getElementById('reveal-dead-roles');
   const bloodMoonChanceInput = document.getElementById('blood-moon-chance');
   const bloodMoonChanceDisplay = document.getElementById('blood-moon-chance-display');
@@ -93,15 +95,69 @@ document.addEventListener("DOMContentLoaded", () => {
   const bodyguardJobChanceInput = document.getElementById('bodyguard-job-chance');
   const bodyguardJobChanceDisplay = document.getElementById('bodyguard-job-chance-display');
   const JOB_CONFIG_STORAGE_KEY = 'werwolfJobConfig';
+  const EVENT_CONFIG_STORAGE_KEY = 'werwolfEventConfig';
   const BLOOD_MOON_CONFIG_STORAGE_KEY = 'werwolfBloodMoonConfig';
   const DEFAULT_PHOENIX_PULSE_CHANCE = 0.05;
   const PHOENIX_PULSE_CONFIG_STORAGE_KEY = 'werwolfPhoenixPulseConfig';
   const defaultJobConfig = { bodyguardChance: 0 };
   const defaultBloodMoonConfig = { baseChance: 0.2 };
   const defaultPhoenixPulseConfig = { chance: DEFAULT_PHOENIX_PULSE_CHANCE };
+  const defaultEventConfig = {
+    bloodMoonEnabled: true,
+    phoenixPulseEnabled: true
+  };
+  let eventConfig = loadEventConfig();
   let jobConfig = loadJobConfig();
   let bloodMoonConfig = loadBloodMoonConfig();
   let phoenixPulseConfig = loadPhoenixPulseConfig();
+
+  function loadEventConfig() {
+    try {
+      const raw = localStorage.getItem(EVENT_CONFIG_STORAGE_KEY);
+      if (!raw) {
+        return { ...defaultEventConfig };
+      }
+      const parsed = JSON.parse(raw);
+      return {
+        bloodMoonEnabled: parsed.bloodMoonEnabled !== false,
+        phoenixPulseEnabled: parsed.phoenixPulseEnabled !== false
+      };
+    } catch (error) {
+      return { ...defaultEventConfig };
+    }
+  }
+
+  function saveEventConfig() {
+    try {
+      const payload = {
+        bloodMoonEnabled: !!eventConfig.bloodMoonEnabled,
+        phoenixPulseEnabled: !!eventConfig.phoenixPulseEnabled
+      };
+      localStorage.setItem(EVENT_CONFIG_STORAGE_KEY, JSON.stringify(payload));
+    } catch (error) {
+      // Ignore storage errors
+    }
+  }
+
+  function areRandomEventsEnabled() {
+    return !eventsEnabledCheckbox || eventsEnabledCheckbox.checked;
+  }
+
+  function isBloodMoonEventEnabled() {
+    return !!eventConfig.bloodMoonEnabled;
+  }
+
+  function isPhoenixPulseEventEnabled() {
+    return !!eventConfig.phoenixPulseEnabled;
+  }
+
+  function isBloodMoonAvailable() {
+    return areRandomEventsEnabled() && isBloodMoonEventEnabled();
+  }
+
+  function isPhoenixPulseAvailable() {
+    return areRandomEventsEnabled() && isPhoenixPulseEventEnabled();
+  }
 
   function loadJobConfig() {
     try {
@@ -438,28 +494,6 @@ document.addEventListener("DOMContentLoaded", () => {
     hideConfirmation();
   });
 
-  // Load events enabled state
-  const savedEventsEnabled = localStorage.getItem('eventsEnabled');
-  if (savedEventsEnabled !== null) {
-    eventsEnabledCheckbox.checked = savedEventsEnabled === 'true';
-  }
-
-  // Save events enabled state
-  eventsEnabledCheckbox.addEventListener('change', () => {
-    localStorage.setItem('eventsEnabled', eventsEnabledCheckbox.checked);
-  });
-
-  // Load reveal dead roles state
-  const savedRevealDeadRoles = localStorage.getItem('revealDeadRoles');
-  if (savedRevealDeadRoles !== null) {
-    revealDeadRolesCheckbox.checked = savedRevealDeadRoles === 'true';
-  }
-
-  // Save reveal dead roles state
-  revealDeadRolesCheckbox.addEventListener('change', () => {
-    localStorage.setItem('revealDeadRoles', revealDeadRolesCheckbox.checked);
-  });
-
   // Win screen elements
   const winOverlay = document.getElementById('win-overlay');
   const winTitle = document.getElementById('win-title');
@@ -498,6 +532,89 @@ document.addEventListener("DOMContentLoaded", () => {
   let bodyguardProtectionNight = null;
   let bodyguardSavedTarget = null;
   let bodyguardPlayers = [];
+
+  function clearBloodMoonState() {
+    bloodMoonActive = false;
+    document.body.classList.remove('blood-moon-active');
+  }
+
+  function clearPhoenixPulseState() {
+    phoenixPulsePending = false;
+    phoenixPulseJustResolved = false;
+    phoenixPulseRevivedPlayers = [];
+    setPhoenixPulseCharged(false);
+  }
+
+  function refreshEventUI() {
+    updateBloodMoonOdds();
+    updatePhoenixPulseStatus();
+  }
+
+  if (bloodMoonEnabledCheckbox) {
+    bloodMoonEnabledCheckbox.checked = !!eventConfig.bloodMoonEnabled;
+  }
+
+  if (phoenixPulseEnabledCheckbox) {
+    phoenixPulseEnabledCheckbox.checked = !!eventConfig.phoenixPulseEnabled;
+  }
+
+  function applyGlobalEventsEnabledState() {
+    if (!areRandomEventsEnabled()) {
+      clearBloodMoonState();
+      clearPhoenixPulseState();
+    }
+    refreshEventUI();
+  }
+
+  if (eventsEnabledCheckbox) {
+    const savedEventsEnabled = localStorage.getItem('eventsEnabled');
+    if (savedEventsEnabled !== null) {
+      eventsEnabledCheckbox.checked = savedEventsEnabled === 'true';
+    }
+    applyGlobalEventsEnabledState();
+    eventsEnabledCheckbox.addEventListener('change', () => {
+      localStorage.setItem('eventsEnabled', eventsEnabledCheckbox.checked);
+      applyGlobalEventsEnabledState();
+      renderNarratorDashboard();
+    });
+  } else {
+    applyGlobalEventsEnabledState();
+  }
+
+  if (bloodMoonEnabledCheckbox) {
+    bloodMoonEnabledCheckbox.addEventListener('change', () => {
+      eventConfig.bloodMoonEnabled = bloodMoonEnabledCheckbox.checked;
+      saveEventConfig();
+      if (!eventConfig.bloodMoonEnabled) {
+        clearBloodMoonState();
+      }
+      refreshEventUI();
+      renderNarratorDashboard();
+    });
+  }
+
+  if (phoenixPulseEnabledCheckbox) {
+    phoenixPulseEnabledCheckbox.addEventListener('change', () => {
+      eventConfig.phoenixPulseEnabled = phoenixPulseEnabledCheckbox.checked;
+      saveEventConfig();
+      if (!eventConfig.phoenixPulseEnabled) {
+        clearPhoenixPulseState();
+      }
+      refreshEventUI();
+      renderNarratorDashboard();
+    });
+  }
+
+  // Load reveal dead roles state
+  const savedRevealDeadRoles = localStorage.getItem('revealDeadRoles');
+  if (savedRevealDeadRoles !== null) {
+    revealDeadRolesCheckbox.checked = savedRevealDeadRoles === 'true';
+  }
+
+  // Save reveal dead roles state
+  revealDeadRolesCheckbox.addEventListener('change', () => {
+    localStorage.setItem('revealDeadRoles', revealDeadRolesCheckbox.checked);
+  });
 
   // New roles state
   let henker = null; // { player: "Name", target: "Name" }
@@ -1093,6 +1210,11 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     phoenixPulseStatus.classList.remove('active', 'resolved');
+
+    if (!isPhoenixPulseAvailable()) {
+      phoenixPulseStatus.textContent = 'Phoenix Pulse: deaktiviert';
+      return;
+    }
 
     if (phoenixPulsePending) {
       phoenixPulseStatus.textContent = 'Phoenix Pulse: bereit';
@@ -2566,20 +2688,24 @@ document.addEventListener("DOMContentLoaded", () => {
   // to prevent multiple event listeners from stacking up
 
   function updateBloodMoonOdds() {
+    const oddsEl = document.getElementById('blood-moon-odds');
+    if (!oddsEl) {
+      return;
+    }
+
+    if (!isBloodMoonAvailable()) {
+      oddsEl.textContent = 'Blutmond deaktiviert';
+      return;
+    }
+
     const rawTimer = parseInt(localStorage.getItem('bloodMoonPityTimer') || '0', 10);
     const pityTimer = Number.isFinite(rawTimer) ? Math.max(rawTimer, 0) : 0;
     const bloodMoonChance = getBloodMoonChance(pityTimer);
-    const oddsEl = document.getElementById('blood-moon-odds');
-    if (oddsEl) {
-      oddsEl.textContent = `Blutmond-Chance diese Nacht: ${Math.round(bloodMoonChance * 100)}%`;
-    }
+    oddsEl.textContent = `Blutmond-Chance diese Nacht: ${Math.round(bloodMoonChance * 100)}%`;
   }
 
   function triggerRandomEvents() {
-    phoenixPulsePending = false;
-    phoenixPulseJustResolved = false;
-    phoenixPulseRevivedPlayers = [];
-    setPhoenixPulseCharged(false);
+    clearPhoenixPulseState();
     updatePhoenixPulseStatus();
 
     // If blood moon was manually triggered by admin, keep it active and skip random check.
@@ -2592,29 +2718,32 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // Reset all events
-    bloodMoonActive = false;
+    clearBloodMoonState();
 
-    if (!eventsEnabledCheckbox.checked) {
+    if (!areRandomEventsEnabled()) {
       renderNarratorDashboard();
       return;
     }
 
-    let bloodMoonPityTimer = parseInt(localStorage.getItem('bloodMoonPityTimer') || '0', 10);
-    if (!Number.isFinite(bloodMoonPityTimer) || bloodMoonPityTimer < 0) {
-      bloodMoonPityTimer = 0;
-    }
-    const bloodMoonChance = getBloodMoonChance(bloodMoonPityTimer);
+    if (isBloodMoonEventEnabled()) {
+      let bloodMoonPityTimer = parseInt(localStorage.getItem('bloodMoonPityTimer') || '0', 10);
+      if (!Number.isFinite(bloodMoonPityTimer) || bloodMoonPityTimer < 0) {
+        bloodMoonPityTimer = 0;
+      }
+      const bloodMoonChance = getBloodMoonChance(bloodMoonPityTimer);
 
-    if (Math.random() < bloodMoonChance) {
-      bloodMoonActive = true;
-      bloodMoonPityTimer = 0;
-    } else {
-      bloodMoonPityTimer++;
+      if (Math.random() < bloodMoonChance) {
+        bloodMoonActive = true;
+        bloodMoonPityTimer = 0;
+      } else {
+        bloodMoonPityTimer++;
+      }
+      localStorage.setItem('bloodMoonPityTimer', bloodMoonPityTimer);
     }
-    localStorage.setItem('bloodMoonPityTimer', bloodMoonPityTimer);
+
     updateBloodMoonOdds();
 
-    if (Math.random() < getPhoenixPulseChance()) {
+    if (isPhoenixPulseEventEnabled() && Math.random() < getPhoenixPulseChance()) {
       phoenixPulsePending = true;
       setPhoenixPulseCharged(true);
       updatePhoenixPulseStatus();
