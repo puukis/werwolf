@@ -930,6 +930,48 @@ document.addEventListener("DOMContentLoaded", () => {
     return `${role} & ${displayJobs.join(' & ')}`;
   }
 
+  function getJobClassModifier(job) {
+    if (typeof job !== 'string' || job.length === 0) {
+      return '';
+    }
+    return job
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
+  function renderRoleWithJobs(targetEl, role, jobs = []) {
+    if (!targetEl) {
+      return;
+    }
+
+    targetEl.innerHTML = '';
+
+    const hasRole = typeof role === 'string' && role.length > 0;
+    if (hasRole) {
+      const roleLabel = document.createElement('span');
+      roleLabel.className = 'role-label';
+      roleLabel.textContent = role;
+      targetEl.appendChild(roleLabel);
+    }
+
+    if (!Array.isArray(jobs) || jobs.length === 0) {
+      return;
+    }
+
+    jobs.forEach(job => {
+      const label = getJobDisplayName(job);
+      if (!label) {
+        return;
+      }
+      const modifier = getJobClassModifier(job);
+      const badge = document.createElement('span');
+      badge.className = modifier ? `job-badge job-badge--${modifier}` : 'job-badge';
+      badge.textContent = label;
+      targetEl.appendChild(badge);
+    });
+  }
+
   function findBodyguardHolderIndex() {
     ensureJobsStructure();
     for (let i = 0; i < jobsAssigned.length; i += 1) {
@@ -2637,6 +2679,7 @@ document.addEventListener("DOMContentLoaded", () => {
     currentNightVictims.forEach((victimName, index) => {
       const playerIndex = players.indexOf(victimName);
       const role = rolesAssigned[playerIndex];
+      const jobs = getPlayerJobs(playerIndex);
 
       const card = document.createElement('div');
       card.className = 'reveal-card';
@@ -2660,19 +2703,19 @@ document.addEventListener("DOMContentLoaded", () => {
       back.className = 'reveal-card-back';
       const roleNameEl = document.createElement('span');
       roleNameEl.className = 'role-name';
-      if (role === 'Dorfbewohner') {
+      if (role === 'Dorfbewohner' && (!Array.isArray(jobs) || jobs.length === 0)) {
         roleNameEl.classList.add('long-text');
       }
-      roleNameEl.textContent = role;
+      renderRoleWithJobs(roleNameEl, role, jobs);
       back.innerHTML = `<span class="player-name">${victimName}</span>`;
       back.prepend(roleNameEl);
-      
+
       const infoBtn = document.createElement('button');
       infoBtn.className = 'info-btn';
       infoBtn.textContent = 'Info';
       infoBtn.onclick = (e) => {
         e.stopPropagation();
-        showRoleInfo(role);
+        showRoleInfo(role, { jobs });
       };
       back.appendChild(infoBtn);
 
@@ -3831,10 +3874,10 @@ document.addEventListener("DOMContentLoaded", () => {
           const jobs = getPlayerJobs(index);
           const roleNameEl = document.createElement('span');
           roleNameEl.className = 'role-name';
-          if (role === 'Dorfbewohner') {
+          if (role === 'Dorfbewohner' && (!Array.isArray(jobs) || jobs.length === 0)) {
             roleNameEl.classList.add('long-text');
           }
-          roleNameEl.textContent = formatRoleWithJobs(role, jobs);
+          renderRoleWithJobs(roleNameEl, role, jobs);
           back.innerHTML = `<span class="player-name">${player}</span>`;
           back.prepend(roleNameEl);
 
@@ -3961,16 +4004,22 @@ document.addEventListener("DOMContentLoaded", () => {
       .map(job => {
         const description = jobDescriptions[job];
         const label = getJobDisplayName(job);
+        if (!label) {
+          return '';
+        }
+        const modifier = getJobClassModifier(job);
+        const badgeClass = modifier ? `job-badge job-badge--${modifier}` : 'job-badge';
+        const badgeHtml = `<span class="${badgeClass}">${label}</span>`;
         return description
-          ? `<strong>${label}:</strong> ${description}`
-          : label;
+          ? `${badgeHtml}<span class="job-description-text">${description}</span>`
+          : badgeHtml;
       })
       .filter(Boolean);
 
     if (jobTextSnippets.length > 0) {
       const jobHtml = jobTextSnippets
         .map(text => `<span class="job-description">${text}</span>`)
-        .join('<br>');
+        .join('');
       desc.innerHTML = `${baseDescription}<br><br><strong>Jobs:</strong><br>${jobHtml}`;
     } else {
       desc.textContent = baseDescription;
@@ -4335,10 +4384,10 @@ document.addEventListener("DOMContentLoaded", () => {
       const jobs = getPlayerJobs(index);
       const roleNameEl = document.createElement('span');
       roleNameEl.className = 'role-name';
-      if (role === 'Dorfbewohner') {
+      if (role === 'Dorfbewohner' && (!Array.isArray(jobs) || jobs.length === 0)) {
         roleNameEl.classList.add('long-text');
       }
-      roleNameEl.textContent = formatRoleWithJobs(role, jobs);
+      renderRoleWithJobs(roleNameEl, role, jobs);
       back.innerHTML = `<span class="player-name">${player}</span>`;
       back.prepend(roleNameEl);
       
@@ -5134,13 +5183,12 @@ document.addEventListener("DOMContentLoaded", () => {
         const backOfCard = card.querySelector('.reveal-card-back');
         const roleNameEl = backOfCard ? backOfCard.querySelector('.role-name') : null;
         if (roleNameEl) {
-          const displayName = formatRoleWithJobs(roleName, Array.isArray(jobs) ? jobs : []);
-          roleNameEl.textContent = displayName || '';
           if (roleName === 'Dorfbewohner' && (!Array.isArray(jobs) || jobs.length === 0)) {
             roleNameEl.classList.add('long-text');
           } else {
             roleNameEl.classList.remove('long-text');
           }
+          renderRoleWithJobs(roleNameEl, roleName, Array.isArray(jobs) ? jobs : []);
         }
       }
     });
