@@ -12,6 +12,10 @@
   --result-bg: #f9fafc;
   --role-color: #333333;
   --special-role-color: #8b5cf6;
+  --job-bodyguard-bg: #1f9d8f;
+  --job-bodyguard-text: #ffffff;
+  --job-doctor-bg: #f6c343;
+  --job-doctor-text: #2d2100;
   --input-bg: #ffffff;
   --input-border: #ccc;
   --shadow-color: rgba(0, 0, 0, 0.08);
@@ -33,6 +37,10 @@
   --result-bg: #333333;
   --role-color: #f0f0f0;
   --special-role-color: #a78bfa;
+  --job-bodyguard-bg: #1a8579;
+  --job-bodyguard-text: #ffffff;
+  --job-doctor-bg: #e7aa36;
+  --job-doctor-text: #1f1400;
   --input-bg: #3d3d3d;
   --input-border: #555555;
   --shadow-color: rgba(0, 0, 0, 0.3);
@@ -249,9 +257,46 @@ body {
   margin-top: 2rem;
 }
 
+.job-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  background: rgba(0, 0, 0, 0.12);
+  color: var(--text-color);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.job-badge--bodyguard {
+  background: var(--job-bodyguard-bg);
+  color: var(--job-bodyguard-text);
+}
+
+.job-badge--doctor {
+  background: var(--job-doctor-bg);
+  color: var(--job-doctor-text);
+}
+
 .job-description {
-  display: inline-block;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
   color: var(--text-light);
+  margin-top: 0.35rem;
+}
+
+.job-description:first-of-type {
+  margin-top: 0.2rem;
+}
+
+.job-description-text {
+  font-size: 0.85rem;
+  line-height: 1.4;
 }
 
 .setup-container {
@@ -1447,10 +1492,31 @@ body.night-active main.container {
 .reveal-card-back .role-name {
   font-size: 1.1rem;
   font-weight: 700;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  text-align: center;
 }
 
 .reveal-card-back .role-name.long-text {
   font-size: 0.9rem;
+}
+
+.reveal-card-back .role-name .role-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.05rem 0.25rem;
+  border-radius: 0.35rem;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.reveal-card-back .role-name .job-badge {
+  font-size: 0.65rem;
+  padding: 0.15rem 0.45rem;
+  border: 1px solid rgba(255, 255, 255, 0.35);
 }
 
 .reveal-card-back .player-name {
