@@ -95,6 +95,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const phoenixPulseChanceDisplay = document.getElementById('phoenix-pulse-chance-display');
   const bodyguardJobChanceInput = document.getElementById('bodyguard-job-chance');
   const bodyguardJobChanceDisplay = document.getElementById('bodyguard-job-chance-display');
+  const doctorJobChanceInput = document.getElementById('doctor-job-chance');
+  const doctorJobChanceDisplay = document.getElementById('doctor-job-chance-display');
   const openConfigBtn = document.getElementById('open-config-btn');
   const configModal = document.getElementById('config-modal');
   const closeConfigBtn = document.getElementById('close-config-btn');
@@ -104,7 +106,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const BLOOD_MOON_CONFIG_STORAGE_KEY = 'werwolfBloodMoonConfig';
   const DEFAULT_PHOENIX_PULSE_CHANCE = 0.05;
   const PHOENIX_PULSE_CONFIG_STORAGE_KEY = 'werwolfPhoenixPulseConfig';
-  const defaultJobConfig = { bodyguardChance: 0 };
+  const defaultJobConfig = { bodyguardChance: 0, doctorChance: 0 };
   const defaultBloodMoonConfig = { baseChance: 0.2 };
   const defaultPhoenixPulseConfig = { chance: DEFAULT_PHOENIX_PULSE_CHANCE };
   const defaultEventConfig = {
@@ -223,13 +225,16 @@ document.addEventListener("DOMContentLoaded", () => {
         return { ...defaultJobConfig };
       }
       const parsed = JSON.parse(raw);
-      const rawChance = typeof parsed.bodyguardChance === 'number'
-        ? parsed.bodyguardChance
-        : defaultJobConfig.bodyguardChance;
-      const normalized = Number.isFinite(rawChance)
-        ? Math.min(Math.max(rawChance, 0), 1)
-        : defaultJobConfig.bodyguardChance;
-      return { bodyguardChance: normalized };
+      const normalizeChance = (value, fallback) => {
+        const rawChance = typeof value === 'number' ? value : fallback;
+        return Number.isFinite(rawChance)
+          ? Math.min(Math.max(rawChance, 0), 1)
+          : fallback;
+      };
+      return {
+        bodyguardChance: normalizeChance(parsed.bodyguardChance, defaultJobConfig.bodyguardChance),
+        doctorChance: normalizeChance(parsed.doctorChance, defaultJobConfig.doctorChance)
+      };
     } catch (error) {
       return { ...defaultJobConfig };
     }
@@ -237,8 +242,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function saveJobConfig() {
     try {
+      const normalizeChance = (value, fallback) => {
+        const numeric = typeof value === 'number' ? value : fallback;
+        return Number.isFinite(numeric) ? Math.min(Math.max(numeric, 0), 1) : fallback;
+      };
       const payload = {
-        bodyguardChance: Math.min(Math.max(jobConfig.bodyguardChance || 0, 0), 1)
+        bodyguardChance: normalizeChance(jobConfig.bodyguardChance, defaultJobConfig.bodyguardChance),
+        doctorChance: normalizeChance(jobConfig.doctorChance, defaultJobConfig.doctorChance)
       };
       localStorage.setItem(JOB_CONFIG_STORAGE_KEY, JSON.stringify(payload));
     } catch (error) {
@@ -382,6 +392,34 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     bodyguardJobChanceInput.addEventListener('change', () => {
       updateBodyguardChanceUI(bodyguardJobChanceInput.value, { save: true });
+    });
+  }
+
+  function updateDoctorChanceUI(percent, { save = false } = {}) {
+    const numeric = Number(percent);
+    const sanitized = Number.isFinite(numeric)
+      ? Math.min(Math.max(Math.round(numeric), 0), 100)
+      : 0;
+    jobConfig.doctorChance = sanitized / 100;
+    if (doctorJobChanceInput && doctorJobChanceInput.value !== String(sanitized)) {
+      doctorJobChanceInput.value = String(sanitized);
+    }
+    if (doctorJobChanceDisplay) {
+      doctorJobChanceDisplay.textContent = `${sanitized}%`;
+    }
+    if (save) {
+      saveJobConfig();
+    }
+  }
+
+  updateDoctorChanceUI(jobConfig.doctorChance * 100, { save: false });
+
+  if (doctorJobChanceInput) {
+    doctorJobChanceInput.addEventListener('input', () => {
+      updateDoctorChanceUI(doctorJobChanceInput.value, { save: false });
+    });
+    doctorJobChanceInput.addEventListener('change', () => {
+      updateDoctorChanceUI(doctorJobChanceInput.value, { save: true });
     });
   }
 
@@ -589,6 +627,12 @@ document.addEventListener("DOMContentLoaded", () => {
   let bodyguardProtectionNight = null;
   let bodyguardSavedTarget = null;
   let bodyguardPlayers = [];
+  let doctorPlayers = [];
+  let doctorPendingTargets = [];
+  let doctorPendingNight = null;
+  let doctorTriggerSourceNight = null;
+  let doctorLastHealedTarget = null;
+  let doctorLastHealedNight = null;
 
   function clearBloodMoonState() {
     bloodMoonActive = false;
@@ -863,6 +907,17 @@ document.addEventListener("DOMContentLoaded", () => {
     return -1;
   }
 
+  function findDoctorHolderIndex() {
+    ensureJobsStructure();
+    for (let i = 0; i < jobsAssigned.length; i += 1) {
+      const jobs = jobsAssigned[i];
+      if (Array.isArray(jobs) && jobs.includes('Doctor')) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
   function assignBodyguardJobToIndex(index) {
     if (typeof index !== 'number' || index < 0 || index >= players.length) {
       return false;
@@ -883,6 +938,32 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!jobs.includes('Bodyguard')) {
       jobs.push('Bodyguard');
     }
+    updateDoctorPlayers();
+    return true;
+  }
+
+  function assignDoctorJobToIndex(index) {
+    if (typeof index !== 'number' || index < 0 || index >= players.length) {
+      return false;
+    }
+    ensureJobsStructure();
+    const currentIndex = findDoctorHolderIndex();
+    if (currentIndex === index) {
+      updateDoctorPlayers();
+      return true;
+    }
+    if (currentIndex !== -1) {
+      const currentJobs = jobsAssigned[currentIndex];
+      const pos = currentJobs.indexOf('Doctor');
+      if (pos !== -1) {
+        currentJobs.splice(pos, 1);
+      }
+    }
+    const jobs = getPlayerJobs(index);
+    if (!jobs.includes('Doctor')) {
+      jobs.push('Doctor');
+    }
+    updateDoctorPlayers();
     return true;
   }
 
@@ -912,6 +993,32 @@ document.addEventListener("DOMContentLoaded", () => {
     return choice.player;
   }
 
+  function assignDoctorJobByChance() {
+    if (!jobConfig || typeof jobConfig.doctorChance !== 'number') {
+      return null;
+    }
+    const chance = Math.min(Math.max(jobConfig.doctorChance, 0), 1);
+    if (chance <= 0) {
+      return null;
+    }
+    const existingIndex = findDoctorHolderIndex();
+    if (existingIndex !== -1) {
+      return players[existingIndex] || null;
+    }
+    if (Math.random() >= chance) {
+      return null;
+    }
+    const eligible = players
+      .map((player, index) => ({ player, index }))
+      .filter(({ index }) => doctorEligibleRoles.has(rolesAssigned[index]));
+    if (eligible.length === 0) {
+      return null;
+    }
+    const choice = eligible[Math.floor(Math.random() * eligible.length)];
+    assignDoctorJobToIndex(choice.index);
+    return choice.player;
+  }
+
   function removeBodyguardJobFromIndex(index) {
     ensureJobsStructure();
     if (typeof index !== 'number' || index < 0 || index >= jobsAssigned.length) {
@@ -925,6 +1032,23 @@ document.addEventListener("DOMContentLoaded", () => {
     if (pos !== -1) {
       jobs.splice(pos, 1);
     }
+    updateDoctorPlayers();
+  }
+
+  function removeDoctorJobFromIndex(index) {
+    ensureJobsStructure();
+    if (typeof index !== 'number' || index < 0 || index >= jobsAssigned.length) {
+      return;
+    }
+    const jobs = jobsAssigned[index];
+    if (!Array.isArray(jobs)) {
+      return;
+    }
+    const pos = jobs.indexOf('Doctor');
+    if (pos !== -1) {
+      jobs.splice(pos, 1);
+    }
+    updateDoctorPlayers();
   }
 
   function hasActiveBodyguard() {
@@ -938,6 +1062,48 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  function hasActiveDoctor() {
+    ensureJobsStructure();
+    return players.some((player, index) => {
+      if (deadPlayers.includes(player)) {
+        return false;
+      }
+      const jobs = jobsAssigned[index];
+      return Array.isArray(jobs) && jobs.includes('Doctor');
+    });
+  }
+
+  function getDoctorAvailableTargets() {
+    return doctorPendingTargets.filter(name => deadPlayers.includes(name));
+  }
+
+  function clearDoctorPending() {
+    doctorPendingTargets = [];
+    doctorPendingNight = null;
+    doctorTriggerSourceNight = null;
+  }
+
+  function updateDoctorPlayers() {
+    ensureJobsStructure();
+    doctorPlayers = players.filter((player, index) => {
+      if (deadPlayers.includes(player)) {
+        return false;
+      }
+      const jobs = jobsAssigned[index];
+      return Array.isArray(jobs) && jobs.includes('Doctor');
+    });
+    const availableTargets = getDoctorAvailableTargets();
+    if (doctorPlayers.length === 0 && doctorPendingNight !== null && doctorPendingNight <= nightCounter) {
+      clearDoctorPending();
+      return;
+    }
+    if (availableTargets.length === 0 && doctorPendingNight !== null && doctorPendingNight <= nightCounter) {
+      clearDoctorPending();
+    } else if (availableTargets.length !== doctorPendingTargets.length) {
+      doctorPendingTargets = availableTargets;
+    }
+  }
+
   function updateBodyguardPlayers() {
     ensureJobsStructure();
     bodyguardPlayers = players.filter((player, index) => {
@@ -947,6 +1113,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const jobs = jobsAssigned[index];
       return Array.isArray(jobs) && jobs.includes('Bodyguard');
     });
+    updateDoctorPlayers();
   }
 
 
@@ -1151,10 +1318,11 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   const jobDescriptions = {
-    Bodyguard: "Wählt jede Nacht eine Person und schützt sie vor Angriffen der Werwölfe."
+    Bodyguard: "Wählt jede Nacht eine Person und schützt sie vor Angriffen der Werwölfe.",
+    Doctor: "Wacht nach einer blutigen Nacht auf und kann eine der Opferpersonen zurück ins Leben holen."
   };
 
-  const bodyguardEligibleRoles = new Set([
+  const villagerJobEligibleRoles = new Set([
     "Dorfbewohner",
     "Seer",
     "Jäger",
@@ -1169,10 +1337,14 @@ document.addEventListener("DOMContentLoaded", () => {
     "Friedenstifter"
   ]);
 
+  const bodyguardEligibleRoles = villagerJobEligibleRoles;
+  const doctorEligibleRoles = villagerJobEligibleRoles;
+
   /* -------------------- Erste Nacht Logik -------------------- */
-  const nightSequence = ["Bodyguard", "Henker", "Geschwister", "Amor", "Seer", "Inquisitor", "Werwolf", "Hexe", "Stumme Jule"];
+  const nightSequence = ["Bodyguard", "Doctor", "Henker", "Geschwister", "Amor", "Seer", "Inquisitor", "Werwolf", "Hexe", "Stumme Jule"];
   const nightTexts = {
     Bodyguard: "Der Bodyguard wacht auf. Bitte wähle eine Person zum Beschützen.",
+    Doctor: "Der Arzt wacht auf. Du darfst eine der Opferpersonen der letzten Nacht heilen.",
     Henker: "Der Henker wacht auf und erfährt sein Ziel.",
     Amor: "Amor wacht auf. Bitte wähle zwei Liebende.",
     Seer: "Der Seher wacht auf. Bitte wähle eine Person zum Ansehen.",
@@ -1672,6 +1844,16 @@ document.addEventListener("DOMContentLoaded", () => {
       nightChoices.style.display = "none";
     } else if (role === "Bodyguard") {
       renderPlayerChoices(1, players.filter((p) => !deadPlayers.includes(p)));
+    } else if (role === "Doctor") {
+      const targets = getDoctorAvailableTargets();
+      if (targets.length > 0) {
+        nightTextEl.innerHTML = `${nightTexts[role]}<br><small>Verfügbare Ziele: ${targets.join(', ')}</small>`;
+        renderPlayerChoices(1, targets);
+      } else {
+        nightTextEl.innerHTML = `${nightTexts[role]}<br><small>Es gibt niemanden zu heilen.</small>`;
+        nightChoices.innerHTML = "";
+        nightChoices.style.display = "none";
+      }
     } else if (role === "Seer") {
       // Show living players for Seer to check - no clear button needed
       renderPlayerChoices(1, players.filter((p) => !deadPlayers.includes(p)));
@@ -2602,6 +2784,13 @@ document.addEventListener("DOMContentLoaded", () => {
       console.log("Tote Spieler:", deadPlayers);
       console.log("Liebespaare:", lovers);
 
+      const uniqueVictims = Array.from(new Set(currentNightVictims));
+      if (uniqueVictims.length >= 2) {
+        doctorPendingTargets = uniqueVictims.slice();
+        doctorPendingNight = nightCounter + 1;
+        doctorTriggerSourceNight = nightCounter;
+      }
+
       nightStepHistory = [];
       renderNarratorDashboard();
 
@@ -2639,6 +2828,60 @@ document.addEventListener("DOMContentLoaded", () => {
         bodyguardSavedTarget = null;
         resultOutput.innerHTML += `<br>Der Bodyguard beschützt ${name}.`;
         logAction({ type: 'night', label: 'Bodyguard schützt', detail: name });
+        renderNarratorDashboard();
+        moveToNextNightStep();
+      });
+      return;
+    } else if (role === "Doctor") {
+      const availableTargets = getDoctorAvailableTargets();
+      if (availableTargets.length === 0) {
+        clearDoctorPending();
+        renderNarratorDashboard();
+        moveToNextNightStep();
+        return;
+      }
+      const selected = nightChoices.querySelector(".player-btn.selected");
+      if (!selected) {
+        showConfirmation({
+          title: 'Keine Heilung?',
+          text: 'Der Arzt kann diese Nacht eine Person heilen. Soll er darauf verzichten?',
+          confirmText: 'Überspringen',
+          cancelText: 'Zurück',
+          onConfirm: () => {
+            clearDoctorPending();
+            logAction({ type: 'night', label: 'Arzt verzichtet', detail: 'Keine Heilung gewählt' });
+            renderNarratorDashboard();
+            moveToNextNightStep();
+          }
+        });
+        return;
+      }
+      const name = selected.textContent;
+      showConfirmation('Heilung einsetzen?', `Soll ${name} vom Arzt geheilt werden?`, () => {
+        const wasDead = deadPlayers.includes(name);
+        if (wasDead) {
+          deadPlayers = deadPlayers.filter(player => player !== name);
+          doctorPendingTargets = doctorPendingTargets.filter(player => player !== name);
+          doctorLastHealedTarget = name;
+          doctorLastHealedNight = nightCounter;
+          updatePlayerCardVisuals();
+          populateAdminKillSelect();
+          populateAdminReviveSelect();
+          if (name === jagerDiedLastNight) {
+            jagerDiedLastNight = null;
+          }
+          checkGameOver(true);
+          if (resultOutput) {
+            resultOutput.innerHTML += `<br>🩺 Der Arzt hat ${name} geheilt!`;
+          }
+          logAction({ type: 'night', label: 'Arzt heilt', detail: name });
+        } else {
+          if (resultOutput) {
+            resultOutput.innerHTML += `<br>🩺 Der Arzt wollte ${name} heilen, aber die Person lebt bereits.`;
+          }
+          logAction({ type: 'night', label: 'Arzt vergeblich', detail: `${name} war bereits am Leben` });
+        }
+        clearDoctorPending();
         renderNarratorDashboard();
         moveToNextNightStep();
       });
@@ -3004,13 +3247,29 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
     
+    updateBodyguardPlayers();
     const livingRoleSet = new Set(livingPlayerRoles);
     const bodyguardActive = hasActiveBodyguard();
+    const upcomingNightNumber = nightCounter + 1;
+    const doctorActive = hasActiveDoctor();
+    const doctorTargets = getDoctorAvailableTargets();
+    if (doctorPendingNight !== null && doctorPendingNight < upcomingNightNumber) {
+      clearDoctorPending();
+    }
+    const doctorShouldAct = doctorActive
+      && doctorPendingNight === upcomingNightNumber
+      && doctorTargets.length > 0;
+    if (doctorPendingNight === upcomingNightNumber && doctorTargets.length === 0) {
+      clearDoctorPending();
+    }
 
     // Filter night sequence based on available living roles
     nightSteps = nightSequence.filter((r) => {
       if (r === "Bodyguard") {
         return bodyguardActive;
+      }
+      if (r === "Doctor") {
+        return doctorShouldAct;
       }
       if (r === "Amor" || r === "Geschwister" || r === "Henker") {
         return livingRoleSet.has(r) && dayCount === 0;
@@ -3350,6 +3609,13 @@ document.addEventListener("DOMContentLoaded", () => {
         jobConfig.bodyguardChance = 1;
         updateBodyguardChanceUI(100, { save: true });
       }
+      if (lastUsed.jobConfig && typeof lastUsed.jobConfig.doctorChance === 'number') {
+        jobConfig.doctorChance = Math.min(Math.max(lastUsed.jobConfig.doctorChance, 0), 1);
+        updateDoctorChanceUI(jobConfig.doctorChance * 100, { save: true });
+      } else if (!lastUsed.jobConfig || typeof lastUsed.jobConfig.doctorChance !== 'number') {
+        jobConfig.doctorChance = defaultJobConfig.doctorChance;
+        updateDoctorChanceUI(jobConfig.doctorChance * 100, { save: true });
+      }
 
       lastSuggestionSnapshot = null;
       roleLayoutCustomized = true;
@@ -3408,7 +3674,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const lastUsedOptions = {
       players: playersRaw,
       roles: roleSetup,
-      jobConfig: { bodyguardChance: jobConfig.bodyguardChance }
+      jobConfig: { bodyguardChance: jobConfig.bodyguardChance, doctorChance: jobConfig.doctorChance }
     };
     localStorage.setItem('werwolfLastUsed', JSON.stringify(lastUsedOptions));
 
@@ -3457,10 +3723,17 @@ document.addEventListener("DOMContentLoaded", () => {
         bodyguardProtectionTarget = null;
         bodyguardProtectionNight = null;
         bodyguardSavedTarget = null;
+        doctorPlayers = [];
+        doctorPendingTargets = [];
+        doctorPendingNight = null;
+        doctorTriggerSourceNight = null;
+        doctorLastHealedTarget = null;
+        doctorLastHealedNight = null;
         firstNightShieldUsed = false;
         initializeMichaelJacksonAccusations();
 
         assignBodyguardJobByChance();
+        assignDoctorJobByChance();
 
         const villageTeamRoles = ["Dorfbewohner", "Seer", "Jäger", "Hexe", "Stumme Jule", "Inquisitor", "Verfluchte", "Sündenbock", "Geschwister", "Geist", "Michael Jackson"];
         const villagersForHenkerTarget = [];
@@ -3481,6 +3754,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
 
         updateBodyguardPlayers();
+        updateDoctorPlayers();
 
         // Assign a target to the Henker (must not be the Henker themselves)
         if (henker) {
@@ -3772,8 +4046,14 @@ document.addEventListener("DOMContentLoaded", () => {
       bodyguardProtectionTarget,
       bodyguardProtectionNight,
       bodyguardSavedTarget,
+      doctorPlayers: doctorPlayers.slice(),
+      doctorPendingTargets: doctorPendingTargets.slice(),
+      doctorPendingNight,
+      doctorTriggerSourceNight,
+      doctorLastHealedTarget,
+      doctorLastHealedNight,
       jobsAssigned: jobsAssigned.map(jobs => Array.isArray(jobs) ? jobs.slice() : []),
-      jobConfig: { bodyguardChance: jobConfig.bodyguardChance }
+      jobConfig: { bodyguardChance: jobConfig.bodyguardChance, doctorChance: jobConfig.doctorChance }
     };
 
     let sessions = JSON.parse(localStorage.getItem('werwolfSessions')) || [];
@@ -3862,9 +4142,26 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     }
 
+    if (Array.isArray(session.doctorPlayers) && session.doctorPlayers.length > 0) {
+      session.doctorPlayers.forEach(name => {
+        const idx = players.indexOf(name);
+        if (idx !== -1) {
+          assignDoctorJobToIndex(idx);
+        }
+      });
+    }
+
     if (session.jobConfig && typeof session.jobConfig.bodyguardChance === 'number') {
       jobConfig.bodyguardChance = Math.min(Math.max(session.jobConfig.bodyguardChance, 0), 1);
       updateBodyguardChanceUI(jobConfig.bodyguardChance * 100, { save: true });
+    }
+    if (session.jobConfig && typeof session.jobConfig.doctorChance === 'number') {
+      jobConfig.doctorChance = Math.min(Math.max(session.jobConfig.doctorChance, 0), 1);
+      updateDoctorChanceUI(jobConfig.doctorChance * 100, { save: true });
+    }
+    if (!session.jobConfig || typeof session.jobConfig.doctorChance !== 'number') {
+      jobConfig.doctorChance = defaultJobConfig.doctorChance;
+      updateDoctorChanceUI(jobConfig.doctorChance * 100, { save: true });
     }
     deadPlayers = session.deadPlayers || [];
     lovers = session.lovers || [];
@@ -3898,6 +4195,20 @@ document.addEventListener("DOMContentLoaded", () => {
     nightCounter = session.nightCounter || 0;
     initializeMichaelJacksonAccusations(session.michaelJacksonAccusations || {});
     updateBodyguardPlayers();
+    doctorPendingTargets = Array.isArray(session.doctorPendingTargets)
+      ? session.doctorPendingTargets.slice()
+      : [];
+    doctorPendingNight = Number.isFinite(session.doctorPendingNight)
+      ? session.doctorPendingNight
+      : null;
+    doctorTriggerSourceNight = Number.isFinite(session.doctorTriggerSourceNight)
+      ? session.doctorTriggerSourceNight
+      : null;
+    doctorLastHealedTarget = session.doctorLastHealedTarget || null;
+    doctorLastHealedNight = Number.isFinite(session.doctorLastHealedNight)
+      ? session.doctorLastHealedNight
+      : null;
+    updateDoctorPlayers();
     bodyguardProtectionTarget = session.bodyguardProtectionTarget || null;
     bodyguardProtectionNight = Number.isFinite(session.bodyguardProtectionNight)
       ? session.bodyguardProtectionNight
@@ -4220,6 +4531,15 @@ document.addEventListener("DOMContentLoaded", () => {
       if (bodyguardSavedTarget) {
         events.push(`Bodyguard Rettung: ${bodyguardSavedTarget}`);
       }
+      if (doctorPendingNight !== null && doctorPlayers.length > 0) {
+        const availableDoctorTargets = getDoctorAvailableTargets();
+        if (availableDoctorTargets.length > 0) {
+          events.push(`Arzt vorbereitet (Nacht ${doctorPendingNight}): ${availableDoctorTargets.join(', ')}`);
+        }
+      }
+      if (doctorLastHealedTarget && doctorLastHealedNight === nightCounter) {
+        events.push(`Arzt Heilung: ${doctorLastHealedTarget}`);
+      }
       if (currentNightVictims.length > 0) {
         events.push(`Ausstehende Nachtopfer: ${currentNightVictims.join(', ')}`);
       }
@@ -4327,8 +4647,14 @@ document.addEventListener("DOMContentLoaded", () => {
       bodyguardProtectionTarget,
       bodyguardProtectionNight,
       bodyguardSavedTarget,
+      doctorPlayers: doctorPlayers.slice(),
+      doctorPendingTargets: doctorPendingTargets.slice(),
+      doctorPendingNight,
+      doctorTriggerSourceNight,
+      doctorLastHealedTarget,
+      doctorLastHealedNight,
       jobsAssigned: jobsAssigned.map(jobs => Array.isArray(jobs) ? jobs.slice() : []),
-      jobConfig: { bodyguardChance: jobConfig.bodyguardChance },
+      jobConfig: { bodyguardChance: jobConfig.bodyguardChance, doctorChance: jobConfig.doctorChance },
       firstNightShieldUsed
     };
   }
@@ -4384,6 +4710,22 @@ document.addEventListener("DOMContentLoaded", () => {
       jobConfig.bodyguardChance = Math.min(Math.max(snapshot.jobConfig.bodyguardChance, 0), 1);
       updateBodyguardChanceUI(jobConfig.bodyguardChance * 100, { save: true });
     }
+    if (Array.isArray(snapshot.doctorPlayers) && snapshot.doctorPlayers.length > 0) {
+      snapshot.doctorPlayers.forEach(name => {
+        const idx = players.indexOf(name);
+        if (idx !== -1) {
+          assignDoctorJobToIndex(idx);
+        }
+      });
+    }
+    if (snapshot.jobConfig && typeof snapshot.jobConfig.doctorChance === 'number') {
+      jobConfig.doctorChance = Math.min(Math.max(snapshot.jobConfig.doctorChance, 0), 1);
+      updateDoctorChanceUI(jobConfig.doctorChance * 100, { save: true });
+    }
+    if (!snapshot.jobConfig || typeof snapshot.jobConfig.doctorChance !== 'number') {
+      jobConfig.doctorChance = defaultJobConfig.doctorChance;
+      updateDoctorChanceUI(jobConfig.doctorChance * 100, { save: true });
+    }
     deadPlayers = snapshot.deadPlayers.slice();
     lovers = snapshot.lovers.map(pair => pair.slice());
     silencedPlayer = snapshot.silencedPlayer;
@@ -4422,6 +4764,20 @@ document.addEventListener("DOMContentLoaded", () => {
     jagerDiedLastNight = snapshot.jagerDiedLastNight || null;
     nightCounter = snapshot.nightCounter || 0;
     updateBodyguardPlayers();
+    doctorPendingTargets = Array.isArray(snapshot.doctorPendingTargets)
+      ? snapshot.doctorPendingTargets.slice()
+      : [];
+    doctorPendingNight = Number.isFinite(snapshot.doctorPendingNight)
+      ? snapshot.doctorPendingNight
+      : null;
+    doctorTriggerSourceNight = Number.isFinite(snapshot.doctorTriggerSourceNight)
+      ? snapshot.doctorTriggerSourceNight
+      : null;
+    doctorLastHealedTarget = snapshot.doctorLastHealedTarget || null;
+    doctorLastHealedNight = Number.isFinite(snapshot.doctorLastHealedNight)
+      ? snapshot.doctorLastHealedNight
+      : null;
+    updateDoctorPlayers();
     bodyguardProtectionTarget = snapshot.bodyguardProtectionTarget || null;
     bodyguardProtectionNight = Number.isFinite(snapshot.bodyguardProtectionNight)
       ? snapshot.bodyguardProtectionNight
@@ -4795,11 +5151,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
     adminChangeRoleRoleSelect.innerHTML = '';
     const allRoles = [...categorizedRoles.village, ...categorizedRoles.werwolf, ...categorizedRoles.special];
-    const roleOptionValues = [...allRoles, 'Bodyguard'];
+    const roleOptionValues = [...allRoles, 'Bodyguard', 'Doctor'];
     roleOptionValues.forEach(r => {
       const option = document.createElement('option');
       option.value = r;
-      option.textContent = r === 'Bodyguard' ? 'Bodyguard (Job)' : r;
+      if (r === 'Bodyguard') {
+        option.textContent = 'Bodyguard (Job)';
+      } else if (r === 'Doctor') {
+        option.textContent = 'Arzt (Job)';
+      } else {
+        option.textContent = r;
+      }
       adminChangeRoleRoleSelect.appendChild(option);
     });
   }
@@ -5154,12 +5516,21 @@ document.addEventListener("DOMContentLoaded", () => {
             previousJobs.push('Bodyguard');
           }
         }
+        if (previousRole === 'Doctor') {
+          previousRole = 'Dorfbewohner';
+          if (!previousJobs.includes('Doctor')) {
+            previousJobs.push('Doctor');
+          }
+        }
 
-        const appliedRole = newRole === 'Bodyguard' ? 'Dorfbewohner' : newRole;
+        const isJobSelection = newRole === 'Bodyguard' || newRole === 'Doctor';
+        const appliedRole = isJobSelection ? 'Dorfbewohner' : newRole;
         const hasBodyguardJob = previousJobs.includes('Bodyguard');
+        const hasDoctorJob = previousJobs.includes('Doctor');
         const wantsBodyguard = newRole === 'Bodyguard';
+        const wantsDoctor = newRole === 'Doctor';
 
-        if (appliedRole === previousRole && hasBodyguardJob === wantsBodyguard) {
+        if (appliedRole === previousRole && hasBodyguardJob === wantsBodyguard && hasDoctorJob === wantsDoctor) {
           const labelText = formatRoleWithJobs(previousRole, previousJobs);
           logAction({ type: 'info', label: 'Keine Rollenänderung notwendig', detail: `${playerToChange} besitzt bereits ${labelText}.` });
           showConfirmation('Keine Änderung', `${playerToChange} hat bereits ${labelText}.`, () => {}, 'Okay', false);
@@ -5171,6 +5542,11 @@ document.addEventListener("DOMContentLoaded", () => {
           assignBodyguardJobToIndex(playerIndex);
         } else {
           removeBodyguardJobFromIndex(playerIndex);
+        }
+        if (wantsDoctor) {
+          assignDoctorJobToIndex(playerIndex);
+        } else {
+          removeDoctorJobFromIndex(playerIndex);
         }
         const newJobs = getPlayerJobs(playerIndex).slice();
 
@@ -5188,8 +5564,12 @@ document.addEventListener("DOMContentLoaded", () => {
           undo: () => {
             rolesAssigned[playerIndex] = previousRole;
             removeBodyguardJobFromIndex(playerIndex);
+            removeDoctorJobFromIndex(playerIndex);
             if (previousJobs.includes('Bodyguard')) {
               assignBodyguardJobToIndex(playerIndex);
+            }
+            if (previousJobs.includes('Doctor')) {
+              assignDoctorJobToIndex(playerIndex);
             }
             updateRevealCardRoleText(playerToChange, previousRole || '', getPlayerJobs(playerIndex));
             updateBodyguardPlayers();
@@ -5199,6 +5579,10 @@ document.addEventListener("DOMContentLoaded", () => {
             removeBodyguardJobFromIndex(playerIndex);
             if (newJobs.includes('Bodyguard')) {
               assignBodyguardJobToIndex(playerIndex);
+            }
+            removeDoctorJobFromIndex(playerIndex);
+            if (newJobs.includes('Doctor')) {
+              assignDoctorJobToIndex(playerIndex);
             }
             updateRevealCardRoleText(playerToChange, appliedRole, getPlayerJobs(playerIndex));
             updateBodyguardPlayers();
@@ -5485,24 +5869,30 @@ document.addEventListener("DOMContentLoaded", () => {
           bodyguardProtectionTarget,
           bodyguardProtectionNight,
           bodyguardSavedTarget,
+          doctorPlayers: doctorPlayers.slice(),
+          doctorPendingTargets: doctorPendingTargets.slice(),
+          doctorPendingNight,
+          doctorTriggerSourceNight,
+          doctorLastHealedTarget,
+          doctorLastHealedNight,
           jobsAssigned: jobsAssigned.map(jobs => Array.isArray(jobs) ? jobs.slice() : []),
-          jobConfig: { bodyguardChance: jobConfig.bodyguardChance }
+          jobConfig: { bodyguardChance: jobConfig.bodyguardChance, doctorChance: jobConfig.doctorChance }
         };
       },
       setState(partial = {}) {
-        let recalcBodyguards = false;
+        let recalcJobs = false;
         let phoenixStateChanged = false;
         if (Array.isArray(partial.players)) {
           players = partial.players.slice();
-          recalcBodyguards = true;
+          recalcJobs = true;
         }
         if (Array.isArray(partial.rolesAssigned)) {
           rolesAssigned = partial.rolesAssigned.slice();
-          recalcBodyguards = true;
+          recalcJobs = true;
         }
         if (Array.isArray(partial.jobsAssigned)) {
           jobsAssigned = partial.jobsAssigned.map(entry => Array.isArray(entry) ? entry.slice() : []);
-          recalcBodyguards = true;
+          recalcJobs = true;
         }
         if (Array.isArray(partial.deadPlayers)) {
           deadPlayers = partial.deadPlayers.slice();
@@ -5585,13 +5975,17 @@ document.addEventListener("DOMContentLoaded", () => {
           jobConfig.bodyguardChance = Math.min(Math.max(partial.jobConfig.bodyguardChance, 0), 1);
           updateBodyguardChanceUI(jobConfig.bodyguardChance * 100, { save: true });
         }
+        if (partial.jobConfig && typeof partial.jobConfig.doctorChance === 'number') {
+          jobConfig.doctorChance = Math.min(Math.max(partial.jobConfig.doctorChance, 0), 1);
+          updateDoctorChanceUI(jobConfig.doctorChance * 100, { save: true });
+        }
 
         if (phoenixStateChanged) {
           setPhoenixPulseCharged(phoenixPulsePending);
           updatePhoenixPulseStatus();
         }
 
-        if (recalcBodyguards || Array.isArray(partial.jobsAssigned) || Array.isArray(partial.bodyguardPlayers)) {
+        if (recalcJobs || Array.isArray(partial.jobsAssigned) || Array.isArray(partial.bodyguardPlayers) || Array.isArray(partial.doctorPlayers)) {
           ensureJobsStructure();
           const legacyBodyguards = [];
           rolesAssigned.forEach((role, index) => {
@@ -5611,13 +6005,43 @@ document.addEventListener("DOMContentLoaded", () => {
               }
             });
           }
+          if (Array.isArray(partial.doctorPlayers)) {
+            partial.doctorPlayers.forEach(name => {
+              const idx = players.indexOf(name);
+              if (idx !== -1) {
+                assignDoctorJobToIndex(idx);
+              }
+            });
+          }
           updateBodyguardPlayers();
-          recalcBodyguards = false;
-        } else if (recalcBodyguards) {
+          recalcJobs = false;
+        } else if (recalcJobs) {
           ensureJobsStructure();
           updateBodyguardPlayers();
-          recalcBodyguards = false;
+          recalcJobs = false;
         }
+        if (Array.isArray(partial.doctorPendingTargets)) {
+          doctorPendingTargets = partial.doctorPendingTargets.slice();
+        }
+        if ('doctorPendingNight' in partial) {
+          doctorPendingNight = Number.isFinite(partial.doctorPendingNight)
+            ? partial.doctorPendingNight
+            : null;
+        }
+        if ('doctorTriggerSourceNight' in partial) {
+          doctorTriggerSourceNight = Number.isFinite(partial.doctorTriggerSourceNight)
+            ? partial.doctorTriggerSourceNight
+            : null;
+        }
+        if ('doctorLastHealedTarget' in partial) {
+          doctorLastHealedTarget = partial.doctorLastHealedTarget || null;
+        }
+        if ('doctorLastHealedNight' in partial) {
+          doctorLastHealedNight = Number.isFinite(partial.doctorLastHealedNight)
+            ? partial.doctorLastHealedNight
+            : null;
+        }
+        updateDoctorPlayers();
         renderNarratorDashboard();
       },
       renderNarratorDashboard,

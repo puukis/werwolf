@@ -202,6 +202,33 @@ describe('Narrator dashboard integrations', () => {
     expect(display.textContent).toBe('25%');
   });
 
+  test('doctor job chance slider syncs UI, state, and storage', () => {
+    const slider = document.getElementById('doctor-job-chance');
+    const display = document.getElementById('doctor-job-chance-display');
+
+    expect(slider).toBeTruthy();
+    expect(display).toBeTruthy();
+    expect(display.textContent).toBe('0%');
+
+    slider.value = '45';
+    dispatchEvent(slider, 'input');
+
+    expect(display.textContent).toBe('45%');
+    expect(testApi.getState().jobConfig.doctorChance).toBeCloseTo(0.45, 2);
+
+    slider.value = '70';
+    dispatchEvent(slider, 'change');
+
+    const storedConfigRaw = localStorage.getItem('werwolfJobConfig');
+    expect(storedConfigRaw).not.toBeNull();
+    const storedConfig = JSON.parse(storedConfigRaw);
+    expect(storedConfig.doctorChance).toBeCloseTo(0.7, 5);
+
+    testApi.setState({ jobConfig: { doctorChance: 0.2 } });
+    expect(slider.value).toBe('20');
+    expect(display.textContent).toBe('20%');
+  });
+
   test('phoenix pulse status reflects availability, charge, and resolution', () => {
     const eventsToggle = document.getElementById('events-enabled');
     const phoenixToggle = document.getElementById('phoenix-pulse-enabled');
