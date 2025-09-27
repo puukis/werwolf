@@ -94,6 +94,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const phoenixPulseChanceDisplay = document.getElementById('phoenix-pulse-chance-display');
   const bodyguardJobChanceInput = document.getElementById('bodyguard-job-chance');
   const bodyguardJobChanceDisplay = document.getElementById('bodyguard-job-chance-display');
+  const openConfigBtn = document.getElementById('open-config-btn');
+  const configModal = document.getElementById('config-modal');
+  const closeConfigBtn = document.getElementById('close-config-btn');
+  const closeConfigFooterBtn = document.getElementById('close-config-footer-btn');
   const JOB_CONFIG_STORAGE_KEY = 'werwolfJobConfig';
   const EVENT_CONFIG_STORAGE_KEY = 'werwolfEventConfig';
   const BLOOD_MOON_CONFIG_STORAGE_KEY = 'werwolfBloodMoonConfig';
@@ -106,10 +110,59 @@ document.addEventListener("DOMContentLoaded", () => {
     bloodMoonEnabled: true,
     phoenixPulseEnabled: true
   };
+
+  function setConfigModalVisibility(isOpen) {
+    if (!configModal) {
+      return;
+    }
+    configModal.style.display = isOpen ? 'flex' : 'none';
+    configModal.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+  }
+
+  function openConfigModal() {
+    setConfigModalVisibility(true);
+    const firstInteractiveElement = configModal?.querySelector('button, input, select, textarea');
+    if (firstInteractiveElement && typeof firstInteractiveElement.focus === 'function') {
+      firstInteractiveElement.focus();
+    }
+  }
+
+  function closeConfigModal() {
+    setConfigModalVisibility(false);
+    if (openConfigBtn && typeof openConfigBtn.focus === 'function') {
+      openConfigBtn.focus();
+    }
+  }
   let eventConfig = loadEventConfig();
   let jobConfig = loadJobConfig();
   let bloodMoonConfig = loadBloodMoonConfig();
   let phoenixPulseConfig = loadPhoenixPulseConfig();
+
+  setConfigModalVisibility(false);
+
+  if (openConfigBtn && configModal) {
+    openConfigBtn.addEventListener('click', () => {
+      openConfigModal();
+    });
+  }
+
+  if (closeConfigBtn) {
+    closeConfigBtn.addEventListener('click', () => {
+      closeConfigModal();
+    });
+  }
+
+  if (closeConfigFooterBtn) {
+    closeConfigFooterBtn.addEventListener('click', () => {
+      closeConfigModal();
+    });
+  }
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && configModal?.style.display === 'flex') {
+      closeConfigModal();
+    }
+  });
 
   function loadEventConfig() {
     try {
@@ -2807,6 +2860,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     if (event.target === rolesOverviewModal) {
       rolesOverviewModal.style.display = 'none';
+    }
+    if (event.target === configModal) {
+      closeConfigModal();
     }
   });
   
