@@ -55,38 +55,11 @@
             <p class="subtitle">Rollenverteiler für das Werwolf-Spiel</p>
             <div id="blood-moon-odds" class="blood-moon-odds"></div>
             <div id="phoenix-pulse-status" class="phoenix-pulse-status" aria-live="polite">Phoenix Pulse: –</div>
-            <div class="event-toggle">
-                <label for="events-enabled">Random Events an</label>
-                <input type="checkbox" id="events-enabled" checked>
+            <div class="config-action">
+                <button id="open-config-btn" type="button" class="secondary-btn config-btn">
+                    ⚙️ Konfiguration
+                </button>
             </div>
-            <div class="event-toggle">
-                <label for="blood-moon-enabled">Blutmond aktiv</label>
-                <input type="checkbox" id="blood-moon-enabled" checked>
-            </div>
-            <div class="event-config">
-                <label for="blood-moon-chance">Blutmond-Grundchance</label>
-                <input type="range" id="blood-moon-chance" min="0" max="100" step="5" value="20">
-                <span id="blood-moon-chance-display">20%</span>
-            </div>
-            <div class="event-toggle">
-                <label for="phoenix-pulse-enabled">Phoenix Pulse aktiv</label>
-                <input type="checkbox" id="phoenix-pulse-enabled" checked>
-            </div>
-            <div class="event-config">
-                <label for="phoenix-pulse-chance">Phoenix Pulse Chance</label>
-                <input type="range" id="phoenix-pulse-chance" min="0" max="100" step="1" value="5">
-                <span id="phoenix-pulse-chance-display">5%</span>
-            </div>
-            <div class="event-toggle">
-                <label for="reveal-dead-roles">Rollen der Toten aufdecken</label>
-                <input type="checkbox" id="reveal-dead-roles" checked>
-            </div>
-            <div class="job-config">
-                <label for="bodyguard-job-chance">Bodyguard-Job Chance</label>
-                <input type="range" id="bodyguard-job-chance" min="0" max="100" step="5" value="0">
-                <span id="bodyguard-job-chance-display">0%</span>
-            </div>
-            <p class="job-note">Nur Dorfbewohner-Rollen können den Bodyguard-Job erhalten.</p>
         </div>
 
         <div class="setup-container">
@@ -193,6 +166,57 @@ Carla
             <span class="close-modal">&times;</span>
             <h3 id="role-info-title"></h3>
             <p id="role-info-desc"></p>
+        </div>
+    </div>
+
+    <div id="config-modal" class="modal" aria-hidden="true">
+        <div class="modal-content config-modal-content">
+            <button id="close-config-btn" class="modal-close-btn" type="button" aria-label="Konfigurationsmenü schließen">&times;</button>
+            <h3>Konfiguration</h3>
+            <div class="config-section">
+                <h4>Ereignisse</h4>
+                <label class="config-toggle" for="events-enabled">
+                    <span>Random Events an</span>
+                    <input type="checkbox" id="events-enabled" checked>
+                </label>
+                <label class="config-toggle" for="blood-moon-enabled">
+                    <span>Blutmond aktiv</span>
+                    <input type="checkbox" id="blood-moon-enabled" checked>
+                </label>
+                <div class="config-slider">
+                    <label for="blood-moon-chance">Blutmond-Grundchance</label>
+                    <input type="range" id="blood-moon-chance" min="0" max="100" step="5" value="20">
+                    <span id="blood-moon-chance-display">20%</span>
+                </div>
+                <label class="config-toggle" for="phoenix-pulse-enabled">
+                    <span>Phoenix Pulse aktiv</span>
+                    <input type="checkbox" id="phoenix-pulse-enabled" checked>
+                </label>
+                <div class="config-slider">
+                    <label for="phoenix-pulse-chance">Phoenix Pulse Chance</label>
+                    <input type="range" id="phoenix-pulse-chance" min="0" max="100" step="1" value="5">
+                    <span id="phoenix-pulse-chance-display">5%</span>
+                </div>
+            </div>
+            <div class="config-section">
+                <h4>Spielinformationen</h4>
+                <label class="config-toggle" for="reveal-dead-roles">
+                    <span>Rollen der Toten aufdecken</span>
+                    <input type="checkbox" id="reveal-dead-roles" checked>
+                </label>
+            </div>
+            <div class="config-section">
+                <h4>Jobs</h4>
+                <div class="config-slider">
+                    <label for="bodyguard-job-chance">Bodyguard-Job Chance</label>
+                    <input type="range" id="bodyguard-job-chance" min="0" max="100" step="5" value="0">
+                    <span id="bodyguard-job-chance-display">0%</span>
+                </div>
+                <p class="job-note">Nur Dorfbewohner-Rollen können den Bodyguard-Job erhalten.</p>
+            </div>
+            <div class="config-footer">
+                <button id="close-config-footer-btn" type="button" class="primary-btn">Schließen</button>
+            </div>
         </div>
     </div>
 
