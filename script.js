@@ -86,6 +86,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const witchActions = document.getElementById("witch-actions");
   const eventsEnabledCheckbox = document.getElementById('events-enabled');
   const bloodMoonEnabledCheckbox = document.getElementById('blood-moon-enabled');
+  const firstNightShieldCheckbox = document.getElementById('first-night-shield');
   const phoenixPulseEnabledCheckbox = document.getElementById('phoenix-pulse-enabled');
   const revealDeadRolesCheckbox = document.getElementById('reveal-dead-roles');
   const bloodMoonChanceInput = document.getElementById('blood-moon-chance');
@@ -108,7 +109,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const defaultPhoenixPulseConfig = { chance: DEFAULT_PHOENIX_PULSE_CHANCE };
   const defaultEventConfig = {
     bloodMoonEnabled: true,
-    phoenixPulseEnabled: true
+    phoenixPulseEnabled: true,
+    firstNightShield: true
   };
 
   function setConfigModalVisibility(isOpen) {
@@ -173,7 +175,8 @@ document.addEventListener("DOMContentLoaded", () => {
       const parsed = JSON.parse(raw);
       return {
         bloodMoonEnabled: parsed.bloodMoonEnabled !== false,
-        phoenixPulseEnabled: parsed.phoenixPulseEnabled !== false
+        phoenixPulseEnabled: parsed.phoenixPulseEnabled !== false,
+        firstNightShield: parsed.firstNightShield !== false
       };
     } catch (error) {
       return { ...defaultEventConfig };
@@ -184,7 +187,8 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const payload = {
         bloodMoonEnabled: !!eventConfig.bloodMoonEnabled,
-        phoenixPulseEnabled: !!eventConfig.phoenixPulseEnabled
+        phoenixPulseEnabled: !!eventConfig.phoenixPulseEnabled,
+        firstNightShield: !!eventConfig.firstNightShield
       };
       localStorage.setItem(EVENT_CONFIG_STORAGE_KEY, JSON.stringify(payload));
     } catch (error) {
@@ -607,6 +611,10 @@ document.addEventListener("DOMContentLoaded", () => {
     bloodMoonEnabledCheckbox.checked = !!eventConfig.bloodMoonEnabled;
   }
 
+  if (firstNightShieldCheckbox) {
+    firstNightShieldCheckbox.checked = eventConfig.firstNightShield !== false;
+  }
+
   if (phoenixPulseEnabledCheckbox) {
     phoenixPulseEnabledCheckbox.checked = !!eventConfig.phoenixPulseEnabled;
   }
@@ -642,6 +650,14 @@ document.addEventListener("DOMContentLoaded", () => {
         clearBloodMoonState();
       }
       refreshEventUI();
+      renderNarratorDashboard();
+    });
+  }
+
+  if (firstNightShieldCheckbox) {
+    firstNightShieldCheckbox.addEventListener('change', () => {
+      eventConfig.firstNightShield = firstNightShieldCheckbox.checked;
+      saveEventConfig();
       renderNarratorDashboard();
     });
   }
@@ -1317,6 +1333,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const gameCheckpoints = [];
   let isRestoringCheckpoint = false;
   let nightCounter = 0;
+  let firstNightShieldUsed = false;
 
   function isBodyguardProtectionActive() {
     if (!nightMode) {
@@ -2148,13 +2165,36 @@ document.addEventListener("DOMContentLoaded", () => {
     } else if (candidates.length === 1) {
       const lynched = candidates[0];
       showConfirmation("Spieler hängen?", `Willst du ${lynched} wirklich hängen?`, () => {
+        const shieldPreventsLynch = eventConfig.firstNightShield && !firstNightShieldUsed && dayCount === 1 && nightCounter <= 1;
+        const messageParts = [`<p>${lynched} wurde mit ${maxVotes} Stimmen gehängt.</p>`];
+        if (shieldPreventsLynch) {
+          firstNightShieldUsed = true;
+          peaceDays++;
+          messageParts[0] = `<p>✨ Schutznacht: ${lynched} überlebt.</p>`;
+          composeDayMessage(messageParts);
+          logAction({ type: 'event', label: 'Schutznacht', detail: `${lynched} entkommt der Lynchung` });
+          accused = [];
+          dayChoices.innerHTML = '';
+          dayLynchBtn.style.display = 'none';
+          daySkipBtn.textContent = 'Weiter';
+          daySkipBtn.style.display = 'block';
+          daySkipBtn.onclick = () => {
+            if (checkGameOver()) return;
+            if (!checkGameOver(true)) {
+              phaseTimerManager.cancelAll();
+              queuePhaseTimer(() => endDayPhase(), 3000, 'Tagphase endet automatisch');
+            }
+          };
+          renderNarratorDashboard();
+          return;
+        }
+
         if (!deadPlayers.includes(lynched)) {
           deadPlayers.push(lynched);
           peaceDays = 0;
           handlePlayerDeath(lynched);
         }
         updatePlayerCardVisuals();
-        const messageParts = [`<p>${lynched} wurde mit ${maxVotes} Stimmen gehängt.</p>`];
         composeDayMessage(messageParts);
 
         if (henker && henker.target === lynched) {
@@ -2730,11 +2770,23 @@ document.addEventListener("DOMContentLoaded", () => {
         });
         return;
       }
-      const victimNames = Array.from(selected).map(btn => btn.textContent).join(' und ');
+      const victims = Array.from(selected).map(btn => btn.textContent);
+      const victimNames = victims.join(' und ');
       showConfirmation("Opfer auswählen?", `Willst du ${victimNames} wirklich fressen?`, () => {
-        selected.forEach(victimBtn => {
-          const victim = victimBtn.textContent;
+        const shouldTriggerFirstNightShield = eventConfig.firstNightShield && !firstNightShieldUsed && nightCounter <= 1;
+        if (shouldTriggerFirstNightShield) {
+          const plural = victims.length > 1 ? 'überleben' : 'überlebt';
+          if (resultOutput) {
+            resultOutput.innerHTML += `<br>✨ Schutznacht: ${victimNames} ${plural}.`;
+          }
+          logAction({ type: 'event', label: 'Schutznacht', detail: victimNames });
+          firstNightShieldUsed = true;
+          renderNarratorDashboard();
+          moveToNextNightStep();
+          return;
+        }
 
+        victims.forEach(victim => {
           if (isPlayerProtectedThisNight(victim)) {
             registerBodyguardSave(victim, { source: 'den Werwölfen' });
             return;
@@ -2749,7 +2801,7 @@ document.addEventListener("DOMContentLoaded", () => {
             setTimeout(() => {
               showConfirmation(
                 "Verwandlung!",
-                `${victim} war der Verfluchte und ist jetzt ein Werwolf. Sage es ihm/ihr nicht. Er/Sie wird ab der nächsten Nacht mit den Werwölfen aufwachen.`, 
+                `${victim} war der Verfluchte und ist jetzt ein Werwolf. Sage es ihm/ihr nicht. Er/Sie wird ab der nächsten Nacht mit den Werwölfen aufwachen.`,
                 () => {}, // No action needed on confirm
                 "Verstanden",
                 false // No cancel button
@@ -3405,6 +3457,7 @@ document.addEventListener("DOMContentLoaded", () => {
         bodyguardProtectionTarget = null;
         bodyguardProtectionNight = null;
         bodyguardSavedTarget = null;
+        firstNightShieldUsed = false;
         initializeMichaelJacksonAccusations();
 
         assignBodyguardJobByChance();
@@ -3658,6 +3711,8 @@ document.addEventListener("DOMContentLoaded", () => {
     document.querySelector('.navigation-buttons').style.display = 'none';
     document.getElementById('reveal-grid').style.display = 'none';
     showRolesOverviewBtn.style.display = 'none';
+    firstNightShieldUsed = false;
+    renderNarratorDashboard();
   });
 
   // Session Management
@@ -3681,6 +3736,7 @@ document.addEventListener("DOMContentLoaded", () => {
       phoenixPulsePending,
       phoenixPulseJustResolved,
       phoenixPulseRevivedPlayers: phoenixPulseRevivedPlayers.slice(),
+      firstNightShieldUsed,
       dayCount: dayCount,
       mayor: mayor,
       accused: accused.slice(),
@@ -3821,6 +3877,15 @@ document.addEventListener("DOMContentLoaded", () => {
     phoenixPulseRevivedPlayers = Array.isArray(session.phoenixPulseRevivedPlayers)
       ? session.phoenixPulseRevivedPlayers.slice()
       : [];
+    if (typeof session.firstNightShieldUsed === 'boolean') {
+      firstNightShieldUsed = session.firstNightShieldUsed;
+    } else {
+      const legacyNightCounter = Number.isFinite(session.nightCounter) ? session.nightCounter : 0;
+      const legacyNightMode = !!session.nightMode;
+      const legacyDayCount = Number.isFinite(session.dayCount) ? session.dayCount : 0;
+      const nightFinished = legacyNightCounter > 1 || (legacyNightCounter === 1 && !legacyNightMode);
+      firstNightShieldUsed = nightFinished || legacyDayCount > 0;
+    }
     setPhoenixPulseCharged(phoenixPulsePending);
     updatePhoenixPulseStatus();
     dayCount = session.dayCount || 0;
@@ -4263,7 +4328,8 @@ document.addEventListener("DOMContentLoaded", () => {
       bodyguardProtectionNight,
       bodyguardSavedTarget,
       jobsAssigned: jobsAssigned.map(jobs => Array.isArray(jobs) ? jobs.slice() : []),
-      jobConfig: { bodyguardChance: jobConfig.bodyguardChance }
+      jobConfig: { bodyguardChance: jobConfig.bodyguardChance },
+      firstNightShieldUsed
     };
   }
 
@@ -4329,6 +4395,14 @@ document.addEventListener("DOMContentLoaded", () => {
     phoenixPulseRevivedPlayers = Array.isArray(snapshot.phoenixPulseRevivedPlayers)
       ? snapshot.phoenixPulseRevivedPlayers.slice()
       : [];
+    if (typeof snapshot.firstNightShieldUsed === 'boolean') {
+      firstNightShieldUsed = snapshot.firstNightShieldUsed;
+    } else {
+      const snapshotNightCounter = Number.isFinite(snapshot.nightCounter) ? snapshot.nightCounter : 0;
+      const snapshotDayCount = Number.isFinite(snapshot.dayCount) ? snapshot.dayCount : 0;
+      const nightFinished = snapshotNightCounter > 1 || (snapshotNightCounter === 1 && !snapshot.nightMode);
+      firstNightShieldUsed = nightFinished || snapshotDayCount > 0;
+    }
     setPhoenixPulseCharged(phoenixPulsePending);
     updatePhoenixPulseStatus();
     dayCount = snapshot.dayCount;
@@ -5391,6 +5465,10 @@ document.addEventListener("DOMContentLoaded", () => {
           healRemaining,
           poisonRemaining,
           bloodMoonActive,
+          phoenixPulsePending,
+          phoenixPulseJustResolved,
+          phoenixPulseRevivedPlayers: phoenixPulseRevivedPlayers.slice(),
+          firstNightShieldUsed,
           dayCount,
           mayor,
           nightMode,
@@ -5455,6 +5533,9 @@ document.addEventListener("DOMContentLoaded", () => {
         if (Array.isArray(partial.phoenixPulseRevivedPlayers)) {
           phoenixPulseRevivedPlayers = partial.phoenixPulseRevivedPlayers.slice();
           phoenixStateChanged = true;
+        }
+        if ('firstNightShieldUsed' in partial) {
+          firstNightShieldUsed = !!partial.firstNightShieldUsed;
         }
         if ('dayCount' in partial) {
           dayCount = partial.dayCount;
