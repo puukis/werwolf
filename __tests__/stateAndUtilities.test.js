@@ -192,5 +192,69 @@ describe('State management and utility flows', () => {
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
     expect(localStorage.getItem('theme')).toBe('dark');
   });
+
+  test('job chances persist across rounds and assigned cards display the jobs', () => {
+    const { testApi } = bootstrap();
+
+    const bodyguardSlider = document.getElementById('bodyguard-job-chance');
+    const doctorSlider = document.getElementById('doctor-job-chance');
+
+    bodyguardSlider.value = '100';
+    bodyguardSlider.dispatchEvent(new Event('input', { bubbles: true }));
+    bodyguardSlider.dispatchEvent(new Event('change', { bubbles: true }));
+
+    doctorSlider.value = '100';
+    doctorSlider.dispatchEvent(new Event('input', { bubbles: true }));
+    doctorSlider.dispatchEvent(new Event('change', { bubbles: true }));
+
+    const playersInput = document.getElementById('players');
+    playersInput.value = 'Anna\nBert\nClara';
+    playersInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+    const findRow = (name) => Array.from(document.querySelectorAll('.role-row'))
+      .find((row) => row.querySelector("input[type='text']").value === name);
+
+    findRow('Dorfbewohner').querySelector('.qty-display').textContent = '2';
+    findRow('Werwolf').querySelector('.qty-display').textContent = '1';
+
+    document.getElementById('assign').click();
+
+    const roleTexts = Array.from(document.querySelectorAll('.reveal-card .role-name'))
+      .map((el) => el.textContent);
+
+    expect(roleTexts.some((text) => text.includes('Bodyguard'))).toBe(true);
+    expect(roleTexts.some((text) => text.includes('Arzt'))).toBe(true);
+
+    expect(bodyguardSlider.value).toBe('100');
+    expect(document.getElementById('bodyguard-job-chance-display').textContent).toBe('100%');
+    expect(doctorSlider.value).toBe('100');
+    expect(document.getElementById('doctor-job-chance-display').textContent).toBe('100%');
+
+    document.getElementById('finish-btn').click();
+
+    expect(bodyguardSlider.value).toBe('100');
+    expect(document.getElementById('bodyguard-job-chance-display').textContent).toBe('100%');
+    expect(doctorSlider.value).toBe('100');
+    expect(document.getElementById('doctor-job-chance-display').textContent).toBe('100%');
+
+    playersInput.value = 'Anna\nBert\nClara';
+    playersInput.dispatchEvent(new Event('input', { bubbles: true }));
+    document.getElementById('assign').click();
+
+    const secondRoleTexts = Array.from(document.querySelectorAll('.reveal-card .role-name'))
+      .map((el) => el.textContent);
+
+    expect(secondRoleTexts.some((text) => text.includes('Bodyguard'))).toBe(true);
+    expect(secondRoleTexts.some((text) => text.includes('Arzt'))).toBe(true);
+
+    expect(bodyguardSlider.value).toBe('100');
+    expect(document.getElementById('bodyguard-job-chance-display').textContent).toBe('100%');
+    expect(doctorSlider.value).toBe('100');
+    expect(document.getElementById('doctor-job-chance-display').textContent).toBe('100%');
+
+    const state = testApi.getState();
+    expect(state.jobConfig.bodyguardChance).toBe(1);
+    expect(state.jobConfig.doctorChance).toBe(1);
+  });
 });
 

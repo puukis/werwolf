@@ -107,6 +107,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const DEFAULT_PHOENIX_PULSE_CHANCE = 0.05;
   const PHOENIX_PULSE_CONFIG_STORAGE_KEY = 'werwolfPhoenixPulseConfig';
   const defaultJobConfig = { bodyguardChance: 0, doctorChance: 0 };
+  let jobConfigSaveTimeout = null;
   const defaultBloodMoonConfig = { baseChance: 0.2 };
   const defaultPhoenixPulseConfig = { chance: DEFAULT_PHOENIX_PULSE_CHANCE };
   const defaultEventConfig = {
@@ -241,6 +242,10 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function saveJobConfig() {
+    if (jobConfigSaveTimeout !== null) {
+      clearTimeout(jobConfigSaveTimeout);
+      jobConfigSaveTimeout = null;
+    }
     try {
       const normalizeChance = (value, fallback) => {
         const numeric = typeof value === 'number' ? value : fallback;
@@ -384,11 +389,22 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function scheduleJobConfigSave() {
+    if (jobConfigSaveTimeout !== null) {
+      clearTimeout(jobConfigSaveTimeout);
+    }
+    jobConfigSaveTimeout = setTimeout(() => {
+      jobConfigSaveTimeout = null;
+      saveJobConfig();
+    }, 150);
+  }
+
   updateBodyguardChanceUI(jobConfig.bodyguardChance * 100, { save: false });
 
   if (bodyguardJobChanceInput) {
     bodyguardJobChanceInput.addEventListener('input', () => {
       updateBodyguardChanceUI(bodyguardJobChanceInput.value, { save: false });
+      scheduleJobConfigSave();
     });
     bodyguardJobChanceInput.addEventListener('change', () => {
       updateBodyguardChanceUI(bodyguardJobChanceInput.value, { save: true });
@@ -417,6 +433,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (doctorJobChanceInput) {
     doctorJobChanceInput.addEventListener('input', () => {
       updateDoctorChanceUI(doctorJobChanceInput.value, { save: false });
+      scheduleJobConfigSave();
     });
     doctorJobChanceInput.addEventListener('change', () => {
       updateDoctorChanceUI(doctorJobChanceInput.value, { save: true });
@@ -886,14 +903,31 @@ document.addEventListener("DOMContentLoaded", () => {
     return jobsAssigned[index];
   }
 
+  const jobDisplayNames = {
+    Bodyguard: 'Bodyguard',
+    Doctor: 'Arzt'
+  };
+
+  function getJobDisplayName(job) {
+    return jobDisplayNames[job] || job;
+  }
+
   function formatRoleWithJobs(role, jobs) {
     if (!role) {
-      return Array.isArray(jobs) && jobs.length ? jobs.join(' & ') : '';
+      if (!Array.isArray(jobs) || jobs.length === 0) {
+        return '';
+      }
+      const displayJobs = jobs.map(getJobDisplayName).filter(Boolean);
+      return displayJobs.join(' & ');
     }
     if (!Array.isArray(jobs) || jobs.length === 0) {
       return role;
     }
-    return `${role} & ${jobs.join(' & ')}`;
+    const displayJobs = jobs.map(getJobDisplayName).filter(Boolean);
+    if (displayJobs.length === 0) {
+      return role;
+    }
+    return `${role} & ${displayJobs.join(' & ')}`;
   }
 
   function findBodyguardHolderIndex() {
@@ -3914,16 +3948,23 @@ document.addEventListener("DOMContentLoaded", () => {
     const desc = document.getElementById('role-info-desc');
 
     const normalizedRole = role || 'Unbekannte Rolle';
-    const jobList = Array.isArray(jobs) ? jobs.filter(Boolean) : [];
-    const titleText = jobList.length
-      ? `${normalizedRole} (${jobList.join(' + ')})`
+    const jobListRaw = Array.isArray(jobs) ? jobs.filter(Boolean) : [];
+    const jobDisplayList = jobListRaw.map(getJobDisplayName).filter(Boolean);
+    const titleText = jobDisplayList.length
+      ? `${normalizedRole} (${jobDisplayList.join(' + ')})`
       : normalizedRole;
 
     title.textContent = titleText;
 
     const baseDescription = roleDescriptions[normalizedRole] || roleDescriptions[role] || "Keine Beschreibung für diese Rolle verfügbar.";
-    const jobTextSnippets = jobList
-      .map(job => jobDescriptions[job])
+    const jobTextSnippets = jobListRaw
+      .map(job => {
+        const description = jobDescriptions[job];
+        const label = getJobDisplayName(job);
+        return description
+          ? `<strong>${label}:</strong> ${description}`
+          : label;
+      })
       .filter(Boolean);
 
     if (jobTextSnippets.length > 0) {
@@ -3975,6 +4016,11 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function syncJobChanceInputs() {
+    updateBodyguardChanceUI(jobConfig.bodyguardChance * 100, { save: false });
+    updateDoctorChanceUI(jobConfig.doctorChance * 100, { save: false });
+  }
+
   finishBtn.addEventListener("click", () => {
     // Show setup and hide results
     document.querySelector('.container').classList.remove('hidden');
@@ -3986,6 +4032,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById('reveal-grid').style.display = 'none';
     showRolesOverviewBtn.style.display = 'none';
     firstNightShieldUsed = false;
+    syncJobChanceInputs();
     renderNarratorDashboard();
   });
 
