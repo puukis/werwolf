@@ -60,6 +60,10 @@ describe('Narrator dashboard integrations', () => {
     return testApi.getDashboardSnapshot();
   }
 
+  function dispatchEvent(element, type) {
+    element.dispatchEvent(new Event(type, { bubbles: true }));
+  }
+
   test('updates dashboard after night kill resolution', () => {
     testApi.setState({
       players: ['Alice', 'Bob', 'Clara', 'Dieter'],
@@ -168,5 +172,129 @@ describe('Narrator dashboard integrations', () => {
     const latest = testApi.getActionLog()[0];
     expect(latest.type).toBe('error');
     expect(latest.label).toBe('Speichern der Namen fehlgeschlagen');
+  });
+
+  test('bodyguard job chance slider syncs UI, state, and storage', () => {
+    const slider = document.getElementById('bodyguard-job-chance');
+    const display = document.getElementById('bodyguard-job-chance-display');
+
+    expect(slider).toBeTruthy();
+    expect(display).toBeTruthy();
+    expect(display.textContent).toBe('0%');
+
+    slider.value = '37';
+    dispatchEvent(slider, 'input');
+
+    expect(display.textContent).toBe('37%');
+    expect(testApi.getState().jobConfig.bodyguardChance).toBeCloseTo(0.37, 2);
+
+    slider.value = '80';
+    dispatchEvent(slider, 'change');
+
+    expect(display.textContent).toBe('80%');
+    const storedConfigRaw = localStorage.getItem('werwolfJobConfig');
+    expect(storedConfigRaw).not.toBeNull();
+    const storedConfig = JSON.parse(storedConfigRaw);
+    expect(storedConfig.bodyguardChance).toBeCloseTo(0.8, 5);
+
+    testApi.setState({ jobConfig: { bodyguardChance: 0.25 } });
+    expect(slider.value).toBe('25');
+    expect(display.textContent).toBe('25%');
+  });
+
+  test('phoenix pulse status reflects availability, charge, and resolution', () => {
+    const eventsToggle = document.getElementById('events-enabled');
+    const phoenixToggle = document.getElementById('phoenix-pulse-enabled');
+    const status = document.getElementById('phoenix-pulse-status');
+
+    expect(eventsToggle).toBeTruthy();
+    expect(phoenixToggle).toBeTruthy();
+    expect(status).toBeTruthy();
+    expect(status.textContent).toBe('Phoenix Pulse: –');
+
+    eventsToggle.checked = false;
+    dispatchEvent(eventsToggle, 'change');
+    expect(status.textContent).toBe('Phoenix Pulse: deaktiviert');
+
+    eventsToggle.checked = true;
+    dispatchEvent(eventsToggle, 'change');
+    expect(status.textContent).toBe('Phoenix Pulse: –');
+
+    testApi.setState({
+      phoenixPulsePending: true,
+      phoenixPulseJustResolved: false,
+      phoenixPulseRevivedPlayers: []
+    });
+
+    expect(status.textContent).toBe('Phoenix Pulse: bereit');
+    expect(status.classList.contains('active')).toBe(true);
+    expect(document.body.classList.contains('phoenix-pulse-charged')).toBe(true);
+
+    testApi.setState({
+      phoenixPulsePending: false,
+      phoenixPulseJustResolved: true,
+      phoenixPulseRevivedPlayers: ['Alice', 'Bob']
+    });
+
+    expect(status.textContent).toBe('Phoenix Pulse: Alice, Bob zurück');
+    expect(status.classList.contains('resolved')).toBe(true);
+    expect(document.body.classList.contains('phoenix-pulse-charged')).toBe(false);
+
+    phoenixToggle.checked = false;
+    dispatchEvent(phoenixToggle, 'change');
+    expect(status.textContent).toBe('Phoenix Pulse: deaktiviert');
+  });
+
+  test('phase timer manager supports pause, resume, and cancellation flows', () => {
+    jest.useFakeTimers();
+    const originalOnChange = testApi.renderNarratorDashboard;
+    const onChangeSpy = jest.fn();
+    testApi.phaseTimerManager.setOnChange(onChangeSpy);
+
+    try {
+      const callback = jest.fn();
+      const cleanupCallback = jest.fn();
+
+      const timerId = testApi.phaseTimerManager.schedule(callback, 5000, 'Test Timer');
+      let entry = testApi.phaseTimerManager.list().find(item => item.id === timerId);
+      expect(entry).toBeDefined();
+      const initialRemaining = entry.remaining;
+      expect(initialRemaining).toBeGreaterThan(0);
+      expect(onChangeSpy).toHaveBeenCalled();
+
+      const cancelId = testApi.phaseTimerManager.schedule(cleanupCallback, 8000, 'Cleanup Timer');
+      expect(testApi.phaseTimerManager.cancel(cancelId)).toBe(true);
+      expect(testApi.phaseTimerManager.list().some(item => item.id === cancelId)).toBe(false);
+      expect(cleanupCallback).not.toHaveBeenCalled();
+      onChangeSpy.mockClear();
+
+      jest.advanceTimersByTime(2000);
+      entry = testApi.phaseTimerManager.list().find(item => item.id === timerId);
+      expect(entry.remaining).toBeLessThan(initialRemaining);
+
+      expect(testApi.phaseTimerManager.pause()).toBe(true);
+      const pausedSnapshot = testApi.phaseTimerManager.list().find(item => item.id === timerId).remaining;
+      expect(testApi.phaseTimerManager.pause()).toBe(false);
+      expect(onChangeSpy).toHaveBeenCalled();
+      onChangeSpy.mockClear();
+
+      jest.advanceTimersByTime(2000);
+      const stillPaused = testApi.phaseTimerManager.list().find(item => item.id === timerId).remaining;
+      expect(stillPaused).toBeCloseTo(pausedSnapshot, 0);
+
+      expect(testApi.phaseTimerManager.resume()).toBe(true);
+      expect(testApi.phaseTimerManager.resume()).toBe(false);
+      expect(onChangeSpy).toHaveBeenCalled();
+      onChangeSpy.mockClear();
+
+      jest.advanceTimersByTime(5000);
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(testApi.phaseTimerManager.list()).toHaveLength(0);
+      expect(onChangeSpy).toHaveBeenCalled();
+    } finally {
+      testApi.phaseTimerManager.cancelAll();
+      testApi.phaseTimerManager.setOnChange(originalOnChange);
+      jest.useRealTimers();
+    }
   });
 });
