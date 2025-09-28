@@ -34,6 +34,19 @@
   --theme-toggle-shadow: 0 18px 32px rgba(12, 28, 18, 0.2);
   --theme-toggle-fallback: rgba(214, 227, 218, 0.9);
   --glow-color: rgba(146, 200, 152, 0.24);
+  --lighting-wash-color: rgba(233, 249, 238, 0.32);
+  --lighting-wash-opacity: 0;
+  --lighting-vignette-color: rgba(12, 24, 18, 0.75);
+  --lighting-vignette-opacity: 0;
+  --lighting-spotlight-color: rgba(255, 255, 245, 0.3);
+  --lighting-spotlight-opacity: 0;
+  --lighting-spotlight-scale: 1;
+  --lighting-master-opacity: 0;
+  --particles-opacity: 0;
+  --particles-color: rgba(255, 255, 255, 0.4);
+  --particles-size: 220px;
+  --particles-blur: 70px;
+  --ambient-transition: 0.85s ease;
   --glass-panel-bg: rgba(245, 249, 246, 0.64);
   --glass-panel-strong-bg: rgba(230, 239, 234, 0.74);
   --glass-panel-border: rgba(143, 176, 155, 0.4);
@@ -101,6 +114,19 @@
   --theme-toggle-shadow: 0 20px 36px rgba(3, 8, 6, 0.6);
   --theme-toggle-fallback: rgba(61, 76, 65, 0.85);
   --glow-color: rgba(74, 222, 128, 0.28);
+  --lighting-wash-color: rgba(45, 72, 56, 0.48);
+  --lighting-wash-opacity: 0;
+  --lighting-vignette-color: rgba(2, 6, 4, 0.85);
+  --lighting-vignette-opacity: 0;
+  --lighting-spotlight-color: rgba(255, 204, 158, 0.32);
+  --lighting-spotlight-opacity: 0;
+  --lighting-spotlight-scale: 1.1;
+  --lighting-master-opacity: 0;
+  --particles-opacity: 0;
+  --particles-color: rgba(255, 206, 170, 0.42);
+  --particles-size: 260px;
+  --particles-blur: 90px;
+  --ambient-transition: 0.95s ease;
   --glass-panel-bg: rgba(16, 28, 22, 0.74);
   --glass-panel-strong-bg: rgba(21, 36, 28, 0.78);
   --glass-panel-border: rgba(62, 95, 74, 0.52);
@@ -130,6 +156,287 @@
   --card-surface-shadow: 0 36px 84px rgba(3, 8, 6, 0.55);
   --card-surface-hover-shadow: 0 48px 112px rgba(3, 8, 6, 0.62);
   --card-surface-fallback: rgba(21, 36, 28, 0.9);
+}
+
+body[data-lighting] {
+  --lighting-master-opacity: 1;
+}
+
+/* Ambient FX stage */
+.ambient-stage {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+  opacity: var(--lighting-master-opacity);
+  transition: opacity 0.5s ease;
+  mix-blend-mode: normal;
+}
+
+.ambient-layer {
+  position: absolute;
+  inset: 0;
+  transition: opacity var(--ambient-transition), transform var(--ambient-transition), filter var(--ambient-transition);
+}
+
+.ambient-color-wash {
+  background: radial-gradient(120% 120% at 50% 25%, var(--lighting-wash-color) 0%, transparent 70%);
+  opacity: var(--lighting-wash-opacity);
+  transform: scale(1.05);
+  mix-blend-mode: screen;
+  animation: ambient-breathe 20s ease-in-out infinite;
+}
+
+.ambient-vignette {
+  background: radial-gradient(circle at 50% 50%, transparent 58%, var(--lighting-vignette-color) 100%);
+  opacity: var(--lighting-vignette-opacity);
+  mix-blend-mode: multiply;
+}
+
+.ambient-spotlight {
+  background: radial-gradient(65% 55% at 50% 40%, var(--lighting-spotlight-color) 0%, transparent 70%);
+  opacity: var(--lighting-spotlight-opacity);
+  transform: scale(var(--lighting-spotlight-scale));
+  mix-blend-mode: screen;
+}
+
+.ambient-particles {
+  overflow: hidden;
+  opacity: var(--particles-opacity);
+}
+
+.ambient-particles::before,
+.ambient-particles::after {
+  content: "";
+  position: absolute;
+  inset: -40%;
+  background-image: radial-gradient(circle, var(--particles-color) 0%, transparent 65%);
+  background-size: var(--particles-size) var(--particles-size);
+  background-position: 0 0;
+  filter: blur(var(--particles-blur));
+  opacity: 0.75;
+  animation: particle-drift 40s linear infinite;
+}
+
+.ambient-particles::after {
+  animation-direction: reverse;
+  animation-duration: 48s;
+  opacity: 0.5;
+}
+
+@keyframes ambient-breathe {
+  0%,
+  100% {
+    transform: scale(1.02);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}
+
+@keyframes particle-drift {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(6%, -6%, 0);
+  }
+  100% {
+    transform: translate3d(-5%, 5%, 0);
+  }
+}
+
+@keyframes blood-moon-pulse {
+  0%,
+  100% {
+    filter: hue-rotate(0deg) saturate(1);
+  }
+  50% {
+    filter: hue-rotate(-12deg) saturate(1.35);
+  }
+}
+
+@keyframes phoenix-flare {
+  0% {
+    filter: saturate(1.2) brightness(1);
+  }
+  50% {
+    filter: saturate(2.4) brightness(1.55);
+  }
+  100% {
+    filter: saturate(1.2) brightness(1);
+  }
+}
+
+body[data-overlay~="blood-moon"] .ambient-stage {
+  animation: blood-moon-pulse 8s ease-in-out infinite;
+}
+
+body[data-overlay~="phoenix"] .ambient-stage {
+  animation: phoenix-flare 3.6s ease-in-out 1;
+}
+
+body[data-overlay~="phoenix"] .ambient-particles::before,
+body[data-overlay~="phoenix"] .ambient-particles::after {
+  background-image: radial-gradient(circle, rgba(255, 184, 108, 0.55) 0%, transparent 70%);
+  opacity: 0.85;
+  animation-duration: 26s;
+}
+
+body[data-lighting="day"] {
+  --lighting-wash-color: rgba(255, 225, 177, 0.65);
+  --lighting-wash-opacity: 0.7;
+  --lighting-vignette-color: rgba(120, 90, 40, 0.35);
+  --lighting-vignette-opacity: 0.25;
+  --lighting-spotlight-color: rgba(255, 255, 240, 0.4);
+  --lighting-spotlight-opacity: 0.22;
+  --lighting-spotlight-scale: 1.35;
+  --particles-opacity: 0.35;
+  --particles-color: rgba(255, 242, 209, 0.45);
+  --particles-size: 260px;
+}
+
+body[data-lighting="night"] {
+  --lighting-wash-color: rgba(64, 114, 162, 0.55);
+  --lighting-wash-opacity: 0.6;
+  --lighting-vignette-color: rgba(4, 10, 18, 0.9);
+  --lighting-vignette-opacity: 0.75;
+  --lighting-spotlight-color: rgba(167, 220, 255, 0.3);
+  --lighting-spotlight-opacity: 0.12;
+  --lighting-spotlight-scale: 1.25;
+  --particles-opacity: 0.38;
+  --particles-color: rgba(173, 216, 230, 0.35);
+  --particles-size: 320px;
+}
+
+body[data-lighting="ritual"] {
+  --lighting-wash-color: rgba(196, 44, 62, 0.72);
+  --lighting-wash-opacity: 0.85;
+  --lighting-vignette-color: rgba(40, 2, 4, 0.92);
+  --lighting-vignette-opacity: 0.82;
+  --lighting-spotlight-color: rgba(255, 128, 64, 0.42);
+  --lighting-spotlight-opacity: 0.38;
+  --lighting-spotlight-scale: 1.1;
+  --particles-opacity: 0.45;
+  --particles-color: rgba(255, 112, 89, 0.45);
+  --particles-size: 280px;
+}
+
+body[data-lighting="witch"] {
+  --lighting-wash-color: rgba(139, 92, 246, 0.58);
+  --lighting-wash-opacity: 0.68;
+  --lighting-vignette-color: rgba(35, 0, 60, 0.78);
+  --lighting-vignette-opacity: 0.65;
+  --lighting-spotlight-color: rgba(255, 255, 255, 0.42);
+  --lighting-spotlight-opacity: 0.28;
+  --lighting-spotlight-scale: 1.3;
+  --particles-opacity: 0.42;
+  --particles-color: rgba(180, 120, 255, 0.4);
+  --particles-size: 300px;
+}
+
+body[data-lighting="seer"] {
+  --lighting-wash-color: rgba(64, 196, 255, 0.52);
+  --lighting-wash-opacity: 0.65;
+  --lighting-vignette-color: rgba(5, 26, 52, 0.82);
+  --lighting-vignette-opacity: 0.72;
+  --lighting-spotlight-color: rgba(214, 234, 255, 0.38);
+  --lighting-spotlight-opacity: 0.26;
+  --lighting-spotlight-scale: 1.4;
+  --particles-opacity: 0.4;
+  --particles-color: rgba(160, 220, 255, 0.5);
+  --particles-size: 340px;
+}
+
+body[data-lighting="hunter"] {
+  --lighting-wash-color: rgba(255, 180, 80, 0.58);
+  --lighting-wash-opacity: 0.75;
+  --lighting-vignette-color: rgba(55, 26, 0, 0.8);
+  --lighting-vignette-opacity: 0.5;
+  --lighting-spotlight-color: rgba(255, 236, 200, 0.45);
+  --lighting-spotlight-opacity: 0.3;
+  --lighting-spotlight-scale: 1.2;
+  --particles-opacity: 0.32;
+  --particles-color: rgba(255, 214, 153, 0.45);
+  --particles-size: 300px;
+}
+
+body[data-lighting="blood-moon"] {
+  --lighting-wash-color: rgba(212, 32, 32, 0.85);
+  --lighting-wash-opacity: 0.95;
+  --lighting-vignette-color: rgba(34, 0, 0, 0.96);
+  --lighting-vignette-opacity: 0.88;
+  --lighting-spotlight-color: rgba(255, 96, 64, 0.48);
+  --lighting-spotlight-opacity: 0.45;
+  --lighting-spotlight-scale: 1.18;
+  --particles-opacity: 0.5;
+  --particles-color: rgba(255, 120, 120, 0.48);
+  --particles-size: 260px;
+}
+
+body[data-lighting="phoenix"] {
+  --lighting-wash-color: rgba(255, 180, 72, 0.85);
+  --lighting-wash-opacity: 0.92;
+  --lighting-vignette-color: rgba(86, 24, 0, 0.78);
+  --lighting-vignette-opacity: 0.64;
+  --lighting-spotlight-color: rgba(255, 234, 214, 0.6);
+  --lighting-spotlight-opacity: 0.52;
+  --lighting-spotlight-scale: 1.25;
+  --particles-opacity: 0.55;
+  --particles-color: rgba(255, 210, 150, 0.6);
+  --particles-size: 300px;
+}
+
+body[data-lighting="victory"] {
+  --lighting-wash-color: rgba(142, 232, 199, 0.65);
+  --lighting-wash-opacity: 0.78;
+  --lighting-vignette-color: rgba(10, 44, 28, 0.6);
+  --lighting-vignette-opacity: 0.35;
+  --lighting-spotlight-color: rgba(240, 255, 255, 0.45);
+  --lighting-spotlight-opacity: 0.34;
+  --lighting-spotlight-scale: 1.35;
+  --particles-opacity: 0.4;
+  --particles-color: rgba(180, 255, 222, 0.5);
+  --particles-size: 320px;
+}
+
+body[data-particles="motes"] {
+  --particles-opacity: 0.28;
+  --particles-color: rgba(255, 255, 255, 0.4);
+  --particles-size: 280px;
+}
+
+body[data-particles="embers"] {
+  --particles-opacity: 0.52;
+  --particles-color: rgba(255, 126, 90, 0.5);
+  --particles-size: 240px;
+}
+
+body[data-particles="aurora"] {
+  --particles-opacity: 0.45;
+  --particles-color: rgba(160, 220, 255, 0.55);
+  --particles-size: 360px;
+}
+
+body[data-particles="sparks"] {
+  --particles-opacity: 0.48;
+  --particles-color: rgba(255, 234, 173, 0.55);
+  --particles-size: 220px;
+}
+
+body[data-particles="phoenix"] {
+  --particles-opacity: 0.6;
+  --particles-color: rgba(255, 196, 130, 0.6);
+  --particles-size: 260px;
+}
+
+.audio-suite {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
 }
 
 /* Theme toggle button */
@@ -2992,6 +3299,115 @@ body.phoenix-pulse-charged .container::before {
 .admin-section button {
   width: 100%;
 }
+
+.ambience-section .ambience-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem;
+}
+
+.ambience-group h6 {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-light);
+}
+
+.ambience-toggle-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.ambience-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+  color: var(--text-color);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  min-width: 140px;
+}
+
+.ambience-toggle:hover {
+  transform: translateY(-1px);
+  border-color: var(--border-strong);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04));
+}
+
+.ambience-toggle[aria-pressed="true"] {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.3), rgba(16, 185, 129, 0.24));
+  border-color: var(--glass-focus-ring);
+  box-shadow: 0 8px 22px rgba(34, 197, 94, 0.22);
+  color: var(--text-color);
+}
+
+[data-theme="dark"] .ambience-toggle[aria-pressed="true"] {
+  color: rgba(12, 24, 18, 0.92);
+}
+
+.ambience-preview {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+[data-theme="dark"] .ambience-preview {
+  background: rgba(8, 18, 12, 0.45);
+}
+
+.ambience-preview h6 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-light);
+}
+
+.ambience-preview-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.ambience-preview-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-color);
+}
+
+.ambience-preview-list li .ambience-tag {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-light);
+}
+
+.ambience-preview-list li.ambience-empty {
+  color: var(--text-light);
+  font-style: italic;
+}
+
 
 .macro-controls {
   display: flex;

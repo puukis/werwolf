@@ -1645,8 +1645,589 @@ document.addEventListener("DOMContentLoaded", async () => {
   const phoenixPulseOverlay = document.getElementById('phoenix-pulse-overlay');
   const phoenixPulseMessage = document.getElementById('phoenix-pulse-message');
   const phoenixPulseStatus = document.getElementById('phoenix-pulse-status');
+  const ambiencePlaylistContainer = document.getElementById('ambience-playlists');
+  const ambienceStingerContainer = document.getElementById('ambience-stingers');
+  const ambienceLightingContainer = document.getElementById('ambience-lighting');
+  const ambiencePreviewList = document.getElementById('ambience-preview-list');
+  const playlistAudioEl = document.getElementById('narrator-playlist-audio');
+  const stingerAudioEl = document.getElementById('narrator-stinger-audio');
+
+  const ambienceManager = (() => {
+    if (!document || !document.body) {
+      return {
+        init() {},
+        setPhaseAmbience() {},
+        setNightStep() {},
+        clearNightStep() {},
+        setEventAmbience() {},
+        flashPhoenixPulse() {},
+        triggerStinger() {},
+        setManualPlaylist() {},
+        setManualLighting() {},
+        getSnapshot() {
+          return {
+            activePlaylist: null,
+            playlistSource: null,
+            activeLighting: null,
+            lightingSource: null,
+            activeParticles: null,
+            particleSource: null,
+            overlays: [],
+            manualPlaylist: null,
+            manualLighting: null
+          };
+        }
+      };
+    }
+
+    const MANUAL_STOP_ID = '__manual-stop__';
+    const MANUAL_NEUTRAL_ID = '__manual-neutral__';
+    const isJsDom = typeof window !== 'undefined'
+      && !!window.navigator
+      && typeof window.navigator.userAgent === 'string'
+      && window.navigator.userAgent.toLowerCase().includes('jsdom');
+    const playlistButtons = new Map();
+    const lightingButtons = new Map();
+    const manualState = { playlist: null, lighting: null };
+    const sourcePriority = ['manual', 'step', 'event', 'phase'];
+    const playlistSources = { manual: null, event: null, step: null, phase: null };
+    const lightingSources = { manual: null, event: null, step: null, phase: null };
+    const particleSources = { manual: null, event: null, step: null, phase: null };
+    const overlaySources = {
+      manual: new Set(),
+      event: new Set(),
+      step: new Set(),
+      phase: new Set()
+    };
+    const overlayFlags = new Set();
+    let activePlaylistId = null;
+    let activePlaylistSource = null;
+    let activeLightingId = null;
+    let activeLightingSource = null;
+    let activeParticleId = null;
+    let activeParticleSource = null;
+    let playlistTransition = Promise.resolve();
+
+    function resolveSource(map) {
+      for (const source of sourcePriority) {
+        const candidate = map[source];
+        if (candidate) {
+          return { id: candidate, source };
+        }
+      }
+      return { id: null, source: null };
+    }
+
+    const clampVolume = (value) => {
+      if (!Number.isFinite(value)) {
+        return 0;
+      }
+      if (value < 0) {
+        return 0;
+      }
+      if (value > 1) {
+        return 1;
+      }
+      return value;
+    };
+
+    function safePause(audio) {
+      if (isJsDom || !audio || typeof audio.pause !== 'function') {
+        return;
+      }
+      try {
+        audio.pause();
+      } catch (error) {
+        // ignore jsdom not implemented errors
+      }
+    }
+
+    function safePlay(audio) {
+      if (isJsDom || !audio || typeof audio.play !== 'function') {
+        return null;
+      }
+      try {
+        const result = audio.play();
+        if (result && typeof result.catch === 'function') {
+          result.catch(() => {});
+        }
+        return result;
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function fadeAudio(audio, targetVolume, duration = 400) {
+      if (!audio || typeof audio.volume !== 'number') {
+        return Promise.resolve();
+      }
+      const startVolume = clampVolume(audio.volume);
+      const endVolume = clampVolume(Number.isFinite(targetVolume) ? targetVolume : 0);
+      const delta = endVolume - startVolume;
+      if (Math.abs(delta) < 0.001 || duration <= 0) {
+        audio.volume = endVolume;
+        return Promise.resolve();
+      }
+      if (isJsDom) {
+        audio.volume = endVolume;
+        return Promise.resolve();
+      }
+      return new Promise((resolve) => {
+        const startTime = typeof performance !== 'undefined' && typeof performance.now === 'function'
+          ? performance.now()
+          : Date.now();
+        const step = (timestamp) => {
+          const now = typeof performance !== 'undefined' && typeof performance.now === 'function'
+            ? timestamp
+            : Date.now();
+          const progress = Math.min(1, (now - startTime) / duration);
+          const nextVolume = clampVolume(startVolume + delta * progress);
+          audio.volume = nextVolume;
+          if (progress < 1) {
+            if (typeof requestAnimationFrame === 'function') {
+              requestAnimationFrame(step);
+            } else {
+              setTimeout(() => step(Date.now()), 16);
+            }
+          } else {
+            resolve();
+          }
+        };
+        if (typeof requestAnimationFrame === 'function') {
+          requestAnimationFrame(step);
+        } else {
+          setTimeout(() => step(Date.now()), 16);
+        }
+      });
+    }
+
+    function updateOverlay() {
+      overlayFlags.clear();
+      sourcePriority.forEach((source) => {
+        overlaySources[source].forEach((flag) => overlayFlags.add(flag));
+      });
+      if (overlayFlags.size > 0) {
+        document.body.dataset.overlay = Array.from(overlayFlags).join(' ');
+      } else {
+        delete document.body.dataset.overlay;
+      }
+      updatePreview();
+    }
+
+    function setOverlayForSource(source, flags) {
+      overlaySources[source] = new Set(Array.isArray(flags) ? flags : []);
+      updateOverlay();
+    }
+
+    function setParticleSource(source, id) {
+      particleSources[source] = id || null;
+      syncParticles();
+    }
+
+    function setPlaylistSource(source, id) {
+      const nextId = typeof id === 'string' ? id : null;
+      playlistSources[source] = nextId;
+      if (source === 'manual') {
+        manualState.playlist = nextId;
+        updateManualButtons();
+      }
+      syncPlaylist();
+    }
+
+    function setLightingSource(source, id) {
+      const nextId = typeof id === 'string' ? id : null;
+      lightingSources[source] = nextId;
+      const preset = id ? lightingPresets[id] : null;
+      const particles = preset && preset.particles ? preset.particles : null;
+      setParticleSource(source, particles);
+      setOverlayForSource(source, preset && Array.isArray(preset.overlay) ? preset.overlay : []);
+      if (source === 'manual') {
+        manualState.lighting = nextId;
+        updateManualButtons();
+      }
+      syncLighting();
+    }
+
+    function syncPlaylist() {
+      const { id: nextId, source: nextSource } = resolveSource(playlistSources);
+      if (nextId === activePlaylistId && nextSource === activePlaylistSource) {
+        updatePreview();
+        return;
+      }
+      const prevId = activePlaylistId;
+      activePlaylistId = nextId;
+      activePlaylistSource = nextSource;
+      playlistTransition = playlistTransition.then(async () => {
+        if (!playlistAudioEl) {
+          updatePreview();
+          return;
+        }
+        if (prevId && prevId !== nextId && prevId !== MANUAL_STOP_ID) {
+          await fadeAudio(playlistAudioEl, 0, 320);
+          safePause(playlistAudioEl);
+          playlistAudioEl.currentTime = 0;
+        }
+        if (!nextId || nextId === MANUAL_STOP_ID) {
+          await fadeAudio(playlistAudioEl, 0, 220);
+          safePause(playlistAudioEl);
+          playlistAudioEl.currentTime = 0;
+          playlistAudioEl.removeAttribute('src');
+          updatePreview();
+          return;
+        }
+        const config = narratorAudioLibrary.playlists[nextId];
+        if (config) {
+          if (playlistAudioEl.src !== config.src) {
+            playlistAudioEl.src = config.src;
+          }
+          playlistAudioEl.loop = config.loop !== false;
+          safePlay(playlistAudioEl);
+          playlistAudioEl.volume = 0;
+          await fadeAudio(playlistAudioEl, config.volume ?? 0.6, 620);
+        } else {
+          await fadeAudio(playlistAudioEl, 0, 220);
+          safePause(playlistAudioEl);
+          playlistAudioEl.currentTime = 0;
+          playlistAudioEl.removeAttribute('src');
+        }
+        updatePreview();
+      });
+    }
+
+    function syncLighting() {
+      const { id: nextId, source: nextSource } = resolveSource(lightingSources);
+      if (nextId === activeLightingId && nextSource === activeLightingSource) {
+        updatePreview();
+        return;
+      }
+      activeLightingId = nextId;
+      activeLightingSource = nextSource;
+      if (nextId && nextId !== MANUAL_NEUTRAL_ID) {
+        document.body.dataset.lighting = nextId;
+      } else {
+        delete document.body.dataset.lighting;
+      }
+      updatePreview();
+    }
+
+    function syncParticles() {
+      const { id: nextId, source: nextSource } = resolveSource(particleSources);
+      if (nextId === activeParticleId && nextSource === activeParticleSource) {
+        updatePreview();
+        return;
+      }
+      activeParticleId = nextId;
+      activeParticleSource = nextSource;
+      if (nextId) {
+        document.body.dataset.particles = nextId;
+      } else {
+        delete document.body.dataset.particles;
+      }
+      updatePreview();
+    }
+
+    function triggerStinger(id) {
+      const config = narratorAudioLibrary.stingers[id];
+      if (!stingerAudioEl || !config) {
+        return;
+      }
+      safePause(stingerAudioEl);
+      stingerAudioEl.currentTime = 0;
+      stingerAudioEl.src = config.src;
+      stingerAudioEl.volume = 0;
+      safePlay(stingerAudioEl);
+      fadeAudio(stingerAudioEl, config.volume ?? 0.85, 140).then(() => {
+        setTimeout(() => {
+          fadeAudio(stingerAudioEl, 0, 220).then(() => {
+            safePause(stingerAudioEl);
+            stingerAudioEl.currentTime = 0;
+          });
+        }, 260);
+      });
+    }
+
+    function updateManualButtons() {
+      playlistButtons.forEach((btn, id) => {
+        btn.setAttribute('aria-pressed', manualState.playlist === id ? 'true' : 'false');
+      });
+      lightingButtons.forEach((btn, id) => {
+        btn.setAttribute('aria-pressed', manualState.lighting === id ? 'true' : 'false');
+      });
+    }
+
+    function buildControls() {
+      playlistButtons.clear();
+      lightingButtons.clear();
+      if (ambiencePlaylistContainer) {
+        ambiencePlaylistContainer.innerHTML = '';
+      }
+      if (ambienceStingerContainer) {
+        ambienceStingerContainer.innerHTML = '';
+      }
+      if (ambienceLightingContainer) {
+        ambienceLightingContainer.innerHTML = '';
+      }
+      if (ambiencePlaylistContainer) {
+        Object.values(narratorAudioLibrary.playlists).forEach((config) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'ambience-toggle';
+          btn.textContent = config.label;
+          btn.dataset.id = config.id;
+          btn.setAttribute('aria-pressed', 'false');
+          btn.addEventListener('click', () => {
+            const nextId = manualState.playlist === config.id ? null : config.id;
+            setManualPlaylist(nextId);
+          });
+          ambiencePlaylistContainer.appendChild(btn);
+          playlistButtons.set(config.id, btn);
+        });
+        const stopBtn = document.createElement('button');
+        stopBtn.type = 'button';
+        stopBtn.className = 'ambience-toggle';
+        stopBtn.textContent = '⏹️ Stoppen';
+        stopBtn.setAttribute('aria-pressed', 'false');
+        stopBtn.addEventListener('click', () => {
+          const nextId = manualState.playlist === MANUAL_STOP_ID ? null : MANUAL_STOP_ID;
+          setManualPlaylist(nextId);
+        });
+        stopBtn.dataset.id = MANUAL_STOP_ID;
+        ambiencePlaylistContainer.appendChild(stopBtn);
+        playlistButtons.set(MANUAL_STOP_ID, stopBtn);
+      }
+
+      if (ambienceStingerContainer) {
+        Object.values(narratorAudioLibrary.stingers).forEach((config) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'ambience-toggle';
+          btn.textContent = config.label;
+          btn.addEventListener('click', () => {
+            triggerStinger(config.id);
+          });
+          ambienceStingerContainer.appendChild(btn);
+        });
+      }
+
+      if (ambienceLightingContainer) {
+        Object.entries(lightingPresets).forEach(([id, preset]) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'ambience-toggle';
+          btn.textContent = preset.label;
+          btn.dataset.id = id;
+          btn.setAttribute('aria-pressed', 'false');
+          btn.addEventListener('click', () => {
+            const nextId = manualState.lighting === id ? null : id;
+            setManualLighting(nextId);
+          });
+          ambienceLightingContainer.appendChild(btn);
+          lightingButtons.set(id, btn);
+        });
+        const neutralBtn = document.createElement('button');
+        neutralBtn.type = 'button';
+        neutralBtn.className = 'ambience-toggle';
+        neutralBtn.textContent = '🌫️ Neutral';
+        neutralBtn.setAttribute('aria-pressed', 'false');
+        neutralBtn.addEventListener('click', () => {
+          const nextId = manualState.lighting === MANUAL_NEUTRAL_ID ? null : MANUAL_NEUTRAL_ID;
+          setManualLighting(nextId);
+        });
+        neutralBtn.dataset.id = MANUAL_NEUTRAL_ID;
+        ambienceLightingContainer.appendChild(neutralBtn);
+        lightingButtons.set(MANUAL_NEUTRAL_ID, neutralBtn);
+      }
+
+      updateManualButtons();
+    }
+
+    function updatePreview() {
+      if (!ambiencePreviewList) {
+        return;
+      }
+      ambiencePreviewList.innerHTML = '';
+      const entries = [];
+      if (activePlaylistId === MANUAL_STOP_ID) {
+        entries.push({ icon: '🎵', label: '⏹️ Stumm', source: activePlaylistSource });
+      } else if (activePlaylistId) {
+        const config = narratorAudioLibrary.playlists[activePlaylistId];
+        const label = config ? config.label : activePlaylistId;
+        entries.push({ icon: '🎵', label, source: activePlaylistSource });
+      }
+      if (activeLightingId === MANUAL_NEUTRAL_ID) {
+        entries.push({ icon: '💡', label: '🌫️ Neutral', source: activeLightingSource });
+      } else if (activeLightingId) {
+        const preset = lightingPresets[activeLightingId];
+        const label = preset ? preset.label : activeLightingId;
+        entries.push({ icon: '💡', label, source: activeLightingSource });
+      }
+      if (activeParticleId) {
+        entries.push({ icon: '✨', label: activeParticleId, source: activeParticleSource });
+      }
+      overlayFlags.forEach((flag) => {
+        const label = overlayLabels[flag] || flag;
+        entries.push({ icon: '🌌', label, source: 'event' });
+      });
+
+      if (entries.length === 0) {
+        const item = document.createElement('li');
+        item.className = 'ambience-empty';
+        item.textContent = 'Keine Effekte aktiv.';
+        ambiencePreviewList.appendChild(item);
+        return;
+      }
+
+      entries.forEach((entry) => {
+        const li = document.createElement('li');
+        const iconSpan = document.createElement('span');
+        iconSpan.textContent = entry.icon;
+        const labelSpan = document.createElement('span');
+        labelSpan.textContent = entry.label;
+        li.appendChild(iconSpan);
+        li.appendChild(labelSpan);
+        if (entry.source) {
+          const tag = document.createElement('span');
+          tag.className = 'ambience-tag';
+          tag.textContent = sourceLabels[entry.source] || entry.source;
+          li.appendChild(tag);
+        }
+        ambiencePreviewList.appendChild(li);
+      });
+    }
+
+    function setPhaseAmbience(phaseKey) {
+      const preset = phaseAmbiencePresets[phaseKey] || phaseAmbiencePresets.setup;
+      setPlaylistSource('phase', preset.playlist || null);
+      setLightingSource('phase', preset.lighting || null);
+      setParticleSource('phase', preset.particles || null);
+    }
+
+    function setNightStep(role) {
+      const preset = role && nightStepAmbience[role] ? nightStepAmbience[role] : null;
+      setPlaylistSource('step', preset && preset.playlist ? preset.playlist : null);
+      setLightingSource('step', preset ? preset.lighting || null : null);
+      setParticleSource('step', preset ? preset.particles || null : null);
+    }
+
+    function setEventAmbience(eventKey, active) {
+      if (!active) {
+        if (eventKey === 'blood-moon' && playlistSources.event === 'bloodmoon') {
+          setPlaylistSource('event', null);
+        }
+        if (eventKey === 'phoenix' && playlistSources.event === 'phoenix') {
+          setPlaylistSource('event', null);
+        }
+        if (eventKey === 'victory' && playlistSources.event === 'daybreak') {
+          setPlaylistSource('event', null);
+        }
+        if (eventKey === 'blood-moon' && lightingSources.event === 'blood-moon') {
+          setLightingSource('event', null);
+        }
+        if (eventKey === 'phoenix' && lightingSources.event === 'phoenix') {
+          setLightingSource('event', null);
+        }
+        if (eventKey === 'victory' && lightingSources.event === 'victory') {
+          setLightingSource('event', null);
+        }
+        return;
+      }
+      if (eventKey === 'blood-moon') {
+        setPlaylistSource('event', 'bloodmoon');
+        setLightingSource('event', 'blood-moon');
+      } else if (eventKey === 'phoenix') {
+        setPlaylistSource('event', 'phoenix');
+        setLightingSource('event', 'phoenix');
+      } else if (eventKey === 'victory') {
+        setPlaylistSource('event', 'daybreak');
+        setLightingSource('event', 'victory');
+      }
+    }
+
+    function flashPhoenixPulse() {
+      setPlaylistSource('step', 'phoenix');
+      setLightingSource('step', 'phoenix');
+      triggerStinger('phoenixRise');
+      setTimeout(() => {
+        if (lightingSources.step === 'phoenix') {
+          setLightingSource('step', null);
+          setPlaylistSource('step', null);
+        }
+      }, 3600);
+    }
+
+    function setManualPlaylist(id) {
+      setPlaylistSource('manual', id);
+    }
+
+    function setManualLighting(id) {
+      setLightingSource('manual', id);
+    }
+
+    function getSnapshot() {
+      const effectivePlaylist = activePlaylistId === MANUAL_STOP_ID ? null : activePlaylistId;
+      const effectiveLighting = activeLightingId === MANUAL_NEUTRAL_ID ? null : activeLightingId;
+      return {
+        activePlaylist: effectivePlaylist,
+        playlistSource: activePlaylistSource,
+        activeLighting: effectiveLighting,
+        lightingSource: activeLightingSource,
+        activeParticles: activeParticleId,
+        particleSource: activeParticleSource,
+        overlays: Array.from(overlayFlags),
+        manualPlaylist: manualState.playlist,
+        manualLighting: manualState.lighting,
+        manualStopActive: manualState.playlist === MANUAL_STOP_ID,
+        manualNeutralActive: manualState.lighting === MANUAL_NEUTRAL_ID
+      };
+    }
+
+    function init() {
+      buildControls();
+      setPhaseAmbience('setup');
+      syncPlaylist();
+      syncLighting();
+      syncParticles();
+      updateOverlay();
+      updatePreview();
+    }
+
+    return {
+      init,
+      setPhaseAmbience,
+      setNightStep,
+      clearNightStep() {
+        setPlaylistSource('step', null);
+        setLightingSource('step', null);
+        setParticleSource('step', null);
+      },
+      setEventAmbience,
+      flashPhoenixPulse,
+      triggerStinger,
+      setManualPlaylist,
+      setManualLighting,
+      getSnapshot
+    };
+  })();
+
+  const initAmbienceManager = () => {
+    try {
+      ambienceManager.init();
+    } catch (error) {
+      console.error('Ambience manager failed to initialize', error);
+    }
+  };
+  if (typeof queueMicrotask === 'function') {
+    queueMicrotask(initAmbienceManager);
+  } else {
+    Promise.resolve().then(initAmbienceManager);
+  }
 
   function showWin(title, message) {
+    ambienceManager.setPhaseAmbience('victory');
+    ambienceManager.setEventAmbience('victory', true);
+    ambienceManager.setEventAmbience('blood-moon', false);
+    ambienceManager.setEventAmbience('phoenix', false);
+    ambienceManager.clearNightStep();
     winTitle.textContent = title;
     winMessage.textContent = message;
     winOverlay.style.display = 'flex';
@@ -1687,8 +2268,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     bloodMoonActive = !!isActive;
     if (bloodMoonActive) {
       document.body.classList.add('blood-moon-active');
+      ambienceManager.setEventAmbience('blood-moon', true);
+      ambienceManager.triggerStinger('bloodStrike');
     } else {
       document.body.classList.remove('blood-moon-active');
+      ambienceManager.setEventAmbience('blood-moon', false);
     }
     updateBloodMoonOdds();
   }
@@ -1702,6 +2286,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     phoenixPulseJustResolved = false;
     phoenixPulseRevivedPlayers = [];
     setPhoenixPulseCharged(false);
+    ambienceManager.setEventAmbience('phoenix', false);
   }
 
   function refreshEventUI() {
@@ -3036,6 +3621,70 @@ document.addEventListener("DOMContentLoaded", async () => {
   const bodyguardEligibleRoles = villagerJobEligibleRoles;
   const doctorEligibleRoles = villagerJobEligibleRoles;
 
+  const AUDIO_BASE64 = {
+    day: `UklGRmQBAABXQVZFZm10IBAAAAABAAEAoA8AAKAPAAABAAgAZGF0YUABAAB/vOv+8sqPUB0CBihfn9b4/OGubzQMABNCf7zr/vLKj1AdAgYoX5/W+Pzhrm80DAATQn+86/7yyo9QHQIGKF+f1vj84a5vNAwAE0J/vOv+8sqPUB0CBihfn9b4/OGubzQMABNCf7zr/vLKj1AdAgYoX5/W+Pzhrm80DAATQn+86/7yyo9QHQIGKF+f1vj84a5vNAwAE0J/vOv+8sqPUB0CBihfn9b4/OGubzQMABNCf7zr/vLKj1AdAgYoX5/W+Pzhrm80DAATQn+86/7yyo9QHQIGKF+f1vj84a5vNAwAE0J/vOv+8sqPUB0CBihfn9b4/OGubzQMABNCf7zr/vLKj1AdAgYoX5/W+Pzhrm80DAATQn+86/7yyo9QHQIGKF+f1vj84a5vNAwAE0J/vOv+8sqPUB0CBihfn9b4/OGubw==`.replace(/\s+/g, ''),
+    night: `UklGRmQBAABXQVZFZm10IBAAAAABAAEAoA8AAKAPAAABAAgAZGF0YUABAAB/o8Pf8v399OHHpoNfPiINAgAIGjRUd5u82e/7/vfmza6LZ0UoEQQABhYuTG+TtdPr+f/569O1k29MLhYGAAQRKEVni67N5vf+++/ZvJt3VDQaCAACDSI+X4Omx+H0/f3y38Ojf1s7HwwBAQodN1h7n8Dc8fz+9uTKqodjQiUPAwAHGDFQc5e51u36/vjo0LKPa0krEwUABRMrSWuPstDo+P767da5l3NQMRgHAAMPJUJjh6rK5Pb+/PHcwJ97WDcdCgEBDB87W3+jw9/y/f304cemg18+Ig0CAAgaNFR3m7zZ7/v+9+bNrotnRSgRBAAGFi5Mb5O10+v5//nr07WTb0wuFgYABBEoRWeLrs3m9/7779m8m3dUNBoIAAINIj5fg6bH4fT9/fLfw6N/WzsfDAEBCh03WHufwNzx/P725A==`.replace(/\s+/g, ''),
+    blood: `UklGRmQBAABXQVZFZm10IBAAAAABAAEAoA8AAKAPAAABAAgAZGF0YUABAAB/kaOzw9Lf6vL5/f79+vTs4dXHt6aVg3FfTj4vIhcNBgIAAAMIEBomNENUZXeJm6y8zNnl7/b7/v789/Dm282+rp2LeWdWRTYoGxEJBAAAAQYNFiEuPExdb4GTpLXF0+Dr8/n9//358+vg08W1pJOBb11MPC4hFg0GAQAABAkRGyg2RVZneYudrr7N2+bw9/z+/vv27+XZzLysm4l3ZVRDNCYaEAgDAAACBg0XIi8+Tl9xg5Wmt8fV4ez0+v3+/fny6t/Sw7OjkX9tW0s7LB8UDAUBAAEEChIdKTdHWGl7jZ+wwM/c5/H4/P7++/bu5NjKu6qZh3VjUkIyJRkPCAMAAAIHDhgjMUBQYXOFl6i5yNbj7fX6/v79+PHo3dDCsqGPfWtaSTkrHhMLBQEAAQULEx4rOUlaa32PobLC0N3o8Q==`.replace(/\s+/g, ''),
+    phoenix: `UklGRmQBAABXQVZFZm10IBAAAAABAAEAoA8AAKAPAAABAAgAZGF0YUABAAB/3P7QbxgCO5/v+LVQCAxYvPrrlzQBHXfW/9Z3HQE0l+v6vFgMCFC1+O+fOwIYb9D+3H8iAC6P5vzDXw8GSa728qZCBBNnyv3hhygAKIfh/cpnEwRCpvL2rkkGD1/D/OaPLgAif9z+0G8YAjuf7/i1UAgMWLz665c0AR131v/Wdx0BNJfr+rxYDAhQtfjvnzsCGG/Q/tx/IgAuj+b8w18PBkmu9vKmQgQTZ8r94YcoACiH4f3KZxMEQqby9q5JBg9fw/zmjy4AIn/c/tBvGAI7n+/4tVAIDFi8+uuXNAEdd9b/1ncdATSX6/q8WAwIULX47587Ahhv0P7cfyIALo/m/MNfDwZJrvbypkIEE2fK/eGHKAAoh+H9ymcTBEKm8vauSQYPX8P85o8uACJ/3P7QbxgCO5/v+LVQCAxYvPrrlw==`.replace(/\s+/g, '')
+  };
+
+  const narratorAudioLibrary = {
+    playlists: {
+      daybreak: { id: 'daybreak', label: '🌅 Morgendämmerung', src: `data:audio/wav;base64,${AUDIO_BASE64.day}`, loop: true, volume: 0.55 },
+      nightwatch: { id: 'nightwatch', label: '🌙 Nachtwache', src: `data:audio/wav;base64,${AUDIO_BASE64.night}`, loop: true, volume: 0.5 },
+      bloodmoon: { id: 'bloodmoon', label: '🩸 Blutmond-Dröhnen', src: `data:audio/wav;base64,${AUDIO_BASE64.blood}`, loop: true, volume: 0.58 },
+      phoenix: { id: 'phoenix', label: '🔥 Phoenix-Aufgang', src: `data:audio/wav;base64,${AUDIO_BASE64.phoenix}`, loop: true, volume: 0.6 }
+    },
+    stingers: {
+      bloodStrike: { id: 'bloodStrike', label: 'Werwolf-Heulen', src: `data:audio/wav;base64,${AUDIO_BASE64.blood}`, volume: 0.85 },
+      phoenixRise: { id: 'phoenixRise', label: 'Phoenix-Aufstieg', src: `data:audio/wav;base64,${AUDIO_BASE64.phoenix}`, volume: 0.9 }
+    }
+  };
+
+  const lightingPresets = {
+    day: { label: 'Tageslicht', particles: 'motes' },
+    night: { label: 'Nachtwache', particles: 'embers' },
+    ritual: { label: 'Ritualglut', particles: 'embers' },
+    witch: { label: 'Hexenglut', particles: 'aurora' },
+    seer: { label: 'Seherblick', particles: 'aurora' },
+    hunter: { label: 'Jägerfeuer', particles: 'sparks' },
+    'blood-moon': { label: 'Blutmond', particles: 'embers', overlay: ['blood-moon'] },
+    phoenix: { label: 'Phoenix Pulse', particles: 'phoenix', overlay: ['phoenix'] },
+    victory: { label: 'Triumphlicht', particles: 'sparks' }
+  };
+
+  const phaseAmbiencePresets = {
+    setup: { playlist: null, lighting: null, particles: null },
+    night: { playlist: 'nightwatch', lighting: 'night', particles: 'embers' },
+    day: { playlist: 'daybreak', lighting: 'day', particles: 'motes' },
+    victory: { playlist: 'daybreak', lighting: 'victory', particles: 'sparks' }
+  };
+
+  const nightStepAmbience = {
+    Werwolf: { lighting: 'ritual', particles: 'embers' },
+    Hexe: { lighting: 'witch', particles: 'aurora' },
+    Seer: { lighting: 'seer', particles: 'aurora' },
+    Inquisitor: { lighting: 'seer', particles: 'aurora' },
+    Jäger: { lighting: 'hunter', particles: 'sparks' },
+    Amor: { lighting: 'ritual', particles: 'motes' },
+    Doctor: { lighting: 'day', particles: 'motes' },
+    Bodyguard: { lighting: 'night', particles: 'embers' },
+    'Stumme Jule': { lighting: 'witch', particles: 'aurora' },
+    Geschwister: { lighting: 'night', particles: 'motes' }
+  };
+
+  const sourceLabels = {
+    manual: 'Manuell',
+    event: 'Event',
+    step: 'Schritt',
+    phase: 'Phase'
+  };
+
+  const overlayLabels = {
+    'blood-moon': 'Blutmond-Schleier',
+    phoenix: 'Phoenix-Resonanz'
+  };
+
   /* -------------------- Erste Nacht Logik -------------------- */
   const nightSequence = ["Bodyguard", "Doctor", "Henker", "Geschwister", "Amor", "Seer", "Inquisitor", "Werwolf", "Hexe", "Stumme Jule"];
   const nightTexts = {
@@ -3340,6 +3989,8 @@ document.addEventListener("DOMContentLoaded", async () => {
           : 'Die Phoenix Pulse lodert durch das Dorf.';
       }
 
+      ambienceManager.flashPhoenixPulse();
+
       phoenixPulseOverlay.classList.remove('active');
       void phoenixPulseOverlay.offsetWidth; // force reflow to restart animation
       phoenixPulseOverlay.classList.add('active');
@@ -3479,6 +4130,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     // Skip to next step if no more steps
     if (nightIndex >= nightSteps.length) {
       // End of night
+      ambienceManager.clearNightStep();
       nightOverlay.style.display = "none";
       startDayPhase();
       return;
@@ -3487,7 +4139,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     const role = nightSteps[nightIndex];
     // Normalize role name for comparison
     const normalizedRole = role.toLowerCase();
-    
+    ambienceManager.setNightStep(role);
+
     // Special case for Werewolves - they act as a team
     if (role === "Werwolf") {
       const hasLivingWerewolf = rolesAssigned.some((r, i) =>
@@ -4471,6 +5124,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     dayAnnouncements = [];
     currentDayAdditionalParagraphs = [];
     dayIntroHtml = '';
+    ambienceManager.setPhaseAmbience('day');
+    ambienceManager.clearNightStep();
 
     const revivedByPhoenix = applyPhoenixPulseRevival();
     if (revivedByPhoenix.length > 0) {
@@ -5129,6 +5784,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   startNightBtn.addEventListener("click", () => {
     document.querySelector('.container').classList.add('hidden');
+    ambienceManager.setPhaseAmbience('night');
+    ambienceManager.clearNightStep();
     // Get living players and their roles
     const livingPlayerRoles = [];
     players.forEach((player, index) => {
@@ -8484,7 +9141,8 @@ document.addEventListener("DOMContentLoaded", async () => {
           jobsAssigned: jobsAssigned.map(jobs => Array.isArray(jobs) ? jobs.slice() : []),
           jobConfig: { bodyguardChance: jobConfig.bodyguardChance, doctorChance: jobConfig.doctorChance },
           eventEngineState: getEventEngineSnapshot(),
-          timeline: buildSessionTimeline()
+          timeline: buildSessionTimeline(),
+          ambience: ambienceManager.getSnapshot()
         };
       },
       setState(partial = {}) {
@@ -8656,6 +9314,31 @@ document.addEventListener("DOMContentLoaded", async () => {
         renderNarratorDashboard();
       },
       renderNarratorDashboard,
+      getAmbienceState() {
+        return ambienceManager.getSnapshot();
+      },
+      setManualAmbience(config = {}) {
+        if (config && Object.prototype.hasOwnProperty.call(config, 'playlist')) {
+          ambienceManager.setManualPlaylist(config.playlist);
+        }
+        if (config && Object.prototype.hasOwnProperty.call(config, 'lighting')) {
+          ambienceManager.setManualLighting(config.lighting);
+        }
+      },
+      setPhaseAmbience: ambienceManager.setPhaseAmbience,
+      previewNightStep(role) {
+        if (role) {
+          ambienceManager.setNightStep(role);
+        } else {
+          ambienceManager.clearNightStep();
+        }
+      },
+      triggerAmbienceEvent(key, active = true) {
+        ambienceManager.setEventAmbience(key, !!active);
+      },
+      playAmbienceStinger(id) {
+        ambienceManager.triggerStinger(id);
+      },
       getDashboardSnapshot() {
         return {
           phase: dashboardPhaseEl ? dashboardPhaseEl.textContent : '',

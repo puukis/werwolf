@@ -13,6 +13,12 @@
         <div class="glow-element"></div>
         <div class="glow-element"></div>
     </div>
+    <div id="ambient-stage" class="ambient-stage" aria-hidden="true">
+        <div id="ambient-color-wash" class="ambient-layer ambient-color-wash"></div>
+        <div id="ambient-vignette" class="ambient-layer ambient-vignette"></div>
+        <div id="ambient-spotlight" class="ambient-layer ambient-spotlight"></div>
+        <div id="ambient-particles" class="ambient-layer ambient-particles"></div>
+    </div>
     <div class="blood-moon-indicator">
         <div class="moon-surface"></div>
         <div class="cloud cloud-1"></div>
@@ -408,6 +414,27 @@ Carla
                 </div>
             </div>
         </div>
+        <div class="admin-section ambience-section">
+            <h5>Atmosphäre &amp; Audio</h5>
+            <div class="ambience-controls">
+                <div class="ambience-group" aria-label="Playlists">
+                    <h6>Playlists</h6>
+                    <div id="ambience-playlists" class="ambience-toggle-group"></div>
+                </div>
+                <div class="ambience-group" aria-label="Stinger FX">
+                    <h6>Stinger FX</h6>
+                    <div id="ambience-stingers" class="ambience-toggle-group"></div>
+                </div>
+                <div class="ambience-group" aria-label="Licht Presets">
+                    <h6>Licht Presets</h6>
+                    <div id="ambience-lighting" class="ambience-toggle-group"></div>
+                </div>
+            </div>
+            <div class="ambience-preview" aria-live="polite">
+                <h6>Aktive Atmosphäre</h6>
+                <ul id="ambience-preview-list" class="ambience-preview-list"></ul>
+            </div>
+        </div>
         <div class="admin-section quick-actions-section">
             <h5>Schnellaktionen</h5>
             <div class="quick-actions">
@@ -474,6 +501,10 @@ Carla
         </svg>
     </button>
     <button id="show-roles-overview-btn" type="button" class="secondary-btn" style="display: none;">Rollenübersicht</button>
+    <div class="audio-suite" aria-hidden="true">
+        <audio id="narrator-playlist-audio" preload="auto" loop></audio>
+        <audio id="narrator-stinger-audio" preload="auto"></audio>
+    </div>
     <script src="events/definitions.js"></script>
     <script src="script.js"></script>
 </body>

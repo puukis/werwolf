@@ -481,6 +481,110 @@ const flushAsync = () => new Promise((resolve) => setTimeout(resolve, 0));
     expect(status.textContent).toBe('Phoenix Pulse: deaktiviert');
   });
 
+  test('test api exposes ambience snapshot and manual setter', () => {
+    const state = testApi.getState();
+    expect(state.ambience).toEqual(expect.objectContaining({
+      activePlaylist: null,
+      manualPlaylist: null,
+      activeLighting: null,
+      manualLighting: null
+    }));
+
+    testApi.setManualAmbience({ playlist: 'nightwatch', lighting: 'witch' });
+    let snapshot = testApi.getAmbienceState();
+    expect(snapshot.manualPlaylist).toBe('nightwatch');
+    expect(snapshot.manualLighting).toBe('witch');
+    expect(snapshot.playlistSource).toBe('manual');
+    expect(snapshot.lightingSource).toBe('manual');
+
+    testApi.setManualAmbience({ playlist: null, lighting: null });
+    snapshot = testApi.getAmbienceState();
+    expect(snapshot.manualPlaylist).toBeNull();
+    expect(snapshot.manualLighting).toBeNull();
+  });
+
+  test('admin ambience controls toggle manual state', async () => {
+    testApi.setManualAmbience({ playlist: null, lighting: null });
+    const playlistButtons = Array.from(document.querySelectorAll('#ambience-playlists .ambience-toggle'));
+    expect(playlistButtons.length).toBeGreaterThan(1);
+
+    const playlistToggle = playlistButtons.find(btn => btn.dataset.id);
+    expect(playlistToggle).toBeDefined();
+    playlistToggle.click();
+    await flushAsync();
+
+    let snapshot = testApi.getAmbienceState();
+    expect(snapshot.manualPlaylist).toBe(playlistToggle.dataset.id);
+    expect(playlistToggle.getAttribute('aria-pressed')).toBe('true');
+
+    const stopBtn = playlistButtons.find(btn => btn.textContent.includes('Stop'));
+    expect(stopBtn).toBeDefined();
+    stopBtn.click();
+
+    await flushAsync();
+    snapshot = testApi.getAmbienceState();
+    expect(snapshot.activePlaylist).toBeNull();
+    expect(snapshot.playlistSource).toBe('manual');
+    expect(stopBtn.getAttribute('aria-pressed')).toBe('true');
+    expect(playlistToggle.getAttribute('aria-pressed')).toBe('false');
+
+    stopBtn.click();
+    await flushAsync();
+    snapshot = testApi.getAmbienceState();
+    expect(snapshot.manualPlaylist).toBeNull();
+    expect(stopBtn.getAttribute('aria-pressed')).toBe('false');
+
+    const lightingButtons = Array.from(document.querySelectorAll('#ambience-lighting .ambience-toggle'));
+    expect(lightingButtons.length).toBeGreaterThan(1);
+
+    const lightingToggle = lightingButtons.find(btn => btn.dataset.id && btn.dataset.id !== '');
+    expect(lightingToggle).toBeDefined();
+    lightingToggle.click();
+
+    snapshot = testApi.getAmbienceState();
+    expect(snapshot.manualLighting).toBe(lightingToggle.dataset.id);
+    expect(lightingToggle.getAttribute('aria-pressed')).toBe('true');
+
+    const neutralBtn = lightingButtons.find(btn => btn.textContent.includes('Neutral'));
+    expect(neutralBtn).toBeDefined();
+    neutralBtn.click();
+
+    snapshot = testApi.getAmbienceState();
+    expect(snapshot.manualLighting).toBe(neutralBtn.dataset.id);
+    expect(snapshot.activeLighting).toBeNull();
+    expect(snapshot.lightingSource).toBe('manual');
+    expect(neutralBtn.getAttribute('aria-pressed')).toBe('true');
+    expect(lightingToggle.getAttribute('aria-pressed')).toBe('false');
+
+    neutralBtn.click();
+    snapshot = testApi.getAmbienceState();
+    expect(snapshot.manualLighting).toBeNull();
+    expect(neutralBtn.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  test('night step ambience temporarily overrides blood moon event', () => {
+    testApi.setManualAmbience({ playlist: null, lighting: null });
+    testApi.triggerAmbienceEvent('blood-moon', true);
+
+    let snapshot = testApi.getAmbienceState();
+    expect(snapshot.activeLighting).toBe('blood-moon');
+    expect(snapshot.lightingSource).toBe('event');
+
+    testApi.previewNightStep('Seer');
+    snapshot = testApi.getAmbienceState();
+    expect(snapshot.activeLighting).toBe('seer');
+    expect(snapshot.lightingSource).toBe('step');
+
+    testApi.previewNightStep(null);
+    snapshot = testApi.getAmbienceState();
+    expect(snapshot.activeLighting).toBe('blood-moon');
+    expect(snapshot.lightingSource).toBe('event');
+
+    testApi.triggerAmbienceEvent('blood-moon', false);
+    snapshot = testApi.getAmbienceState();
+    expect(snapshot.lightingSource === 'event').toBe(false);
+  });
+
   test('phase timer manager supports pause, resume, and cancellation flows', () => {
     jest.useFakeTimers();
     const originalOnChange = testApi.renderNarratorDashboard;
