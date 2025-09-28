@@ -217,6 +217,19 @@ const apiClient = (() => {
           method: 'DELETE',
         });
       },
+      async timeline(timestamp) {
+        if (!Number.isFinite(Number(timestamp))) {
+          return null;
+        }
+        const data = await request(`/sessions/${encodeURIComponent(timestamp)}/timeline`);
+        return data?.timeline ?? null;
+      },
+    },
+    analytics: {
+      async get() {
+        const data = await request('/analytics');
+        return data || {};
+      },
     },
     auth: {
       async me() {
@@ -737,6 +750,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   const sessionsSidebar = document.getElementById('sessions-sidebar');
   const sessionsList = document.getElementById('sessions-list');
   const sessionsToggle = document.getElementById('sessions-toggle');
+
+  const replaySessionSelect = document.getElementById('replay-session-select');
+  const replayScrubber = document.getElementById('replay-scrubber');
+  const replayActionLabel = document.getElementById('replay-action-label');
+  const replayApplyBtn = document.getElementById('replay-apply-btn');
+  const replayActionList = document.getElementById('replay-action-list');
+
+  const analyticsSummaryEl = document.getElementById('analytics-summary');
+  const analyticsWinratesEl = document.getElementById('analytics-winrates');
+  const analyticsMetaEl = document.getElementById('analytics-meta');
+
+  let replayTimeline = null;
+  let replayPointer = -1;
+  let isLoadingReplay = false;
 
   if (sessionsToggle) {
     sessionsToggle.addEventListener('click', () => {
@@ -1468,9 +1495,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   updateBloodMoonOdds();
 
-  // Load existing sessions on startup
-  await loadSessions();
-
   // Confirmation Modal Elements
   const confirmationModal = document.getElementById('confirmation-modal');
   const confirmationTitle = document.getElementById('confirmation-title');
@@ -1628,6 +1652,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     winOverlay.style.display = 'flex';
     winOverlay.classList.add('show');
     winBtn.onclick = () => location.reload();
+    lastWinner = {
+      title,
+      message,
+      timestamp: Date.now()
+    };
   }
 
   // State tracking
@@ -1652,6 +1681,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   let doctorTriggerSourceNight = null;
   let doctorLastHealedTarget = null;
   let doctorLastHealedNight = null;
+  let lastWinner = null;
 
   function setBloodMoonState(isActive) {
     bloodMoonActive = !!isActive;
@@ -3035,13 +3065,43 @@ document.addEventListener("DOMContentLoaded", async () => {
   let dayIntroHtml = '';
   let dayAnnouncements = [];
   let currentDayAdditionalParagraphs = [];
-  
+
   // DOM elements for day phase
   const dayOverlay = document.getElementById('day-overlay');
   const dayText = document.getElementById('day-text');
   const dayChoices = document.getElementById('day-choices');
   let dayLynchBtn = document.getElementById('day-lynch-btn');
   let daySkipBtn = document.getElementById('day-skip-btn');
+
+  const timerEventHistory = [];
+  let timerEventCounter = 0;
+
+  function recordTimerEvent(kind, payload = {}) {
+    timerEventCounter += 1;
+    const timestamp = Date.now();
+    const event = {
+      id: `timer-${timestamp}-${timerEventCounter}`,
+      sequence: timerEventCounter,
+      kind,
+      timestamp,
+      metadata: {
+        ...payload,
+        dayCount,
+        nightCounter,
+        phase: nightMode ? 'night' : (dayMode ? 'day' : 'setup')
+      }
+    };
+    timerEventHistory.push(event);
+    if (timerEventHistory.length > 200) {
+      timerEventHistory.shift();
+    }
+    return event;
+  }
+
+  function resetTimerEventHistory() {
+    timerEventHistory.length = 0;
+    timerEventCounter = 0;
+  }
 
   const phaseTimerManager = (() => {
     let timers = new Map();
@@ -3051,6 +3111,15 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     function notifyChange() {
       onChange();
+    }
+
+    function serializeTimer(timer) {
+      return {
+        id: timer.id,
+        label: timer.label,
+        delay: timer.delay,
+        remaining: timer.remaining
+      };
     }
 
     function schedule(callback, delay, label = 'Timer') {
@@ -3069,6 +3138,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       const run = () => {
         if (paused) return;
         timers.delete(id);
+        recordTimerEvent('triggered', { timerId: id, label });
         callback();
         notifyChange();
       };
@@ -3080,6 +3150,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
 
       timers.set(id, timer);
+      recordTimerEvent('scheduled', { timerId: id, label, delay });
       notifyChange();
       return id;
     }
@@ -3096,6 +3167,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           timer.remaining = Math.max(0, timer.remaining - elapsed);
         }
       });
+      recordTimerEvent('paused', { timers: Array.from(timers.values()).map(serializeTimer) });
       notifyChange();
       return true;
     }
@@ -3109,17 +3181,20 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (timer.remaining <= 0) {
           timer.timeoutId = setTimeout(() => {
             timers.delete(timer.id);
+            recordTimerEvent('triggered', { timerId: timer.id, label: timer.label });
             timer.callback();
             notifyChange();
           }, 0);
         } else {
           timer.timeoutId = setTimeout(() => {
             timers.delete(timer.id);
+            recordTimerEvent('triggered', { timerId: timer.id, label: timer.label });
             timer.callback();
             notifyChange();
           }, timer.remaining);
         }
       });
+      recordTimerEvent('resumed', { timers: Array.from(timers.values()).map(serializeTimer) });
       notifyChange();
       return true;
     }
@@ -3131,17 +3206,20 @@ document.addEventListener("DOMContentLoaded", async () => {
         clearTimeout(timer.timeoutId);
       }
       timers.delete(id);
+      recordTimerEvent('cancelled', { timerId: id, label: timer.label });
       notifyChange();
       return true;
     }
 
     function cancelAll() {
+      const activeTimers = Array.from(timers.values()).map(serializeTimer);
       timers.forEach(timer => {
         if (timer.timeoutId) {
           clearTimeout(timer.timeoutId);
         }
       });
       timers.clear();
+      recordTimerEvent('cancelled_all', { timers: activeTimers });
       notifyChange();
     }
 
@@ -3165,10 +3243,19 @@ document.addEventListener("DOMContentLoaded", async () => {
       return paused;
     }
 
-    return { schedule, pause, resume, cancel, cancelAll, list, setOnChange, isPaused };
+    function history() {
+      return timerEventHistory.slice();
+    }
+
+    function resetHistory() {
+      resetTimerEventHistory();
+    }
+
+    return { schedule, pause, resume, cancel, cancelAll, list, setOnChange, isPaused, history, resetHistory };
   })();
 
   const gameCheckpoints = [];
+  let checkpointCounter = 0;
   let isRestoringCheckpoint = false;
   let nightCounter = 0;
   let firstNightShieldUsed = false;
@@ -5523,6 +5610,18 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     const finalizeAssignment = () => {
+        phaseTimerManager.cancelAll();
+        phaseTimerManager.resetHistory();
+        resetTimerEventHistory();
+        actionLog.length = 0;
+        undoStack.length = 0;
+        redoStack.length = 0;
+        actionSequenceCounter = 0;
+        checkpointCounter = 0;
+        updateTimelineUI();
+        updateUndoHistoryUI();
+        lastWinner = null;
+
         // Shuffle roles
         shuffleArray(roles);
 
@@ -5839,12 +5938,186 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderNarratorDashboard();
   });
 
+  function serializeActionEntry(entry) {
+    const createdAt = getActionEntryDate(entry);
+    return {
+      id: entry.id,
+      sequence: entry.sequence,
+      type: entry.type,
+      label: entry.label,
+      detail: entry.detail,
+      timestamp: createdAt.getTime(),
+      iso: createdAt.toISOString(),
+      phase: entry.phase,
+      step: entry.step || null,
+      metadata: entry.metadata || {}
+    };
+  }
+
+  function serializeCheckpointEntry(checkpoint) {
+    const timestamp = typeof checkpoint.timestamp === 'number'
+      ? checkpoint.timestamp
+      : Date.now();
+    return {
+      id: checkpoint.id,
+      label: checkpoint.label,
+      timestamp,
+      iso: new Date(timestamp).toISOString(),
+      actionSequence: typeof checkpoint.actionSequence === 'number' ? checkpoint.actionSequence : null,
+      state: checkpoint.state
+    };
+  }
+
+  function buildSessionTimeline() {
+    const actions = actionLog
+      .slice()
+      .sort((a, b) => (a.sequence || 0) - (b.sequence || 0))
+      .map(serializeActionEntry);
+
+    const checkpoints = gameCheckpoints
+      .slice()
+      .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
+      .map(serializeCheckpointEntry);
+
+    const timers = phaseTimerManager.history().map(event => {
+      const timestamp = typeof event.timestamp === 'number' ? event.timestamp : Date.now();
+      return {
+        id: event.id,
+        sequence: event.sequence,
+        kind: event.kind,
+        timestamp,
+        iso: new Date(timestamp).toISOString(),
+        metadata: event.metadata || {}
+      };
+    });
+
+    return { actions, checkpoints, timers };
+  }
+
+  function renderAnalytics(data) {
+    if (!analyticsSummaryEl) {
+      return;
+    }
+
+    const summary = data?.summary || {};
+    const sessionCount = Number.isFinite(summary.sessionCount) ? summary.sessionCount : Number(summary.sessions) || 0;
+    const averageLengthMs = Number.isFinite(summary.averageGameLengthMs)
+      ? summary.averageGameLengthMs
+      : Number(summary.average_game_length_ms);
+    const averageActions = Number.isFinite(summary.averageActionCount)
+      ? summary.averageActionCount
+      : Number(summary.average_action_count);
+    const averagePlayers = Number.isFinite(summary.averagePlayerCount)
+      ? summary.averagePlayerCount
+      : Number(summary.average_player_count);
+
+    const summaryParts = [`Gespeicherte Spiele: ${sessionCount}`];
+    if (Number.isFinite(averagePlayers)) {
+      summaryParts.push(`Ø Spieler:innen: ${averagePlayers.toFixed(1)}`);
+    }
+    if (Number.isFinite(averageActions)) {
+      summaryParts.push(`Ø Aktionen: ${averageActions.toFixed(1)}`);
+    }
+    if (Number.isFinite(averageLengthMs)) {
+      summaryParts.push(`Ø Spieldauer: ${formatMillisecondsToSeconds(averageLengthMs)}s`);
+    }
+    analyticsSummaryEl.textContent = summaryParts.join(' • ');
+
+    if (analyticsWinratesEl) {
+      analyticsWinratesEl.innerHTML = '';
+      const winRates = Array.isArray(data?.winRates) ? data.winRates : [];
+      if (winRates.length === 0) {
+        const emptyItem = document.createElement('li');
+        emptyItem.className = 'empty';
+        emptyItem.textContent = 'Noch keine Siege ausgewertet.';
+        analyticsWinratesEl.appendChild(emptyItem);
+      } else {
+        winRates.forEach(entry => {
+          const item = document.createElement('li');
+          const winner = entry.winner || 'Unbekannt';
+          const rateValue = Number.isFinite(entry.rate) ? entry.rate : Number(entry.percentage) / 100;
+          const percentage = Number.isFinite(rateValue) ? Math.round(rateValue * 100) : null;
+          const count = Number.isFinite(entry.count) ? entry.count : Number(entry.total) || 0;
+          const parts = [`<strong>${winner}</strong>`];
+          parts.push(percentage !== null ? `${percentage}%` : '–');
+          parts.push(`(${count})`);
+          item.innerHTML = parts.join(' ');
+          analyticsWinratesEl.appendChild(item);
+        });
+      }
+    }
+
+    if (analyticsMetaEl) {
+      const meta = data?.meta || {};
+      const averageNights = Number.isFinite(meta.averageNightCount)
+        ? meta.averageNightCount
+        : Number(meta.average_night_count);
+      const averageDays = Number.isFinite(meta.averageDayCount)
+        ? meta.averageDayCount
+        : Number(meta.average_day_count);
+      const metaParts = [];
+      if (Number.isFinite(averageNights)) {
+        metaParts.push(`Ø Nächte: ${averageNights.toFixed(1)}`);
+      }
+      if (Number.isFinite(averageDays)) {
+        metaParts.push(`Ø Tage: ${averageDays.toFixed(1)}`);
+      }
+      analyticsMetaEl.textContent = metaParts.join(' • ');
+    }
+  }
+
+  async function loadAnalytics() {
+    if (!analyticsSummaryEl) {
+      return null;
+    }
+
+    analyticsSummaryEl.textContent = 'Lade Statistiken…';
+    if (analyticsWinratesEl) {
+      analyticsWinratesEl.innerHTML = '';
+    }
+    if (analyticsMetaEl) {
+      analyticsMetaEl.textContent = '';
+    }
+
+    try {
+      const data = await apiClient.analytics.get();
+      renderAnalytics(data);
+      return data;
+    } catch (error) {
+      analyticsSummaryEl.textContent = 'Statistiken konnten nicht geladen werden.';
+      console.error('Analytics konnten nicht geladen werden.', error);
+      return null;
+    }
+  }
+
   // Session Management
   async function saveSession() {
     const roleCounts = rolesAssigned.reduce((acc, role) => {
       acc[role] = (acc[role] || 0) + 1;
       return acc;
     }, {});
+
+    const timeline = buildSessionTimeline();
+    let gameDurationMs = null;
+    if (timeline.actions.length > 1) {
+      const first = timeline.actions[0];
+      const last = timeline.actions[timeline.actions.length - 1];
+      const duration = last.timestamp - first.timestamp;
+      if (Number.isFinite(duration) && duration >= 0) {
+        gameDurationMs = duration;
+      }
+    }
+
+    const sessionMetadata = {
+      playerCount: players.length,
+      dayCount,
+      nightCount: nightCounter,
+      actionCount: timeline.actions.length,
+      checkpointCount: timeline.checkpoints.length,
+      gameDurationMs,
+      winner: lastWinner ? { ...lastWinner } : null,
+      savedAt: Date.now()
+    };
 
     const session = {
       timestamp: Date.now(),
@@ -5903,11 +6176,16 @@ document.addEventListener("DOMContentLoaded", async () => {
       doctorLastHealedTarget,
       doctorLastHealedNight,
       jobsAssigned: jobsAssigned.map(jobs => Array.isArray(jobs) ? jobs.slice() : []),
-      jobConfig: { bodyguardChance: jobConfig.bodyguardChance, doctorChance: jobConfig.doctorChance }
+      jobConfig: { bodyguardChance: jobConfig.bodyguardChance, doctorChance: jobConfig.doctorChance },
+      timeline,
+      metadata: sessionMetadata
     };
 
     await apiClient.sessions.create(session);
     await loadSessions();
+    if (typeof loadAnalytics === 'function') {
+      loadAnalytics();
+    }
     return session;
   }
 
@@ -5924,6 +6202,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     if (!Array.isArray(sessions) || sessions.length === 0) {
       sessionsList.innerHTML = '<li>Keine gespeicherten Sessions.</li>';
+      updateReplaySessionOptions([]);
       return [];
     }
 
@@ -5950,6 +6229,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       sessionsList.appendChild(li);
     });
 
+    updateReplaySessionOptions(sessions);
+
     // Add delete functionality
     document.querySelectorAll('.delete-session-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -5963,6 +6244,256 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
 
     return sessions;
+  }
+
+  function resetReplayUI() {
+    replayTimeline = null;
+    replayPointer = -1;
+    if (replayScrubber) {
+      replayScrubber.min = 0;
+      replayScrubber.max = 0;
+      replayScrubber.value = 0;
+      replayScrubber.disabled = true;
+    }
+    if (replayActionLabel) {
+      replayActionLabel.textContent = '–';
+    }
+    if (replayApplyBtn) {
+      replayApplyBtn.disabled = true;
+    }
+    if (replayActionList) {
+      replayActionList.innerHTML = '';
+    }
+  }
+
+  function updateReplaySessionOptions(sessions = []) {
+    if (!replaySessionSelect) {
+      return;
+    }
+
+    const previousValue = replaySessionSelect.value;
+    replaySessionSelect.innerHTML = '';
+
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Session auswählen…';
+    placeholder.disabled = true;
+    replaySessionSelect.appendChild(placeholder);
+
+    let hasSelection = false;
+    sessions.forEach(session => {
+      const option = document.createElement('option');
+      option.value = session.timestamp;
+      option.textContent = new Date(session.timestamp).toLocaleString('de-DE');
+      if (String(session.timestamp) === previousValue) {
+        option.selected = true;
+        hasSelection = true;
+      }
+      replaySessionSelect.appendChild(option);
+    });
+
+    placeholder.selected = !hasSelection;
+    if (!hasSelection) {
+      resetReplayUI();
+    }
+  }
+
+  function renderReplayActions() {
+    if (!replayActionList) {
+      return;
+    }
+
+    replayActionList.innerHTML = '';
+
+    if (!replayTimeline || !Array.isArray(replayTimeline.actions) || replayTimeline.actions.length === 0) {
+      const empty = document.createElement('li');
+      empty.className = 'empty';
+      empty.textContent = 'Keine Aktionen gespeichert.';
+      replayActionList.appendChild(empty);
+      if (replayScrubber) {
+        replayScrubber.disabled = true;
+        replayScrubber.value = 0;
+        replayScrubber.max = 0;
+      }
+      if (replayApplyBtn) {
+        replayApplyBtn.disabled = true;
+      }
+      if (replayActionLabel) {
+        replayActionLabel.textContent = '–';
+      }
+      return;
+    }
+
+    replayTimeline.actions.forEach((action, index) => {
+      const item = document.createElement('li');
+      item.className = 'replay-entry';
+      const time = action.iso ? new Date(action.iso) : new Date(action.timestamp);
+      const timeText = Number.isNaN(time.getTime())
+        ? ''
+        : time.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      item.innerHTML = `
+        <div class="replay-entry-header">
+          <span class="replay-entry-type">${timelineLabelMap[action.type] || 'Info'}</span>
+          <span class="replay-entry-time">${timeText}</span>
+        </div>
+        <div class="replay-entry-label">${action.label || 'Aktion'}</div>
+        ${action.detail ? `<div class="replay-entry-detail">${action.detail}</div>` : ''}
+      `;
+      item.addEventListener('click', () => {
+        setReplayPointer(index);
+      });
+      replayActionList.appendChild(item);
+    });
+
+    if (replayScrubber) {
+      replayScrubber.disabled = false;
+      replayScrubber.min = 0;
+      replayScrubber.max = replayTimeline.actions.length - 1;
+      replayScrubber.value = 0;
+    }
+
+    setReplayPointer(0);
+  }
+
+  function setReplayPointer(index) {
+    if (!replayTimeline || !Array.isArray(replayTimeline.actions) || replayTimeline.actions.length === 0) {
+      replayPointer = -1;
+      if (replayApplyBtn) {
+        replayApplyBtn.disabled = true;
+      }
+      return;
+    }
+
+    const boundedIndex = Math.min(Math.max(index, 0), replayTimeline.actions.length - 1);
+    replayPointer = boundedIndex;
+    const action = replayTimeline.actions[boundedIndex];
+
+    if (replayScrubber) {
+      replayScrubber.value = String(boundedIndex);
+    }
+    if (replayActionLabel) {
+      replayActionLabel.textContent = action.label || 'Aktion';
+    }
+    if (replayApplyBtn) {
+      replayApplyBtn.disabled = false;
+    }
+    if (replayActionList) {
+      Array.from(replayActionList.children).forEach((item, idx) => {
+        item.classList.toggle('active', idx === boundedIndex);
+      });
+    }
+  }
+
+  function findCheckpointForSequence(sequence) {
+    if (!replayTimeline || !Array.isArray(replayTimeline.checkpoints) || replayTimeline.checkpoints.length === 0) {
+      return null;
+    }
+    let candidate = null;
+    replayTimeline.checkpoints.forEach(checkpoint => {
+      const seq = typeof checkpoint.actionSequence === 'number' ? checkpoint.actionSequence : null;
+      if (seq === null) {
+        return;
+      }
+      if (seq <= sequence) {
+        if (!candidate || seq >= (candidate.actionSequence ?? -Infinity)) {
+          candidate = checkpoint;
+        }
+      }
+    });
+
+    if (!candidate) {
+      candidate = replayTimeline.checkpoints[0];
+    }
+    return candidate;
+  }
+
+  async function loadReplayTimeline(timestamp) {
+    if (!replaySessionSelect) {
+      return null;
+    }
+
+    resetReplayUI();
+    if (!Number.isFinite(timestamp)) {
+      return null;
+    }
+
+    isLoadingReplay = true;
+    try {
+      if (replayActionLabel) {
+        replayActionLabel.textContent = 'Lade…';
+      }
+      const timeline = await apiClient.sessions.timeline(timestamp);
+      if (!timeline) {
+        if (replayActionLabel) {
+          replayActionLabel.textContent = 'Keine Timeline gefunden';
+        }
+        replayTimeline = null;
+        return null;
+      }
+      replayTimeline = {
+        timestamp,
+        actions: Array.isArray(timeline.actions) ? timeline.actions : [],
+        checkpoints: Array.isArray(timeline.checkpoints) ? timeline.checkpoints : [],
+        timers: Array.isArray(timeline.timers) ? timeline.timers : []
+      };
+      renderReplayActions();
+      return replayTimeline;
+    } catch (error) {
+      console.error('Timeline konnte nicht geladen werden.', error);
+      if (replayActionLabel) {
+        replayActionLabel.textContent = 'Fehler beim Laden';
+      }
+      return null;
+    } finally {
+      isLoadingReplay = false;
+    }
+  }
+
+  function applyReplaySelection() {
+    if (!replayTimeline || replayPointer < 0 || !Array.isArray(replayTimeline.actions)) {
+      return;
+    }
+    const action = replayTimeline.actions[replayPointer];
+    const sequence = typeof action.sequence === 'number' ? action.sequence : null;
+    const checkpoint = sequence !== null ? findCheckpointForSequence(sequence) : null;
+    if (!checkpoint || !checkpoint.state) {
+      showInfoMessage({
+        title: 'Kein Snapshot vorhanden',
+        text: 'Für diese Aktion liegt kein vollständiger Snapshot vor.',
+        confirmText: 'Okay'
+      });
+      return;
+    }
+
+    phaseTimerManager.cancelAll();
+    phaseTimerManager.resetHistory();
+    isRestoringCheckpoint = true;
+    try {
+      applyStateSnapshot(checkpoint.state);
+    } finally {
+      isRestoringCheckpoint = false;
+    }
+
+    const actionTime = action.iso ? new Date(action.iso) : new Date(action.timestamp);
+    const detailParts = [];
+    if (!Number.isNaN(actionTime.getTime())) {
+      detailParts.push(actionTime.toLocaleString('de-DE'));
+    }
+    if (checkpoint.label) {
+      detailParts.push(`Snapshot: ${checkpoint.label}`);
+    }
+
+    logAction({
+      type: 'replay',
+      label: `Replay geladen – ${action.label || 'Aktion'}`,
+      detail: detailParts.join(' | '),
+      metadata: {
+        source: 'replay',
+        sessionTimestamp: replayTimeline.timestamp,
+        actionId: action.id,
+        checkpointId: checkpoint.id
+      }
+    });
   }
 
   async function deleteSession(timestamp) {
@@ -5979,7 +6510,46 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
+  if (replaySessionSelect) {
+    replaySessionSelect.addEventListener('change', async (event) => {
+      const value = Number(event.target.value);
+      if (!Number.isFinite(value)) {
+        resetReplayUI();
+        return;
+      }
+      await loadReplayTimeline(value);
+    });
+  }
+
+  if (replayScrubber) {
+    replayScrubber.addEventListener('input', (event) => {
+      const value = Number(event.target.value);
+      if (!Number.isFinite(value)) {
+        return;
+      }
+      setReplayPointer(value);
+    });
+  }
+
+  if (replayApplyBtn) {
+    replayApplyBtn.addEventListener('click', () => {
+      applyReplaySelection();
+    });
+  }
+
   function applySession(session) {
+    phaseTimerManager.resetHistory();
+    resetTimerEventHistory();
+    actionLog.length = 0;
+    undoStack.length = 0;
+    redoStack.length = 0;
+    actionSequenceCounter = 0;
+    checkpointCounter = 0;
+    updateTimelineUI();
+    updateUndoHistoryUI();
+    const sessionWinner = session?.metadata?.winner;
+    lastWinner = sessionWinner ? { ...sessionWinner } : null;
+
     players = Array.isArray(session.players) ? session.players.slice() : [];
     rolesAssigned = Array.isArray(session.rolesAssigned) ? session.rolesAssigned.slice() : [];
     jobsAssigned = Array.isArray(session.jobsAssigned)
@@ -6089,9 +6659,87 @@ document.addEventListener("DOMContentLoaded", async () => {
     currentDayAdditionalParagraphs = [];
     dayIntroHtml = '';
 
+    const timelineData = session.timeline || null;
+
     phaseTimerManager.cancelAll();
     gameCheckpoints.length = 0;
-    captureGameCheckpoint('Session geladen');
+
+    if (timelineData && Array.isArray(timelineData.checkpoints) && timelineData.checkpoints.length > 0) {
+      const sortedCheckpoints = timelineData.checkpoints
+        .slice()
+        .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+      sortedCheckpoints.forEach((cp, index) => {
+        if (!cp.state) {
+          return;
+        }
+        const timestamp = typeof cp.timestamp === 'number'
+          ? cp.timestamp
+          : (typeof cp.iso === 'string' ? Date.parse(cp.iso) : Date.now());
+        const sequence = typeof cp.actionSequence === 'number' ? cp.actionSequence : index;
+        checkpointCounter = Math.max(checkpointCounter, sequence);
+        gameCheckpoints.push({
+          id: cp.id || `checkpoint-${timestamp}-${sequence || index + 1}`,
+          label: cp.label || 'Snapshot',
+          timestamp,
+          actionSequence: sequence,
+          state: cp.state
+        });
+      });
+      if (gameCheckpoints.length === 0) {
+        captureGameCheckpoint('Session geladen');
+      }
+    } else {
+      captureGameCheckpoint('Session geladen');
+    }
+
+    if (timelineData && Array.isArray(timelineData.actions) && timelineData.actions.length > 0) {
+      const restoredActions = timelineData.actions
+        .slice()
+        .map(action => {
+          const createdAt = action.iso ? new Date(action.iso) : new Date(action.timestamp);
+          const sequence = typeof action.sequence === 'number' ? action.sequence : 0;
+          return {
+            id: action.id || `action-${createdAt.getTime()}-${sequence}`,
+            sequence,
+            type: action.type || 'info',
+            label: action.label || '',
+            detail: action.detail || '',
+            createdAt: Number.isNaN(createdAt.getTime()) ? new Date() : createdAt,
+            phase: action.phase || 'setup',
+            step: action.step || null,
+            metadata: action.metadata || {}
+          };
+        })
+        .sort((a, b) => (b.sequence || 0) - (a.sequence || 0));
+      restoredActions.forEach(entry => {
+        actionLog.push(entry);
+        actionSequenceCounter = Math.max(actionSequenceCounter, entry.sequence || 0);
+      });
+    }
+
+    if (timelineData && Array.isArray(timelineData.timers) && timelineData.timers.length > 0) {
+      resetTimerEventHistory();
+      timelineData.timers
+        .slice()
+        .sort((a, b) => (a.sequence || 0) - (b.sequence || 0))
+        .forEach(event => {
+          const timestamp = typeof event.timestamp === 'number'
+            ? event.timestamp
+            : (typeof event.iso === 'string' ? Date.parse(event.iso) : Date.now());
+          const sequence = typeof event.sequence === 'number' ? event.sequence : timerEventCounter + 1;
+          timerEventCounter = Math.max(timerEventCounter, sequence);
+          timerEventHistory.push({
+            id: event.id || `timer-${timestamp}-${sequence}`,
+            sequence,
+            kind: event.kind || 'custom',
+            timestamp,
+            metadata: event.metadata || {}
+          });
+        });
+    }
+
+    updateTimelineUI();
+    updateUndoHistoryUI();
 
     playersTextarea.value = session.players.join('\n');
 
@@ -6218,6 +6866,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   const macroRunBtn = document.getElementById('admin-run-macro-btn');
   const macroDescriptionEl = document.getElementById('admin-macro-description');
   const defaultMacroDescription = macroDescriptionEl ? macroDescriptionEl.textContent : '';
+
+  await loadSessions();
+  await loadAnalytics();
 
   const narratorDashboard = document.getElementById('narrator-dashboard');
   const dashboardPhaseEl = document.getElementById('dashboard-phase');
@@ -6541,9 +7192,13 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   function captureGameCheckpoint(label) {
     if (isRestoringCheckpoint) return;
+    const timestamp = Date.now();
+    checkpointCounter += 1;
     const snapshot = {
+      id: `checkpoint-${timestamp}-${checkpointCounter}`,
       label,
-      timestamp: Date.now(),
+      timestamp,
+      actionSequence: actionSequenceCounter,
       state: createStateSnapshot()
     };
     gameCheckpoints.push(snapshot);
@@ -6831,9 +7486,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     sandboxResultEl.innerHTML = lines.map(text => `<p>${text}</p>`).join('');
   }
 
+  const ACTION_LOG_LIMIT = 500;
   const actionLog = [];
   const undoStack = [];
   const redoStack = [];
+  let actionSequenceCounter = 0;
 
   const timelineLabelMap = {
     admin: 'Admin',
@@ -6847,6 +7504,29 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   function formatTimestamp(date) {
     return date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  function getActionEntryDate(entry) {
+    if (entry.createdAt instanceof Date) {
+      return entry.createdAt;
+    }
+    if (typeof entry.timestamp === 'number') {
+      const date = new Date(entry.timestamp);
+      if (!Number.isNaN(date.getTime())) {
+        entry.createdAt = date;
+        return date;
+      }
+    }
+    if (typeof entry.iso === 'string') {
+      const parsed = new Date(entry.iso);
+      if (!Number.isNaN(parsed.getTime())) {
+        entry.createdAt = parsed;
+        return parsed;
+      }
+    }
+    const fallback = new Date();
+    entry.createdAt = fallback;
+    return fallback;
   }
 
   function updateTimelineUI() {
@@ -6875,8 +7555,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       const timeEl = document.createElement('time');
       timeEl.className = 'timeline-time';
-      timeEl.dateTime = entry.timestamp.toISOString();
-      timeEl.textContent = formatTimestamp(entry.timestamp);
+      const createdAt = getActionEntryDate(entry);
+      timeEl.dateTime = createdAt.toISOString();
+      timeEl.textContent = formatTimestamp(createdAt);
       header.appendChild(timeEl);
 
       item.appendChild(header);
@@ -6943,14 +7624,33 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  function logAction({ type = 'info', label, detail = '' }) {
-    const timestamp = new Date();
-    actionLog.unshift({ type, label, detail, timestamp });
-    if (actionLog.length > 50) {
+  function logAction({ type = 'info', label, detail = '', metadata = {} }) {
+    const createdAt = new Date();
+    actionSequenceCounter += 1;
+    const entry = {
+      id: `action-${createdAt.getTime()}-${actionSequenceCounter}`,
+      sequence: actionSequenceCounter,
+      type,
+      label,
+      detail,
+      createdAt,
+      phase: nightMode ? 'night' : (dayMode ? 'day' : 'setup'),
+      step: nightMode ? nightSteps[nightIndex] || null : null,
+      metadata: {
+        ...metadata,
+        dayCount,
+        nightCounter,
+        mayor,
+        playerCount: players.length
+      }
+    };
+    actionLog.unshift(entry);
+    if (actionLog.length > ACTION_LOG_LIMIT) {
       actionLog.pop();
     }
     updateTimelineUI();
     renderNarratorDashboard();
+    return entry;
   }
 
   function recordAction({ type = 'admin', label, detail = '', undo, redo }) {
@@ -7783,7 +8483,8 @@ document.addEventListener("DOMContentLoaded", async () => {
           doctorLastHealedNight,
           jobsAssigned: jobsAssigned.map(jobs => Array.isArray(jobs) ? jobs.slice() : []),
           jobConfig: { bodyguardChance: jobConfig.bodyguardChance, doctorChance: jobConfig.doctorChance },
-          eventEngineState: getEventEngineSnapshot()
+          eventEngineState: getEventEngineSnapshot(),
+          timeline: buildSessionTimeline()
         };
       },
       setState(partial = {}) {
@@ -7983,6 +8684,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       },
       getActionLog() {
         return actionLog.slice();
+      },
+      getTimerEvents() {
+        return timerEventHistory.slice();
       },
       phaseTimerManager,
       getEventEngineState() {
