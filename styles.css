@@ -718,7 +718,7 @@ body.auth-locked {
   letter-spacing: 0.06em;
   background: rgba(37, 99, 235, 0.15);
   color: #2563eb;
-  border-radius: 999px;
+  border-radius: 0.55rem;
   padding: 0.15rem 0.6rem;
   margin-top: 0.15rem;
 }
@@ -733,7 +733,7 @@ body.auth-locked {
 }
 
 .secondary-btn.subtle-btn {
-  border-radius: 999px;
+  border-radius: 0.55rem;
   padding: 0.55rem 1.2rem;
   background: rgba(148, 163, 184, 0.12);
   border: 1px solid rgba(148, 163, 184, 0.35);
@@ -1252,7 +1252,7 @@ button {
   gap: 0.5rem;
   position: relative;
   padding: 0.65rem 1.35rem;
-  border-radius: 999px;
+  border-radius: 0.55rem;
   border: 1px solid var(--glass-button-border);
   background: linear-gradient(var(--glass-sheen-angle), var(--btn-bg-start) 0%, var(--btn-bg-end) 100%);
   color: #fff;
@@ -1301,7 +1301,7 @@ button {
   gap: 0.5rem;
   position: relative;
   padding: 0.6rem 1.2rem;
-  border-radius: 999px;
+  border-radius: 0.55rem;
   border: 1px solid var(--glass-secondary-border);
   background: linear-gradient(var(--glass-sheen-angle), var(--btn-bg-start) 0%, var(--btn-bg-end) 100%);
   color: var(--text-color);
