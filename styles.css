@@ -589,7 +589,7 @@ body.auth-locked {
 .config-action {
   margin-top: 1.25rem;
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .config-btn {
