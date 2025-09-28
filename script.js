@@ -97,6 +97,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const bodyguardJobChanceDisplay = document.getElementById('bodyguard-job-chance-display');
   const doctorJobChanceInput = document.getElementById('doctor-job-chance');
   const doctorJobChanceDisplay = document.getElementById('doctor-job-chance-display');
+  const eventDeckListEl = document.getElementById('event-deck-list');
+  const campaignSelectEl = document.getElementById('campaign-select');
+  const campaignPreviewListEl = document.getElementById('campaign-preview-list');
+  const eventCardPreviewListEl = document.getElementById('event-card-preview');
   const openConfigBtn = document.getElementById('open-config-btn');
   const configModal = document.getElementById('config-modal');
   const closeConfigBtn = document.getElementById('close-config-btn');
@@ -106,14 +110,193 @@ document.addEventListener("DOMContentLoaded", () => {
   const BLOOD_MOON_CONFIG_STORAGE_KEY = 'werwolfBloodMoonConfig';
   const DEFAULT_PHOENIX_PULSE_CHANCE = 0.05;
   const PHOENIX_PULSE_CONFIG_STORAGE_KEY = 'werwolfPhoenixPulseConfig';
+  const EVENT_ENGINE_STORAGE_KEY = 'werwolfEventEngineState';
   const defaultJobConfig = { bodyguardChance: 0, doctorChance: 0 };
   let jobConfigSaveTimeout = null;
   const defaultBloodMoonConfig = { baseChance: 0.2 };
   const defaultPhoenixPulseConfig = { chance: DEFAULT_PHOENIX_PULSE_CHANCE };
+
+  const eventDeckMetadata = Array.isArray(window.WERWOLF_EVENT_DECKS)
+    ? window.WERWOLF_EVENT_DECKS.slice()
+    : [];
+  const eventCardDefinitions = Array.isArray(window.WERWOLF_EVENT_DEFINITIONS)
+    ? window.WERWOLF_EVENT_DEFINITIONS.slice()
+    : [];
+  const campaignDefinitions = Array.isArray(window.WERWOLF_CAMPAIGNS)
+    ? window.WERWOLF_CAMPAIGNS.slice()
+    : [];
+
+  if (eventDeckMetadata.length === 0) {
+    eventDeckMetadata.push({
+      id: 'legacy',
+      name: 'Klassisches Deck',
+      description: 'Erhält die bekannten Ereignisse Blutmond und Phoenix Pulse.'
+    });
+  }
+
+  if (eventCardDefinitions.length === 0) {
+    eventCardDefinitions.push(
+      {
+        id: 'blood-moon',
+        legacyKey: 'bloodMoon',
+        deckId: 'legacy',
+        label: '🌕 Blutmond',
+        description: 'Der Mond färbt sich rot – die Werwölfe dürfen ein zweites Opfer wählen.',
+        cooldownNights: 1,
+        pityKey: 'bloodMoonPityTimer',
+        trigger(context) {
+          if (!context.flags.randomEventsEnabled || !context.flags.bloodMoonEnabled) {
+            return { triggered: false, reason: 'disabled' };
+          }
+
+          if (context.state.bloodMoonActive) {
+            context.storage.setNumber(this.pityKey, 0);
+            return { triggered: true, reason: 'forced' };
+          }
+
+          const pityTimer = context.storage.getNumber(this.pityKey, 0);
+          const chance = context.helpers.getBloodMoonChance(pityTimer);
+          const roll = context.random();
+          const triggeredByChance = roll < chance;
+          let triggered = triggeredByChance;
+          let nextPity = triggered ? 0 : pityTimer + 1;
+          if (!triggered && nextPity >= 3) {
+            triggered = true;
+            nextPity = 0;
+          }
+          context.storage.setNumber(this.pityKey, nextPity);
+
+          return {
+            triggered,
+            pityTimer,
+            chance,
+            roll,
+            nextPity,
+            triggeredByChance
+          };
+        },
+        effect({ scheduler, helpers, meta, nightNumber }) {
+          if (!meta || !meta.triggered) {
+            return { skipped: true };
+          }
+
+          scheduler.addModifier({
+            id: 'blood-moon',
+            label: '🌕 Blutmond',
+            expiresAfterNight: nightNumber,
+            originCardId: 'blood-moon'
+          });
+
+          return {
+            log: {
+              type: 'event',
+              label: 'Blutmond steigt auf',
+              detail: 'Die Werwölfe dürfen in dieser Nacht zwei Opfer wählen.'
+            },
+            narratorNote: 'Die Werwölfe wählen zwei Opfer.',
+            meta
+          };
+        },
+        preview() {
+          return 'Werwölfe wählen zwei Opfer.';
+        }
+      },
+      {
+        id: 'phoenix-pulse',
+        legacyKey: 'phoenixPulse',
+        deckId: 'legacy',
+        label: '🔥 Phoenix Pulse',
+        description: 'Eine uralte Energie lodert durch das Dorf – Nachtopfer werden wiederbelebt.',
+        trigger(context) {
+          if (!context.flags.randomEventsEnabled || !context.flags.phoenixEnabled) {
+            return { triggered: false, reason: 'disabled' };
+          }
+
+          const chance = context.helpers.getPhoenixPulseChance();
+          const roll = context.random();
+          return {
+            triggered: roll < chance,
+            chance,
+            roll
+          };
+        },
+        effect({ scheduler, helpers, meta }) {
+          if (!meta || !meta.triggered) {
+            return { skipped: true };
+          }
+
+          const alreadyQueued = scheduler.getState().queuedEffects.some(
+            entry => entry.cardId === 'phoenix-pulse'
+          );
+          if (alreadyQueued) {
+            return { skipped: true, meta };
+          }
+
+          scheduler.enqueueResolution({
+            cardId: 'phoenix-pulse',
+            label: '🔥 Phoenix Pulse',
+            meta
+          });
+
+          return {
+            log: {
+              type: 'event',
+              label: 'Phoenix Pulse geladen',
+              detail: 'Die Phoenix Pulse lädt und wird bei Tagesanbruch explodieren.'
+            },
+            narratorNote: 'Nachtopfer werden am Morgen wiederbelebt.',
+            message: '<br><strong>🔥 Phoenix Pulse:</strong> Eine uralte Energie sammelt sich in dieser Nacht.',
+            meta
+          };
+        },
+        preview() {
+          return 'Nachtopfer kehren bei Tagesanbruch zurück.';
+        }
+      }
+    );
+  }
+
+  if (campaignDefinitions.length === 0) {
+    campaignDefinitions.push({
+      id: 'legacy',
+      name: 'Klassische Ereigniskette',
+      description: 'Behält die bisherigen Zufallsereignisse mit sanften Vorahnungen bei.',
+      deckConfig: {
+        legacy: { weight: 1 }
+      },
+      script: [
+        {
+          night: 1,
+          eventId: 'phoenix-pulse',
+          title: 'Vorzeichen des Phönix',
+          description: 'Die Phoenix Pulse knistert schon in der ersten Nacht und lädt garantiert.'
+        }
+      ]
+    });
+  }
+
+  function buildDefaultDeckConfig() {
+    const config = {};
+    const decks = eventDeckMetadata.length > 0
+      ? eventDeckMetadata
+      : [{ id: 'legacy', name: 'Standard' }];
+    decks.forEach(deck => {
+      config[deck.id] = { enabled: true, weight: 1 };
+    });
+    return config;
+  }
+
+  function getDefaultCampaignId() {
+    const firstCampaign = campaignDefinitions.find(campaign => campaign && campaign.id);
+    return firstCampaign ? firstCampaign.id : null;
+  }
+
   const defaultEventConfig = {
     bloodMoonEnabled: true,
     phoenixPulseEnabled: true,
-    firstNightShield: true
+    firstNightShield: true,
+    decks: buildDefaultDeckConfig(),
+    campaignId: getDefaultCampaignId()
   };
 
   function setConfigModalVisibility(isOpen) {
@@ -139,6 +322,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
   let eventConfig = loadEventConfig();
+  eventConfig.decks = sanitizeDeckConfig(eventConfig.decks || {});
   let jobConfig = loadJobConfig();
   let bloodMoonConfig = loadBloodMoonConfig();
   let phoenixPulseConfig = loadPhoenixPulseConfig();
@@ -169,20 +353,65 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  function cloneDeckConfig(config) {
+    return Object.keys(config || {}).reduce((acc, key) => {
+      const entry = config[key] || {};
+      const weight = Number.isFinite(entry.weight) ? entry.weight : 1;
+      acc[key] = {
+        enabled: entry.enabled !== false,
+        weight: Math.max(0, weight)
+      };
+      return acc;
+    }, {});
+  }
+
+  function sanitizeDeckConfig(rawConfig) {
+    const base = buildDefaultDeckConfig();
+    const overrides = cloneDeckConfig(rawConfig);
+    return Object.keys(base).reduce((acc, deckId) => {
+      const override = overrides[deckId] || {};
+      const normalizedWeight = Number.isFinite(override.weight)
+        ? Math.max(0, override.weight)
+        : base[deckId].weight;
+      acc[deckId] = {
+        enabled: override.enabled !== false && normalizedWeight > 0,
+        weight: normalizedWeight > 0 ? normalizedWeight : 0
+      };
+      return acc;
+    }, {});
+  }
+
   function loadEventConfig() {
     try {
       const raw = localStorage.getItem(EVENT_CONFIG_STORAGE_KEY);
+      const defaults = {
+        bloodMoonEnabled: defaultEventConfig.bloodMoonEnabled,
+        phoenixPulseEnabled: defaultEventConfig.phoenixPulseEnabled,
+        firstNightShield: defaultEventConfig.firstNightShield,
+        decks: cloneDeckConfig(defaultEventConfig.decks),
+        campaignId: defaultEventConfig.campaignId
+      };
       if (!raw) {
-        return { ...defaultEventConfig };
+        return defaults;
       }
       const parsed = JSON.parse(raw);
       return {
         bloodMoonEnabled: parsed.bloodMoonEnabled !== false,
         phoenixPulseEnabled: parsed.phoenixPulseEnabled !== false,
-        firstNightShield: parsed.firstNightShield !== false
+        firstNightShield: parsed.firstNightShield !== false,
+        decks: sanitizeDeckConfig(parsed.decks || {}),
+        campaignId: typeof parsed.campaignId === 'string'
+          ? parsed.campaignId
+          : defaults.campaignId
       };
     } catch (error) {
-      return { ...defaultEventConfig };
+      return {
+        bloodMoonEnabled: defaultEventConfig.bloodMoonEnabled,
+        phoenixPulseEnabled: defaultEventConfig.phoenixPulseEnabled,
+        firstNightShield: defaultEventConfig.firstNightShield,
+        decks: cloneDeckConfig(defaultEventConfig.decks),
+        campaignId: defaultEventConfig.campaignId
+      };
     }
   }
 
@@ -191,7 +420,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const payload = {
         bloodMoonEnabled: !!eventConfig.bloodMoonEnabled,
         phoenixPulseEnabled: !!eventConfig.phoenixPulseEnabled,
-        firstNightShield: !!eventConfig.firstNightShield
+        firstNightShield: !!eventConfig.firstNightShield,
+        decks: sanitizeDeckConfig(eventConfig.decks || {}),
+        campaignId: eventConfig.campaignId || null
       };
       localStorage.setItem(EVENT_CONFIG_STORAGE_KEY, JSON.stringify(payload));
     } catch (error) {
@@ -651,9 +882,18 @@ document.addEventListener("DOMContentLoaded", () => {
   let doctorLastHealedTarget = null;
   let doctorLastHealedNight = null;
 
+  function setBloodMoonState(isActive) {
+    bloodMoonActive = !!isActive;
+    if (bloodMoonActive) {
+      document.body.classList.add('blood-moon-active');
+    } else {
+      document.body.classList.remove('blood-moon-active');
+    }
+    updateBloodMoonOdds();
+  }
+
   function clearBloodMoonState() {
-    bloodMoonActive = false;
-    document.body.classList.remove('blood-moon-active');
+    setBloodMoonState(false);
   }
 
   function clearPhoenixPulseState() {
@@ -666,6 +906,368 @@ document.addEventListener("DOMContentLoaded", () => {
   function refreshEventUI() {
     updateBloodMoonOdds();
     updatePhoenixPulseStatus();
+  }
+
+  const eventModifierHandlers = {
+    'blood-moon': {
+      apply() {
+        setBloodMoonState(true);
+        syncBloodMoonUI({ silent: true });
+      },
+      expire() {
+        setBloodMoonState(false);
+        syncBloodMoonUI({ silent: true });
+      }
+    }
+  };
+
+  const eventQueueHandlers = {
+    'phoenix-pulse': {
+      onEnqueue() {
+        phoenixPulsePending = true;
+        phoenixPulseJustResolved = false;
+        setPhoenixPulseCharged(true);
+        updatePhoenixPulseStatus();
+      },
+      onComplete(_meta, payload = {}) {
+        if (payload && payload.deferClear) {
+          return;
+        }
+        phoenixPulsePending = false;
+        setPhoenixPulseCharged(false);
+        updatePhoenixPulseStatus();
+      }
+    }
+  };
+
+  function sanitizeSchedulerState(raw = {}) {
+    const normalizeModifier = (modifier) => {
+      if (!modifier) {
+        return null;
+      }
+      const id = typeof modifier.id === 'string' && modifier.id.trim()
+        ? modifier.id.trim()
+        : (typeof modifier.originCardId === 'string' && modifier.originCardId.trim()
+          ? modifier.originCardId.trim()
+          : `mod-${Date.now()}`);
+      const origin = typeof modifier.originCardId === 'string' && modifier.originCardId.trim()
+        ? modifier.originCardId.trim()
+        : id;
+      const expiresAfterNight = Number.isFinite(modifier.expiresAfterNight)
+        ? modifier.expiresAfterNight
+        : null;
+      return {
+        id,
+        label: modifier.label || id,
+        originCardId: origin,
+        expiresAfterNight
+      };
+    };
+
+    const normalizeQueueEntry = (entry) => {
+      if (!entry) {
+        return null;
+      }
+      const cardId = typeof entry.cardId === 'string' && entry.cardId.trim()
+        ? entry.cardId.trim()
+        : (typeof entry.id === 'string' ? entry.id : 'event');
+      return {
+        id: typeof entry.id === 'string' && entry.id.trim()
+          ? entry.id.trim()
+          : `${cardId}-${Date.now()}`,
+        cardId,
+        label: entry.label || cardId,
+        meta: entry.meta || null,
+        night: Number.isFinite(entry.night) ? entry.night : null,
+        scheduledAt: Number.isFinite(entry.scheduledAt) ? entry.scheduledAt : Date.now()
+      };
+    };
+
+    const normalizeHistoryEntry = (entry) => {
+      if (!entry) {
+        return null;
+      }
+      const normalized = normalizeQueueEntry(entry);
+      return {
+        ...normalized,
+        payload: entry.payload || null,
+        recordedAt: Number.isFinite(entry.recordedAt) ? entry.recordedAt : Date.now(),
+        resolvedAt: Number.isFinite(entry.resolvedAt) ? entry.resolvedAt : null
+      };
+    };
+
+    const activeModifiers = Array.isArray(raw.activeModifiers)
+      ? raw.activeModifiers.map(normalizeModifier).filter(Boolean)
+      : [];
+    const queuedEffects = Array.isArray(raw.queuedEffects)
+      ? raw.queuedEffects.map(normalizeQueueEntry).filter(Boolean)
+      : [];
+    const history = Array.isArray(raw.history)
+      ? raw.history.map(normalizeHistoryEntry).filter(Boolean).slice(0, 25)
+      : [];
+
+    return {
+      activeModifiers,
+      queuedEffects,
+      history
+    };
+  }
+
+  function createEventScheduler(initialState = {}, onChange) {
+    const state = sanitizeSchedulerState(initialState);
+    const notify = () => {
+      if (typeof onChange === 'function') {
+        onChange(state);
+      }
+    };
+
+    return {
+      addModifier(modifier) {
+        const normalized = sanitizeSchedulerState({ activeModifiers: [modifier] }).activeModifiers[0];
+        if (!normalized) {
+          return null;
+        }
+        state.activeModifiers = state.activeModifiers.filter(entry => entry.id !== normalized.id);
+        state.activeModifiers.push(normalized);
+        const handler = eventModifierHandlers[normalized.originCardId] || eventModifierHandlers[normalized.id];
+        if (handler && typeof handler.apply === 'function') {
+          handler.apply({ modifier: normalized });
+        }
+        notify();
+        return normalized;
+      },
+      clearExpiredModifiers(currentNight) {
+        const remaining = [];
+        let changed = false;
+        state.activeModifiers.forEach(modifier => {
+          if (modifier.expiresAfterNight !== null && currentNight > modifier.expiresAfterNight) {
+            const handler = eventModifierHandlers[modifier.originCardId] || eventModifierHandlers[modifier.id];
+            if (handler && typeof handler.expire === 'function') {
+              handler.expire({ modifier, night: currentNight });
+            }
+            changed = true;
+          } else {
+            remaining.push(modifier);
+          }
+        });
+        state.activeModifiers = remaining;
+        if (changed) {
+          notify();
+        }
+      },
+      removeModifier(modifierId) {
+        let changed = false;
+        state.activeModifiers = state.activeModifiers.filter(modifier => {
+          if (modifier.id === modifierId) {
+            const handler = eventModifierHandlers[modifier.originCardId] || eventModifierHandlers[modifier.id];
+            if (handler && typeof handler.expire === 'function') {
+              handler.expire({ modifier, night: null });
+            }
+            changed = true;
+            return false;
+          }
+          return true;
+        });
+        if (changed) {
+          notify();
+        }
+      },
+      enqueueResolution(entry) {
+        const normalized = sanitizeSchedulerState({ queuedEffects: [entry] }).queuedEffects[0];
+        if (!normalized) {
+          return null;
+        }
+        state.queuedEffects.push(normalized);
+        const handler = eventQueueHandlers[normalized.cardId];
+        if (handler && typeof handler.onEnqueue === 'function') {
+          handler.onEnqueue(normalized.meta || {}, { entry: normalized });
+        }
+        notify();
+        return normalized;
+      },
+      completeQueuedEffect(cardId, payload = {}) {
+        let completed = null;
+        state.queuedEffects = state.queuedEffects.filter(entry => {
+          if (!completed && entry.cardId === cardId) {
+            completed = entry;
+            return false;
+          }
+          return true;
+        });
+        if (completed) {
+          const handler = eventQueueHandlers[completed.cardId];
+          if (handler && typeof handler.onComplete === 'function') {
+            handler.onComplete(completed.meta || {}, payload, { entry: completed });
+          }
+          state.history.unshift({ ...completed, payload, resolvedAt: Date.now() });
+          if (state.history.length > 25) {
+            state.history.length = 25;
+          }
+          notify();
+        }
+        return completed;
+      },
+      recordHistory(entry) {
+        state.history.unshift({ ...entry, recordedAt: Date.now() });
+        if (state.history.length > 25) {
+          state.history.length = 25;
+        }
+        notify();
+      },
+      clearAll({ silent = false } = {}) {
+        state.activeModifiers = [];
+        state.queuedEffects = [];
+        state.history = [];
+        if (!silent) {
+          notify();
+        }
+      },
+      replaceState(nextState = {}, { silent = false } = {}) {
+        const sanitized = sanitizeSchedulerState(nextState);
+        state.activeModifiers = sanitized.activeModifiers;
+        state.queuedEffects = sanitized.queuedEffects;
+        state.history = sanitized.history;
+        if (!silent) {
+          notify();
+        }
+      },
+      getState() {
+        return sanitizeSchedulerState(state);
+      }
+    };
+  }
+
+  function buildDefaultCampaignProgress() {
+    return {
+      id: defaultEventConfig.campaignId || null,
+      executed: []
+    };
+  }
+
+  function loadEventEngineState() {
+    const defaults = {
+      scheduler: sanitizeSchedulerState(),
+      campaignProgress: buildDefaultCampaignProgress()
+    };
+
+    try {
+      const raw = localStorage.getItem(EVENT_ENGINE_STORAGE_KEY);
+      if (!raw) {
+        return defaults;
+      }
+      const parsed = JSON.parse(raw);
+      return {
+        scheduler: sanitizeSchedulerState(parsed.scheduler || {}),
+        campaignProgress: {
+          id: typeof parsed?.campaignProgress?.id === 'string'
+            ? parsed.campaignProgress.id
+            : defaults.campaignProgress.id,
+          executed: Array.isArray(parsed?.campaignProgress?.executed)
+            ? parsed.campaignProgress.executed.slice(0, 50)
+            : []
+        }
+      };
+    } catch (error) {
+      return defaults;
+    }
+  }
+
+  let eventEngineState = loadEventEngineState();
+
+  const eventScheduler = createEventScheduler(eventEngineState.scheduler, () => {
+    eventEngineState.scheduler = eventScheduler.getState();
+    persistEventEngineState();
+    renderNarratorDashboard();
+  });
+
+  function persistEventEngineState() {
+    try {
+      const payload = {
+        scheduler: eventScheduler.getState(),
+        campaignProgress: {
+          id: eventEngineState?.campaignProgress?.id || null,
+          executed: Array.isArray(eventEngineState?.campaignProgress?.executed)
+            ? eventEngineState.campaignProgress.executed.slice(0, 50)
+            : []
+        }
+      };
+      localStorage.setItem(EVENT_ENGINE_STORAGE_KEY, JSON.stringify(payload));
+    } catch (error) {
+      // Ignore persistence errors
+    }
+  }
+
+  function setCampaignProgress(newProgress) {
+    eventEngineState.campaignProgress = {
+      id: newProgress?.id || null,
+      executed: Array.isArray(newProgress?.executed)
+        ? newProgress.executed.slice(0, 50)
+        : []
+    };
+    persistEventEngineState();
+    renderCampaignPreview();
+  }
+
+  function resetCampaignProgress(campaignId) {
+    setCampaignProgress({ id: campaignId || null, executed: [] });
+  }
+
+  function markCampaignStepExecuted(step) {
+    if (!step) {
+      return;
+    }
+    const key = `${step.night || 0}:${step.eventId || step.id}`;
+    const progress = eventEngineState.campaignProgress || buildDefaultCampaignProgress();
+    if (!Array.isArray(progress.executed)) {
+      progress.executed = [];
+    }
+    if (!progress.executed.includes(key)) {
+      progress.executed.push(key);
+      setCampaignProgress({ id: progress.id, executed: progress.executed });
+    }
+    renderCampaignPreview();
+  }
+
+  function rehydrateEventSideEffects() {
+    clearBloodMoonState();
+    clearPhoenixPulseState();
+    const schedulerState = eventScheduler.getState();
+    schedulerState.activeModifiers.forEach(modifier => {
+      const handler = eventModifierHandlers[modifier.originCardId] || eventModifierHandlers[modifier.id];
+      if (handler && typeof handler.apply === 'function') {
+        handler.apply({ modifier, fromRestore: true });
+      }
+    });
+    schedulerState.queuedEffects.forEach(entry => {
+      const handler = eventQueueHandlers[entry.cardId];
+      if (handler && typeof handler.onEnqueue === 'function') {
+        handler.onEnqueue(entry.meta || {}, { entry, fromRestore: true });
+      }
+    });
+    refreshEventUI();
+  }
+
+  function getEventEngineSnapshot() {
+    return {
+      scheduler: eventScheduler.getState(),
+      campaignProgress: {
+        id: eventEngineState?.campaignProgress?.id || null,
+        executed: Array.isArray(eventEngineState?.campaignProgress?.executed)
+          ? eventEngineState.campaignProgress.executed.slice(0, 50)
+          : []
+      }
+    };
+  }
+
+  function restoreEventEngineState(nextState) {
+    if (nextState) {
+      eventScheduler.replaceState(nextState.scheduler || {}, { silent: true });
+      setCampaignProgress(nextState.campaignProgress || {});
+    } else {
+      eventScheduler.clearAll({ silent: true });
+      setCampaignProgress(buildDefaultCampaignProgress());
+    }
+    rehydrateEventSideEffects();
   }
 
   if (bloodMoonEnabledCheckbox) {
@@ -682,26 +1284,227 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function applyGlobalEventsEnabledState() {
     if (!areRandomEventsEnabled()) {
+      eventScheduler.clearAll({ silent: true });
       clearBloodMoonState();
       clearPhoenixPulseState();
+      persistEventEngineState();
+    } else {
+      rehydrateEventSideEffects();
     }
     refreshEventUI();
+    renderNarratorDashboard();
   }
+
+  function getActiveDeckIds() {
+    return Object.entries(eventConfig.decks || {})
+      .filter(([, cfg]) => cfg && cfg.enabled !== false && Number(cfg.weight) > 0)
+      .map(([deckId]) => deckId);
+  }
+
+  function renderEventDeckControls() {
+    if (!eventDeckListEl) {
+      return;
+    }
+    const decks = eventDeckMetadata.length > 0
+      ? eventDeckMetadata
+      : [{ id: 'legacy', name: 'Standard', description: 'Blutmond & Phoenix Pulse' }];
+    eventDeckListEl.innerHTML = '';
+
+    decks.forEach(deck => {
+      const config = eventConfig.decks[deck.id] || { enabled: true, weight: 1 };
+      const entry = document.createElement('div');
+      entry.className = 'deck-config-entry';
+
+      const toggleLabel = document.createElement('label');
+      toggleLabel.className = 'config-toggle';
+      const toggleSpan = document.createElement('span');
+      toggleSpan.textContent = deck.name || deck.id;
+      const toggleInput = document.createElement('input');
+      toggleInput.type = 'checkbox';
+      toggleInput.id = `deck-toggle-${deck.id}`;
+      toggleInput.checked = config.enabled !== false && Number(config.weight) > 0;
+      toggleLabel.appendChild(toggleSpan);
+      toggleLabel.appendChild(toggleInput);
+      entry.appendChild(toggleLabel);
+
+      const sliderWrapper = document.createElement('div');
+      sliderWrapper.className = 'config-slider';
+      const sliderLabel = document.createElement('label');
+      sliderLabel.setAttribute('for', `deck-weight-${deck.id}`);
+      sliderLabel.textContent = 'Gewichtung';
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.id = `deck-weight-${deck.id}`;
+      slider.min = '0';
+      slider.max = '3';
+      slider.step = '0.5';
+      const currentWeight = Math.max(0, Number(config.weight) || 0);
+      slider.value = String(Math.min(Math.max(currentWeight, 0), 3));
+      const weightDisplay = document.createElement('span');
+      weightDisplay.className = 'deck-weight-display';
+
+      const updateWeightDisplay = () => {
+        const value = Number(slider.value);
+        weightDisplay.textContent = `${value.toFixed(1)}x`;
+        slider.disabled = !toggleInput.checked;
+      };
+
+      updateWeightDisplay();
+
+      slider.addEventListener('input', () => {
+        const value = Number(slider.value);
+        if (!eventConfig.decks[deck.id]) {
+          eventConfig.decks[deck.id] = { enabled: toggleInput.checked, weight: value };
+        } else {
+          eventConfig.decks[deck.id].weight = value;
+        }
+        if (value <= 0) {
+          toggleInput.checked = false;
+          eventConfig.decks[deck.id].enabled = false;
+        } else if (!toggleInput.checked) {
+          toggleInput.checked = true;
+          eventConfig.decks[deck.id].enabled = true;
+        }
+        updateWeightDisplay();
+      });
+
+      slider.addEventListener('change', () => {
+        saveEventConfig();
+        renderEventCardPreview();
+      });
+
+      toggleInput.addEventListener('change', () => {
+        if (!eventConfig.decks[deck.id]) {
+          eventConfig.decks[deck.id] = { enabled: true, weight: 1 };
+        }
+        eventConfig.decks[deck.id].enabled = toggleInput.checked;
+        if (!toggleInput.checked) {
+          slider.value = '0';
+          eventConfig.decks[deck.id].weight = 0;
+        } else if (Number(eventConfig.decks[deck.id].weight) <= 0) {
+          slider.value = '1';
+          eventConfig.decks[deck.id].weight = 1;
+        }
+        updateWeightDisplay();
+        saveEventConfig();
+        renderEventCardPreview();
+      });
+
+      sliderWrapper.appendChild(sliderLabel);
+      sliderWrapper.appendChild(slider);
+      sliderWrapper.appendChild(weightDisplay);
+      entry.appendChild(sliderWrapper);
+
+      if (deck.description) {
+        const helper = document.createElement('p');
+        helper.className = 'config-helper';
+        helper.textContent = deck.description;
+        entry.appendChild(helper);
+      }
+
+      eventDeckListEl.appendChild(entry);
+    });
+  }
+
+  function renderEventCardPreview() {
+    if (!eventCardPreviewListEl) {
+      return;
+    }
+    eventCardPreviewListEl.innerHTML = '';
+    const activeDecks = new Set(getActiveDeckIds());
+    const cards = eventCardDefinitions.filter(card => !card.deckId || activeDecks.has(card.deckId));
+    if (cards.length === 0) {
+      const li = document.createElement('li');
+      li.textContent = 'Keine Karten aktiviert.';
+      eventCardPreviewListEl.appendChild(li);
+      return;
+    }
+    cards.forEach(card => {
+      const li = document.createElement('li');
+      const description = card.description || '';
+      li.innerHTML = `<strong>${card.label || card.id}</strong>${description ? ` – ${description}` : ''}`;
+      eventCardPreviewListEl.appendChild(li);
+    });
+  }
+
+  function renderCampaignSelect() {
+    if (!campaignSelectEl) {
+      return;
+    }
+    campaignSelectEl.innerHTML = '';
+    const freeOption = document.createElement('option');
+    freeOption.value = '';
+    freeOption.textContent = 'Freies Spiel';
+    campaignSelectEl.appendChild(freeOption);
+
+    campaignDefinitions.forEach(campaign => {
+      if (!campaign || !campaign.id) {
+        return;
+      }
+      const option = document.createElement('option');
+      option.value = campaign.id;
+      option.textContent = campaign.name || campaign.id;
+      option.dataset.description = campaign.description || '';
+      campaignSelectEl.appendChild(option);
+    });
+
+    campaignSelectEl.value = eventConfig.campaignId || '';
+  }
+
+  function renderCampaignPreview() {
+    if (!campaignPreviewListEl) {
+      return;
+    }
+    campaignPreviewListEl.innerHTML = '';
+    const campaign = campaignDefinitions.find(entry => entry && entry.id === eventConfig.campaignId);
+    if (!campaign) {
+      const li = document.createElement('li');
+      li.textContent = 'Keine Kampagne aktiv.';
+      campaignPreviewListEl.appendChild(li);
+      return;
+    }
+    const executedKeys = new Set(eventEngineState?.campaignProgress?.executed || []);
+    const script = Array.isArray(campaign.script) ? campaign.script : [];
+    const upcoming = script.filter(step => !executedKeys.has(`${step.night || 0}:${step.eventId || step.id}`));
+    if (upcoming.length === 0) {
+      const li = document.createElement('li');
+      li.textContent = 'Alle Beats dieser Kampagne wurden erlebt.';
+      campaignPreviewListEl.appendChild(li);
+      return;
+    }
+    upcoming.sort((a, b) => (a.night || 0) - (b.night || 0));
+    upcoming.forEach(step => {
+      const li = document.createElement('li');
+      const card = eventCardDefinitions.find(entry => entry.id === step.eventId);
+      const label = card ? card.label || card.id : step.eventId;
+      const title = step.title || label;
+      const description = step.description || card?.description || '';
+      li.innerHTML = `<strong>Nacht ${step.night}</strong>: ${title}${description ? ` – ${description}` : ''}`;
+      campaignPreviewListEl.appendChild(li);
+    });
+  }
+
+  let deferInitialEventEnablement = false;
 
   if (eventsEnabledCheckbox) {
     const savedEventsEnabled = localStorage.getItem('eventsEnabled');
     if (savedEventsEnabled !== null) {
       eventsEnabledCheckbox.checked = savedEventsEnabled === 'true';
     }
-    applyGlobalEventsEnabledState();
+    deferInitialEventEnablement = true;
     eventsEnabledCheckbox.addEventListener('change', () => {
       localStorage.setItem('eventsEnabled', eventsEnabledCheckbox.checked);
       applyGlobalEventsEnabledState();
       renderNarratorDashboard();
     });
   } else {
-    applyGlobalEventsEnabledState();
+    deferInitialEventEnablement = true;
   }
+
+  renderEventDeckControls();
+  renderEventCardPreview();
+  renderCampaignSelect();
+  renderCampaignPreview();
 
   if (bloodMoonEnabledCheckbox) {
     bloodMoonEnabledCheckbox.addEventListener('change', () => {
@@ -732,6 +1535,22 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       refreshEventUI();
       renderNarratorDashboard();
+    });
+  }
+
+  if (campaignSelectEl) {
+    campaignSelectEl.addEventListener('change', () => {
+      const newId = campaignSelectEl.value || null;
+      const normalizedId = newId && newId.length > 0 ? newId : null;
+      if (eventConfig.campaignId !== normalizedId) {
+        eventConfig.campaignId = normalizedId;
+        saveEventConfig();
+        resetCampaignProgress(normalizedId);
+      } else {
+        eventConfig.campaignId = normalizedId;
+        saveEventConfig();
+      }
+      renderCampaignPreview();
     });
   }
 
@@ -2737,6 +3556,8 @@ document.addEventListener("DOMContentLoaded", () => {
     phoenixPulseRevivedPlayers = revived;
     setPhoenixPulseCharged(false);
     updatePhoenixPulseStatus();
+    eventScheduler.completeQueuedEffect('phoenix-pulse', { revived });
+    persistEventEngineState();
     renderNarratorDashboard();
 
     return revived;
@@ -2809,8 +3630,7 @@ document.addEventListener("DOMContentLoaded", () => {
       showNightStep();
     } else {
       // Nacht beendet
-      bloodMoonActive = false; // Reset blood moon event
-      document.body.classList.remove('blood-moon-active');
+      setBloodMoonState(false);
       nightMode = false;
       nightOverlay.style.display = "none";
       assignBtn.style.display = "inline-block";
@@ -3216,58 +4036,193 @@ document.addEventListener("DOMContentLoaded", () => {
     oddsEl.textContent = `Blutmond-Chance diese Nacht: ${Math.round(bloodMoonChance * 100)}%`;
   }
 
-  function triggerRandomEvents() {
-    clearPhoenixPulseState();
-    updatePhoenixPulseStatus();
+  function buildEventTriggerContext(nightNumber) {
+    return {
+      nightNumber,
+      flags: {
+        randomEventsEnabled: areRandomEventsEnabled(),
+        bloodMoonEnabled: isBloodMoonEventEnabled(),
+        phoenixEnabled: isPhoenixPulseEventEnabled()
+      },
+      state: {
+        bloodMoonActive
+      },
+      storage: {
+        getNumber(key, fallback = 0) {
+          const raw = localStorage.getItem(key);
+          if (raw === null || raw === undefined) {
+            return fallback;
+          }
+          const value = Number(raw);
+          return Number.isFinite(value) ? value : fallback;
+        },
+        setNumber(key, value) {
+          try {
+            const numeric = Number.isFinite(value) ? value : 0;
+            localStorage.setItem(key, String(numeric));
+          } catch (error) {
+            // Ignore storage errors
+          }
+        }
+      },
+      helpers: {
+        getBloodMoonChance,
+        getPhoenixPulseChance
+      },
+      random: Math.random
+    };
+  }
 
-    // If blood moon was manually triggered by admin, keep it active and skip random check.
-    if (bloodMoonActive === true) {
-        // Reset pity timer as the blood moon is happening
-        localStorage.setItem('bloodMoonPityTimer', 0);
-        updateBloodMoonOdds();
-        renderNarratorDashboard();
-        return;
+  function buildNightDeckEntries() {
+    const activeDecks = new Set(getActiveDeckIds());
+    return eventCardDefinitions
+      .map((card, index) => ({ card, index }))
+      .filter(({ card }) => {
+        if (!card || !card.id) {
+          return false;
+        }
+        if (!card.deckId) {
+          return true;
+        }
+        return activeDecks.has(card.deckId);
+      })
+      .map(({ card, index }) => {
+        const deckConfig = eventConfig.decks[card.deckId] || { enabled: true, weight: 1 };
+        const weight = Math.max(0, Number(deckConfig.weight) || 0);
+        return { card, weight, index };
+      })
+      .filter(entry => entry.weight > 0)
+      .sort((a, b) => {
+        const weightDiff = b.weight - a.weight;
+        if (Math.abs(weightDiff) > Number.EPSILON) {
+          return weightDiff;
+        }
+        return a.index - b.index;
+      });
+  }
+
+  function executeEventCard(card, meta, nightNumber, { scriptStep = null } = {}) {
+    if (!card) {
+      return;
+    }
+    const effectResult = typeof card.effect === 'function'
+      ? card.effect({
+          scheduler: eventScheduler,
+          helpers: {
+            logAction,
+            refreshEventUI,
+            setBloodMoonState,
+            clearBloodMoonState,
+            setPhoenixPulseCharged,
+            updatePhoenixPulseStatus
+          },
+          meta,
+          nightNumber,
+          scriptStep
+        }) || {}
+      : {};
+
+    if (effectResult.log) {
+      logAction(effectResult.log);
     }
 
-    // Reset all events
-    clearBloodMoonState();
+    if (effectResult.message && resultOutput) {
+      resultOutput.innerHTML += effectResult.message;
+    }
+
+    const historyEntry = {
+      night: nightNumber,
+      cardId: card.id,
+      label: card.label || card.id,
+      meta,
+      narratorNote: effectResult.narratorNote || null,
+      scriptStep: scriptStep ? { ...scriptStep } : null
+    };
+    eventScheduler.recordHistory(historyEntry);
+    persistEventEngineState();
+  }
+
+  function evaluateEventCard(card, deckWeight, nightNumber) {
+    if (!card || typeof card.trigger !== 'function') {
+      return { triggered: false, reason: 'missing-trigger' };
+    }
+    const weight = Math.max(0, Number(deckWeight) || 0);
+    if (weight <= 0) {
+      return { triggered: false, reason: 'weight-zero' };
+    }
+    const context = buildEventTriggerContext(nightNumber);
+    if (weight < 1) {
+      const gateRoll = Math.random();
+      if (gateRoll > weight) {
+        return { triggered: false, reason: 'weight-gate', gateRoll };
+      }
+    }
+    let meta = card.trigger(context) || { triggered: false };
+    if (!meta.triggered && weight > 1) {
+      const tries = Math.max(1, Math.round(weight));
+      for (let attempt = 1; attempt < tries; attempt += 1) {
+        meta = card.trigger(context) || { triggered: false };
+        if (meta.triggered) {
+          break;
+        }
+      }
+    }
+    return meta;
+  }
+
+  function triggerRandomEvents() {
+    const upcomingNightNumber = nightCounter + 1;
+    eventScheduler.clearExpiredModifiers(upcomingNightNumber);
 
     if (!areRandomEventsEnabled()) {
+      persistEventEngineState();
       renderNarratorDashboard();
       return;
     }
 
-    if (isBloodMoonEventEnabled()) {
-      let bloodMoonPityTimer = parseInt(localStorage.getItem('bloodMoonPityTimer') || '0', 10);
-      if (!Number.isFinite(bloodMoonPityTimer) || bloodMoonPityTimer < 0) {
-        bloodMoonPityTimer = 0;
-      }
-      const bloodMoonChance = getBloodMoonChance(bloodMoonPityTimer);
-
-      if (Math.random() < bloodMoonChance) {
-        bloodMoonActive = true;
-        bloodMoonPityTimer = 0;
-      } else {
-        bloodMoonPityTimer++;
-      }
-      localStorage.setItem('bloodMoonPityTimer', bloodMoonPityTimer);
+    const forcedCardIds = new Set();
+    const campaign = campaignDefinitions.find(entry => entry && entry.id === eventConfig.campaignId);
+    if (campaign) {
+      const executedKeys = new Set(eventEngineState?.campaignProgress?.executed || []);
+      const script = Array.isArray(campaign.script) ? campaign.script : [];
+      script
+        .filter(step => step && step.eventId && step.night === upcomingNightNumber)
+        .forEach(step => {
+          const key = `${step.night || 0}:${step.eventId}`;
+          if (executedKeys.has(key)) {
+            return;
+          }
+          const card = eventCardDefinitions.find(entry => entry.id === step.eventId);
+          if (!card) {
+            return;
+          }
+          forcedCardIds.add(card.id);
+          const meta = { triggered: true, forced: true, script: step };
+          executeEventCard(card, meta, upcomingNightNumber, { scriptStep: step });
+          markCampaignStepExecuted(step);
+        });
     }
 
-    updateBloodMoonOdds();
-
-    if (isPhoenixPulseEventEnabled() && Math.random() < getPhoenixPulseChance()) {
-      phoenixPulsePending = true;
-      setPhoenixPulseCharged(true);
-      updatePhoenixPulseStatus();
-      if (resultOutput) {
-        resultOutput.innerHTML += '<br><strong>🔥 Phoenix Pulse:</strong> Eine uralte Energie sammelt sich in dieser Nacht.';
-      }
-      logAction({
-        type: 'event',
-        label: 'Phoenix Pulse geladen',
-        detail: 'Event aktiviert – Nachtopfer werden bei Tagesanbruch wiederbelebt.'
-      });
+  const deckEntries = buildNightDeckEntries();
+  deckEntries.forEach(entry => {
+    if (forcedCardIds.has(entry.card.id)) {
+      return;
     }
+      const meta = evaluateEventCard(entry.card, entry.weight, upcomingNightNumber);
+      if (meta && meta.triggered) {
+        executeEventCard(entry.card, meta, upcomingNightNumber);
+      } else if (meta && meta.reason !== 'disabled') {
+        eventScheduler.recordHistory({
+          night: upcomingNightNumber,
+          cardId: entry.card.id,
+          label: entry.card.label || entry.card.id,
+          meta,
+          narratorNote: null
+        });
+      }
+    });
+
+    persistEventEngineState();
     renderNarratorDashboard();
   }
 
@@ -3708,7 +4663,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const lastUsedOptions = {
       players: playersRaw,
       roles: roleSetup,
-      jobConfig: { bodyguardChance: jobConfig.bodyguardChance, doctorChance: jobConfig.doctorChance }
+      jobConfig: { bodyguardChance: jobConfig.bodyguardChance, doctorChance: jobConfig.doctorChance },
+      eventEngineState: getEventEngineSnapshot()
     };
     localStorage.setItem('werwolfLastUsed', JSON.stringify(lastUsedOptions));
 
@@ -4215,7 +5171,7 @@ document.addEventListener("DOMContentLoaded", () => {
     silencedPlayer = session.silencedPlayer || null;
     healRemaining = session.healRemaining !== undefined ? session.healRemaining : 1;
     poisonRemaining = session.poisonRemaining !== undefined ? session.poisonRemaining : 1;
-    bloodMoonActive = session.bloodMoonActive || false;
+    setBloodMoonState(!!session.bloodMoonActive);
     phoenixPulsePending = !!session.phoenixPulsePending;
     phoenixPulseJustResolved = !!session.phoenixPulseJustResolved;
     phoenixPulseRevivedPlayers = Array.isArray(session.phoenixPulseRevivedPlayers)
@@ -4256,6 +5212,11 @@ document.addEventListener("DOMContentLoaded", () => {
       ? session.doctorLastHealedNight
       : null;
     updateDoctorPlayers();
+    if (session.eventEngineState) {
+      restoreEventEngineState(session.eventEngineState);
+    } else {
+      persistEventEngineState();
+    }
     bodyguardProtectionTarget = session.bodyguardProtectionTarget || null;
     bodyguardProtectionNight = Number.isFinite(session.bodyguardProtectionNight)
       ? session.bodyguardProtectionNight
@@ -4600,6 +5561,14 @@ document.addEventListener("DOMContentLoaded", () => {
           : '';
         events.push(`Letzter Checkpoint: ${lastCheckpoint.label}${timeLabel ? ` (${timeLabel})` : ''}`);
       }
+      const schedulerSnapshot = eventScheduler.getState();
+      schedulerSnapshot.activeModifiers.forEach(modifier => {
+        events.push(`Modifikator: ${modifier.label}`);
+      });
+      schedulerSnapshot.queuedEffects.forEach(entry => {
+        const nightLabel = entry.night ? ` (Nacht ${entry.night})` : '';
+        events.push(`Geplant: ${entry.label}${nightLabel}`);
+      });
       if (events.length === 0) {
         events.push('Keine offenen Ereignisse');
       }
@@ -4702,7 +5671,8 @@ document.addEventListener("DOMContentLoaded", () => {
       doctorLastHealedNight,
       jobsAssigned: jobsAssigned.map(jobs => Array.isArray(jobs) ? jobs.slice() : []),
       jobConfig: { bodyguardChance: jobConfig.bodyguardChance, doctorChance: jobConfig.doctorChance },
-      firstNightShieldUsed
+      firstNightShieldUsed,
+      eventEngineState: getEventEngineSnapshot()
     };
   }
 
@@ -4778,7 +5748,7 @@ document.addEventListener("DOMContentLoaded", () => {
     silencedPlayer = snapshot.silencedPlayer;
     healRemaining = snapshot.healRemaining;
     poisonRemaining = snapshot.poisonRemaining;
-    bloodMoonActive = snapshot.bloodMoonActive;
+    setBloodMoonState(!!snapshot.bloodMoonActive);
     phoenixPulsePending = !!snapshot.phoenixPulsePending;
     phoenixPulseJustResolved = !!snapshot.phoenixPulseJustResolved;
     phoenixPulseRevivedPlayers = Array.isArray(snapshot.phoenixPulseRevivedPlayers)
@@ -4825,6 +5795,11 @@ document.addEventListener("DOMContentLoaded", () => {
       ? snapshot.doctorLastHealedNight
       : null;
     updateDoctorPlayers();
+    if (snapshot.eventEngineState) {
+      restoreEventEngineState(snapshot.eventEngineState);
+    } else {
+      persistEventEngineState();
+    }
     bodyguardProtectionTarget = snapshot.bodyguardProtectionTarget || null;
     bodyguardProtectionNight = Number.isFinite(snapshot.bodyguardProtectionNight)
       ? snapshot.bodyguardProtectionNight
@@ -5811,21 +6786,51 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
-      bloodMoonActive = true;
+      setBloodMoonState(true);
       syncBloodMoonUI({ silent: true });
       showConfirmation('Blutmond aktiviert', 'Der Blutmond wurde für die nächste Nacht manuell aktiviert.', () => {}, 'Okay', false);
+
+      eventScheduler.addModifier({
+        id: 'blood-moon-manual',
+        originCardId: 'blood-moon',
+        label: '🌕 Blutmond (manuell)',
+        expiresAfterNight: nightCounter + 1
+      });
+      try {
+        localStorage.setItem('bloodMoonPityTimer', '0');
+      } catch (error) {
+        // ignore
+      }
+      persistEventEngineState();
+      renderNarratorDashboard();
 
       recordAction({
         type: 'admin',
         label: 'Blutmond manuell aktiviert',
         detail: 'Gilt für die kommende Nacht.',
         undo: () => {
-          bloodMoonActive = wasActive;
+          setBloodMoonState(wasActive);
           syncBloodMoonUI({ silent: true });
+          eventScheduler.removeModifier('blood-moon-manual');
+          persistEventEngineState();
+          renderNarratorDashboard();
         },
         redo: () => {
-          bloodMoonActive = true;
+          setBloodMoonState(true);
           syncBloodMoonUI({ silent: true });
+          eventScheduler.addModifier({
+            id: 'blood-moon-manual',
+            originCardId: 'blood-moon',
+            label: '🌕 Blutmond (manuell)',
+            expiresAfterNight: nightCounter + 1
+          });
+          try {
+            localStorage.setItem('bloodMoonPityTimer', '0');
+          } catch (error) {
+            // ignore
+          }
+          persistEventEngineState();
+          renderNarratorDashboard();
         }
       });
     });
@@ -5923,7 +6928,8 @@ document.addEventListener("DOMContentLoaded", () => {
           doctorLastHealedTarget,
           doctorLastHealedNight,
           jobsAssigned: jobsAssigned.map(jobs => Array.isArray(jobs) ? jobs.slice() : []),
-          jobConfig: { bodyguardChance: jobConfig.bodyguardChance, doctorChance: jobConfig.doctorChance }
+          jobConfig: { bodyguardChance: jobConfig.bodyguardChance, doctorChance: jobConfig.doctorChance },
+          eventEngineState: getEventEngineSnapshot()
         };
       },
       setState(partial = {}) {
@@ -5957,7 +6963,7 @@ document.addEventListener("DOMContentLoaded", () => {
           poisonRemaining = partial.poisonRemaining;
         }
         if ('bloodMoonActive' in partial) {
-          bloodMoonActive = partial.bloodMoonActive;
+          setBloodMoonState(!!partial.bloodMoonActive);
         }
         if ('phoenixPulsePending' in partial) {
           phoenixPulsePending = !!partial.phoenixPulsePending;
@@ -5970,6 +6976,9 @@ document.addEventListener("DOMContentLoaded", () => {
         if (Array.isArray(partial.phoenixPulseRevivedPlayers)) {
           phoenixPulseRevivedPlayers = partial.phoenixPulseRevivedPlayers.slice();
           phoenixStateChanged = true;
+        }
+        if (partial.eventEngineState) {
+          restoreEventEngineState(partial.eventEngineState);
         }
         if ('firstNightShieldUsed' in partial) {
           firstNightShieldUsed = !!partial.firstNightShieldUsed;
@@ -6121,11 +7130,25 @@ document.addEventListener("DOMContentLoaded", () => {
       getActionLog() {
         return actionLog.slice();
       },
-      phaseTimerManager
+      phaseTimerManager,
+      getEventEngineState() {
+        return getEventEngineSnapshot();
+      },
+      triggerNightEvents() {
+        const upcomingNight = nightCounter + 1;
+        triggerRandomEvents();
+        nightCounter = upcomingNight;
+      },
+      resolvePhoenixPulse: applyPhoenixPulseRevival
     };
   }
 
-  updatePhoenixPulseStatus();
+  if (deferInitialEventEnablement) {
+    applyGlobalEventsEnabledState();
+  } else {
+    refreshEventUI();
+  }
+
   renderNarratorDashboard();
 
 });
