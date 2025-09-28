@@ -232,6 +232,14 @@ function requireAuthForApi(req, res, next) {
   return next();
 }
 
+function ensureAdmin(req, res) {
+  if (!req.user || !req.user.isAdmin) {
+    res.status(403).json({ error: 'Nur Admins dürfen diese Aktion ausführen.' });
+    return false;
+  }
+  return true;
+}
+
 function normalizeTheme(theme) {
   if (typeof theme !== 'string') {
     return null;
@@ -241,6 +249,164 @@ function normalizeTheme(theme) {
     return trimmed;
   }
   return null;
+}
+
+function normalizeOptionalString(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeRoleKind(kind) {
+  const normalized = normalizeOptionalString(kind);
+  if (!normalized) {
+    return 'role';
+  }
+  const lower = normalized.toLowerCase();
+  if (lower === 'role' || lower === 'ability') {
+    return lower;
+  }
+  return null;
+}
+
+function normalizeRoleFaction(faction) {
+  const normalized = normalizeOptionalString(faction);
+  if (!normalized) {
+    return null;
+  }
+  const lower = normalized.toLowerCase();
+  if (lower === 'village' || lower === 'werwolf' || lower === 'special') {
+    return lower;
+  }
+  return null;
+}
+
+function parseOptionalInteger(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) {
+    return null;
+  }
+  const intValue = Math.trunc(numberValue);
+  return intValue;
+}
+
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeRoleLimits(limits) {
+  if (!isPlainObject(limits)) {
+    return {};
+  }
+  const result = {};
+  const keys = ['minPlayers', 'maxPlayers', 'maxPerGame'];
+  keys.forEach((key) => {
+    if (!Object.prototype.hasOwnProperty.call(limits, key)) {
+      return;
+    }
+    const value = limits[key];
+    if (value === null || value === undefined || value === '') {
+      return;
+    }
+    const parsed = parseOptionalInteger(value);
+    if (parsed === null) {
+      return;
+    }
+    result[key] = Math.max(parsed, 0);
+  });
+  return result;
+}
+
+function normalizeRoleHooks(hooks) {
+  if (hooks === null || hooks === undefined) {
+    return [];
+  }
+  const rawList = Array.isArray(hooks) ? hooks : [hooks];
+  const normalized = [];
+  rawList.forEach((entry) => {
+    if (typeof entry !== 'string') {
+      return;
+    }
+    const trimmed = entry.trim();
+    if (!trimmed) {
+      return;
+    }
+    if (!normalized.includes(trimmed)) {
+      normalized.push(trimmed);
+    }
+  });
+  return normalized;
+}
+
+function normalizeRolePayload(payload) {
+  if (!isPlainObject(payload)) {
+    return null;
+  }
+
+  const name = normalizeOptionalString(payload.name);
+  if (!name) {
+    return null;
+  }
+
+  const kind = normalizeRoleKind(payload.kind) || 'role';
+  if (!kind) {
+    return null;
+  }
+
+  const faction = normalizeRoleFaction(payload.faction);
+  const description = normalizeOptionalString(payload.description);
+  const nightPrompt = normalizeOptionalString(payload.nightPrompt);
+  const nightAction = normalizeOptionalString(payload.nightAction);
+  const nightOrder = parseOptionalInteger(payload.nightOrder);
+  const abilityScriptRaw = typeof payload.abilityScript === 'string' ? payload.abilityScript : null;
+  const abilityScript = abilityScriptRaw && abilityScriptRaw.trim().length > 0 ? abilityScriptRaw : null;
+  const limits = normalizeRoleLimits(payload.limits);
+  const hooks = normalizeRoleHooks(payload.hooks);
+  const metadata = isPlainObject(payload.metadata) ? payload.metadata : {};
+
+  return {
+    name,
+    kind,
+    faction,
+    description,
+    nightOrder,
+    nightPrompt,
+    nightAction,
+    limits,
+    abilityScript,
+    hooks,
+    metadata,
+  };
+}
+
+function formatRoleRow(row) {
+  if (!row) {
+    return null;
+  }
+  const hooks = Array.isArray(row.hooks) ? row.hooks : normalizeRoleHooks(row.hooks);
+  const limits = isPlainObject(row.limits) ? row.limits : {};
+  const metadata = isPlainObject(row.metadata) ? row.metadata : {};
+  return {
+    id: row.id,
+    name: row.name,
+    kind: row.kind,
+    faction: row.faction,
+    description: row.description,
+    nightOrder: row.night_order,
+    nightPrompt: row.night_prompt,
+    nightAction: row.night_action,
+    limits,
+    abilityScript: row.ability_script,
+    hooks,
+    metadata,
+    createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+    updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+  };
 }
 
 async function getSetting(key) {
@@ -452,6 +618,147 @@ app.put('/api/role-presets', async (req, res) => {
     res.json({ roles });
   } catch (error) {
     res.status(500).json({ error: 'Gespeicherte Rollen konnten nicht abgelegt werden.' });
+  }
+});
+
+app.get('/api/roles', async (req, res) => {
+  try {
+    const result = await query(
+      `SELECT id, name, kind, faction, description, night_order, night_prompt, night_action,
+              limits, ability_script, hooks, metadata, created_at, updated_at
+         FROM role_catalog
+        ORDER BY LOWER(name)`
+    );
+    const roles = result.rows.map(formatRoleRow).filter(Boolean);
+    res.json({ roles });
+  } catch (error) {
+    console.error('Rollenkatalog konnte nicht geladen werden:', error);
+    res.status(500).json({ error: 'Rollenkatalog konnte nicht geladen werden.' });
+  }
+});
+
+app.post('/api/roles', async (req, res) => {
+  if (!ensureAdmin(req, res)) {
+    return;
+  }
+  const normalized = normalizeRolePayload(req.body?.role || req.body);
+  if (!normalized) {
+    return res.status(400).json({ error: 'Ungültige Rollendaten.' });
+  }
+
+  try {
+    const result = await query(
+      `INSERT INTO role_catalog
+         (name, kind, faction, description, night_order, night_prompt, night_action,
+          limits, ability_script, hooks, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       RETURNING id, name, kind, faction, description, night_order, night_prompt, night_action,
+                 limits, ability_script, hooks, metadata, created_at, updated_at`,
+      [
+        normalized.name,
+        normalized.kind,
+        normalized.faction,
+        normalized.description,
+        normalized.nightOrder,
+        normalized.nightPrompt,
+        normalized.nightAction,
+        normalized.limits,
+        normalized.abilityScript,
+        normalized.hooks,
+        normalized.metadata,
+      ]
+    );
+    const role = formatRoleRow(result.rows[0]);
+    res.status(201).json({ role });
+  } catch (error) {
+    if (error?.code === '23505') {
+      return res.status(409).json({ error: 'Es existiert bereits eine Rolle mit diesem Namen.' });
+    }
+    console.error('Rolle konnte nicht gespeichert werden:', error);
+    res.status(500).json({ error: 'Rolle konnte nicht gespeichert werden.' });
+  }
+});
+
+app.put('/api/roles/:id', async (req, res) => {
+  if (!ensureAdmin(req, res)) {
+    return;
+  }
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ error: 'Ungültige Rollen-ID.' });
+  }
+
+  const normalized = normalizeRolePayload(req.body?.role || req.body);
+  if (!normalized) {
+    return res.status(400).json({ error: 'Ungültige Rollendaten.' });
+  }
+
+  try {
+    const result = await query(
+      `UPDATE role_catalog
+          SET name = $1,
+              kind = $2,
+              faction = $3,
+              description = $4,
+              night_order = $5,
+              night_prompt = $6,
+              night_action = $7,
+              limits = $8,
+              ability_script = $9,
+              hooks = $10,
+              metadata = $11
+        WHERE id = $12
+        RETURNING id, name, kind, faction, description, night_order, night_prompt, night_action,
+                  limits, ability_script, hooks, metadata, created_at, updated_at`,
+      [
+        normalized.name,
+        normalized.kind,
+        normalized.faction,
+        normalized.description,
+        normalized.nightOrder,
+        normalized.nightPrompt,
+        normalized.nightAction,
+        normalized.limits,
+        normalized.abilityScript,
+        normalized.hooks,
+        normalized.metadata,
+        id,
+      ]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Rolle wurde nicht gefunden.' });
+    }
+
+    const role = formatRoleRow(result.rows[0]);
+    res.json({ role });
+  } catch (error) {
+    if (error?.code === '23505') {
+      return res.status(409).json({ error: 'Es existiert bereits eine Rolle mit diesem Namen.' });
+    }
+    console.error('Rolle konnte nicht aktualisiert werden:', error);
+    res.status(500).json({ error: 'Rolle konnte nicht aktualisiert werden.' });
+  }
+});
+
+app.delete('/api/roles/:id', async (req, res) => {
+  if (!ensureAdmin(req, res)) {
+    return;
+  }
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ error: 'Ungültige Rollen-ID.' });
+  }
+
+  try {
+    const result = await query('DELETE FROM role_catalog WHERE id = $1', [id]);
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Rolle wurde nicht gefunden.' });
+    }
+    res.status(204).end();
+  } catch (error) {
+    console.error('Rolle konnte nicht entfernt werden:', error);
+    res.status(500).json({ error: 'Rolle konnte nicht entfernt werden.' });
   }
 });
 

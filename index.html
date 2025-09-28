@@ -377,6 +377,96 @@ Carla
             <select id="admin-change-role-role-select"></select>
             <button id="admin-change-role-btn" class="secondary-btn">Ändern</button>
         </div>
+        <div class="admin-section role-catalog-section">
+            <h5>Rollen-Katalog</h5>
+            <div class="role-catalog-toolbar">
+                <label class="sr-only" for="role-catalog-select">Rolle auswählen</label>
+                <select id="role-catalog-select"></select>
+                <button id="role-catalog-new-btn" type="button" class="secondary-btn small-btn">Neu</button>
+                <button id="role-catalog-delete-btn" type="button" class="secondary-btn small-btn">Löschen</button>
+            </div>
+            <form id="role-editor-form" class="role-editor-form">
+                <div class="form-row">
+                    <label for="role-editor-name">Name</label>
+                    <input id="role-editor-name" type="text" autocomplete="off" required />
+                </div>
+                <div class="form-row triple">
+                    <div class="form-field">
+                        <label for="role-editor-kind">Typ</label>
+                        <select id="role-editor-kind">
+                            <option value="role">Rolle</option>
+                            <option value="ability">Fähigkeit</option>
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label for="role-editor-faction">Fraktion</label>
+                        <select id="role-editor-faction">
+                            <option value="">–</option>
+                            <option value="village">Dorf</option>
+                            <option value="werwolf">Werwolf</option>
+                            <option value="special">Sonder</option>
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label for="role-editor-night-order">Nacht-Reihenfolge</label>
+                        <input id="role-editor-night-order" type="number" min="0" step="1" />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <label for="role-editor-description">Beschreibung</label>
+                    <textarea id="role-editor-description" rows="2"></textarea>
+                </div>
+                <div class="form-row">
+                    <label for="role-editor-night-prompt">Nacht-Ansage</label>
+                    <textarea id="role-editor-night-prompt" rows="2"></textarea>
+                </div>
+                <div class="form-row">
+                    <label for="role-editor-night-action">Automatisierungs-Hinweis</label>
+                    <textarea id="role-editor-night-action" rows="2"></textarea>
+                </div>
+                <div class="form-row">
+                    <label for="role-editor-ability-script">Script (Tests &amp; Automatisierung)</label>
+                    <textarea id="role-editor-ability-script" rows="3" spellcheck="false"></textarea>
+                </div>
+                <fieldset class="role-editor-fieldset">
+                    <legend>Hooks</legend>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="role-hook-night-sequence" data-role-hook value="nightSequence" />
+                        Teil der Nachtsequenz
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="role-hook-bodyguard" data-role-hook value="job:bodyguardEligible" />
+                        Bodyguard-Job möglich
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="role-hook-doctor" data-role-hook value="job:doctorEligible" />
+                        Arzt-Job möglich
+                    </label>
+                </fieldset>
+                <fieldset class="role-editor-fieldset">
+                    <legend>Limits</legend>
+                    <div class="form-row triple">
+                        <div class="form-field">
+                            <label for="role-limit-min">Min. Spielende</label>
+                            <input id="role-limit-min" type="number" min="0" step="1" />
+                        </div>
+                        <div class="form-field">
+                            <label for="role-limit-max">Max. Spielende</label>
+                            <input id="role-limit-max" type="number" min="0" step="1" />
+                        </div>
+                        <div class="form-field">
+                            <label for="role-limit-copies">Max. Kopien</label>
+                            <input id="role-limit-copies" type="number" min="0" step="1" />
+                        </div>
+                    </div>
+                </fieldset>
+                <div class="role-editor-actions">
+                    <button id="role-editor-reset-btn" type="button" class="secondary-btn small-btn">Zurücksetzen</button>
+                    <button id="role-editor-save-btn" type="submit" class="primary-btn small-btn">Speichern</button>
+                </div>
+            </form>
+            <p id="role-editor-status" class="admin-helper-text role-editor-status" aria-live="polite"></p>
+        </div>
         <div class="admin-section dashboard-section">
             <h5>Spielleiter-Dashboard</h5>
             <div id="narrator-dashboard" class="narrator-dashboard" aria-live="polite">

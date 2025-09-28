@@ -201,6 +201,35 @@ const apiClient = (() => {
         return roles;
       },
     },
+    roles: {
+      async list() {
+        const data = await request('/roles');
+        return Array.isArray(data?.roles) ? data.roles : [];
+      },
+      async create(role) {
+        const data = await request('/roles', {
+          method: 'POST',
+          body: JSON.stringify({ role }),
+        });
+        return data?.role ?? null;
+      },
+      async update(id, role) {
+        if (!Number.isFinite(Number(id))) {
+          throw new Error('Ungültige Rollen-ID.');
+        }
+        const data = await request(`/roles/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          body: JSON.stringify({ role }),
+        });
+        return data?.role ?? null;
+      },
+      async remove(id) {
+        if (!Number.isFinite(Number(id))) {
+          throw new Error('Ungültige Rollen-ID.');
+        }
+        await request(`/roles/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      },
+    },
     sessions: {
       async list() {
         const data = await request('/sessions');
@@ -256,6 +285,466 @@ const apiClient = (() => {
     },
   };
 })();
+
+const jobDescriptions = {
+  Bodyguard: 'Wählt jede Nacht eine Person und schützt sie vor Angriffen der Werwölfe.',
+  Doctor: 'Wacht nach einer blutigen Nacht auf und kann eine der Opferpersonen zurück ins Leben holen.'
+};
+
+const ROLE_FACTIONS = new Set(['village', 'werwolf', 'special']);
+const ROLE_HOOKS = {
+  NIGHT_SEQUENCE: 'nightSequence',
+  JOB_BODYGUARD: 'job:bodyguardEligible',
+  JOB_DOCTOR: 'job:doctorEligible'
+};
+
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function clonePlainObject(value) {
+  if (!isPlainObject(value)) {
+    return {};
+  }
+  return JSON.parse(JSON.stringify(value));
+}
+
+const BUNDLED_ROLE_ENTRIES = [
+  {
+    name: 'Dorfbewohner',
+    kind: 'role',
+    faction: 'village',
+    description: 'Gewinnt, wenn alle Werwölfe eliminiert sind.',
+    hooks: [ROLE_HOOKS.JOB_BODYGUARD, ROLE_HOOKS.JOB_DOCTOR]
+  },
+  {
+    name: 'Seer',
+    kind: 'role',
+    faction: 'village',
+    description: 'Kann jede Nacht die Rolle eines Spielers sehen.',
+    hooks: [ROLE_HOOKS.NIGHT_SEQUENCE, ROLE_HOOKS.JOB_BODYGUARD, ROLE_HOOKS.JOB_DOCTOR],
+    nightOrder: 6,
+    nightPrompt: 'Der Seher wacht auf. Bitte wähle eine Person zum Ansehen.'
+  },
+  {
+    name: 'Jäger',
+    kind: 'role',
+    faction: 'village',
+    description: 'Darf vor seinem Tod einen Spieler erschießen.',
+    hooks: [ROLE_HOOKS.JOB_BODYGUARD, ROLE_HOOKS.JOB_DOCTOR]
+  },
+  {
+    name: 'Hexe',
+    kind: 'role',
+    faction: 'village',
+    description: 'Hat einen Heil- und einen Gifttrank.',
+    hooks: [ROLE_HOOKS.NIGHT_SEQUENCE, ROLE_HOOKS.JOB_BODYGUARD, ROLE_HOOKS.JOB_DOCTOR],
+    nightOrder: 9,
+    nightPrompt: 'Die Hexe wacht auf. Entscheide Heil- oder Gifttrank.'
+  },
+  {
+    name: 'Stumme Jule',
+    kind: 'role',
+    faction: 'village',
+    description: 'Wählt jede Nacht jemanden, der bis zum nächsten Tag nicht reden darf.',
+    hooks: [ROLE_HOOKS.NIGHT_SEQUENCE, ROLE_HOOKS.JOB_BODYGUARD, ROLE_HOOKS.JOB_DOCTOR],
+    nightOrder: 10,
+    nightPrompt: 'Stumme Jule wacht auf. Wähle eine Person, die nicht reden darf.'
+  },
+  {
+    name: 'Inquisitor',
+    kind: 'role',
+    faction: 'village',
+    description: 'Kann jede Nacht prüfen, ob jemand zur Werwolf-Fraktion gehört.',
+    hooks: [ROLE_HOOKS.NIGHT_SEQUENCE, ROLE_HOOKS.JOB_BODYGUARD, ROLE_HOOKS.JOB_DOCTOR],
+    nightOrder: 7,
+    nightPrompt: 'Der Inquisitor wacht auf. Wähle eine Person zum Befragen.'
+  },
+  {
+    name: 'Sündenbock',
+    kind: 'role',
+    faction: 'village',
+    description: 'Wird anstelle der anderen Spieler gelyncht, wenn es bei der Abstimmung einen Gleichstand gibt.',
+    hooks: [ROLE_HOOKS.JOB_BODYGUARD, ROLE_HOOKS.JOB_DOCTOR]
+  },
+  {
+    name: 'Geschwister',
+    kind: 'role',
+    faction: 'village',
+    description: 'Zwei Dorfbewohner, die sich gegenseitig kennen.',
+    hooks: [ROLE_HOOKS.NIGHT_SEQUENCE, ROLE_HOOKS.JOB_BODYGUARD, ROLE_HOOKS.JOB_DOCTOR],
+    nightOrder: 4,
+    nightPrompt: 'Die Geschwister wachen auf und sehen sich.'
+  },
+  {
+    name: 'Geist',
+    kind: 'role',
+    faction: 'village',
+    description: 'Kann nach seinem Tod weiterhin eine Nachricht an die Lebenden senden.',
+    hooks: [ROLE_HOOKS.JOB_BODYGUARD, ROLE_HOOKS.JOB_DOCTOR]
+  },
+  {
+    name: 'Werwolf',
+    kind: 'role',
+    faction: 'werwolf',
+    description: 'Gewinnt, wenn sie alle Dorfbewohner eliminieren.',
+    hooks: [ROLE_HOOKS.NIGHT_SEQUENCE],
+    nightOrder: 8,
+    nightPrompt: 'Werwölfe wachen auf. Sucht euer Opfer.'
+  },
+  {
+    name: 'Verfluchte',
+    kind: 'role',
+    faction: 'werwolf',
+    description: 'Startet als Dorfbewohner, wird aber zum Werwolf, wenn er von Werwölfen angegriffen wird.',
+    hooks: [ROLE_HOOKS.JOB_BODYGUARD, ROLE_HOOKS.JOB_DOCTOR]
+  },
+  {
+    name: 'Amor',
+    kind: 'role',
+    faction: 'special',
+    description: 'Verknüpft zwei Liebende, die gemeinsam gewinnen.',
+    hooks: [ROLE_HOOKS.NIGHT_SEQUENCE],
+    nightOrder: 5,
+    nightPrompt: 'Amor wacht auf. Bitte wähle zwei Liebende.'
+  },
+  {
+    name: 'Trickster',
+    kind: 'role',
+    faction: 'special',
+    description: 'Gewinnt, wenn er gelyncht wird, bevor die Werwölfe gewinnen.',
+    hooks: []
+  },
+  {
+    name: 'Henker',
+    kind: 'role',
+    faction: 'special',
+    description: 'Gewinnt, wenn sein geheimes Ziel vom Dorf gelyncht wird. Spielt für sich allein.',
+    hooks: [ROLE_HOOKS.NIGHT_SEQUENCE],
+    nightOrder: 3,
+    nightPrompt: 'Der Henker wacht auf und erfährt sein Ziel.'
+  },
+  {
+    name: 'Friedenstifter',
+    kind: 'role',
+    faction: 'special',
+    description: 'Gewinnt, wenn für zwei aufeinanderfolgende Runden (Tag und Nacht) niemand stirbt.',
+    hooks: [ROLE_HOOKS.JOB_BODYGUARD, ROLE_HOOKS.JOB_DOCTOR]
+  },
+  {
+    name: 'Michael Jackson',
+    kind: 'role',
+    faction: 'special',
+    description: 'Dorfbewohner-Sonderrolle: Ab der ersten Beschuldigung zählt seine Stimme doppelt, bei der zweiten Beschuldigung stirbt er sofort.',
+    hooks: [ROLE_HOOKS.JOB_BODYGUARD, ROLE_HOOKS.JOB_DOCTOR]
+  },
+  {
+    name: 'Bodyguard',
+    kind: 'ability',
+    faction: null,
+    description: jobDescriptions.Bodyguard,
+    hooks: [ROLE_HOOKS.NIGHT_SEQUENCE],
+    nightOrder: 1,
+    nightPrompt: 'Der Bodyguard wacht auf. Bitte wähle eine Person zum Beschützen.'
+  },
+  {
+    name: 'Doctor',
+    kind: 'ability',
+    faction: null,
+    description: jobDescriptions.Doctor,
+    hooks: [ROLE_HOOKS.NIGHT_SEQUENCE],
+    nightOrder: 2,
+    nightPrompt: 'Der Arzt wacht auf. Du darfst eine der Opferpersonen der letzten Nacht heilen.'
+  }
+];
+
+const BUNDLED_NIGHT_PROMPTS = {};
+const BUNDLED_NIGHT_ORDER = new Map();
+
+BUNDLED_ROLE_ENTRIES.forEach((entry, index) => {
+  if (entry && typeof entry.name === 'string') {
+    if (typeof entry.nightPrompt === 'string' && entry.nightPrompt.trim().length > 0) {
+      BUNDLED_NIGHT_PROMPTS[entry.name] = entry.nightPrompt;
+    }
+    if (Number.isFinite(entry.nightOrder)) {
+      BUNDLED_NIGHT_ORDER.set(entry.name, entry.nightOrder);
+    } else {
+      BUNDLED_NIGHT_ORDER.set(entry.name, index + 100);
+    }
+  }
+});
+
+let roleCatalogEntries = [];
+let roleCatalogByName = new Map();
+let categorizedRoles = { village: [], werwolf: [], special: [] };
+let roleDescriptions = {};
+let jobEligibility = { bodyguard: new Set(), doctor: new Set() };
+let nightSequence = [];
+let nightTexts = { ...BUNDLED_NIGHT_PROMPTS };
+
+function getFallbackNightOrder(name) {
+  if (!name) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+  if (BUNDLED_NIGHT_ORDER.has(name)) {
+    return BUNDLED_NIGHT_ORDER.get(name);
+  }
+  return Number.MAX_SAFE_INTEGER;
+}
+
+function normalizeCatalogEntry(entry, defaultSource = 'database') {
+  if (!entry || typeof entry !== 'object') {
+    return null;
+  }
+
+  const rawName = typeof entry.name === 'string' ? entry.name.trim() : '';
+  if (!rawName) {
+    return null;
+  }
+
+  const rawKind = typeof entry.kind === 'string' ? entry.kind.trim().toLowerCase() : 'role';
+  const kind = rawKind === 'ability' ? 'ability' : 'role';
+
+  const rawFaction = typeof entry.faction === 'string' ? entry.faction.trim().toLowerCase() : null;
+  const faction = ROLE_FACTIONS.has(rawFaction) ? rawFaction : null;
+
+  const description = typeof entry.description === 'string' && entry.description.trim().length > 0
+    ? entry.description.trim()
+    : null;
+
+  const nightOrder = Number.isFinite(Number(entry.nightOrder))
+    ? Math.trunc(Number(entry.nightOrder))
+    : null;
+
+  const nightPrompt = typeof entry.nightPrompt === 'string' && entry.nightPrompt.trim().length > 0
+    ? entry.nightPrompt.trim()
+    : null;
+
+  const nightAction = typeof entry.nightAction === 'string' && entry.nightAction.trim().length > 0
+    ? entry.nightAction.trim()
+    : null;
+
+  const abilityScript = typeof entry.abilityScript === 'string' && entry.abilityScript.trim().length > 0
+    ? entry.abilityScript
+    : null;
+
+  const limits = (() => {
+    if (!isPlainObject(entry.limits)) {
+      return {};
+    }
+    const result = {};
+    Object.entries(entry.limits).forEach(([key, value]) => {
+      if (value === null || value === undefined || value === '') {
+        return;
+      }
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) {
+        return;
+      }
+      result[key] = Math.max(0, Math.trunc(numeric));
+    });
+    return result;
+  })();
+
+  const hooks = (() => {
+    if (Array.isArray(entry.hooks)) {
+      return entry.hooks
+        .filter((hook) => typeof hook === 'string')
+        .map((hook) => hook.trim())
+        .filter((hook, index, array) => hook.length > 0 && array.indexOf(hook) === index);
+    }
+    if (typeof entry.hooks === 'string') {
+      const trimmed = entry.hooks.trim();
+      return trimmed ? [trimmed] : [];
+    }
+    return [];
+  })();
+
+  const metadata = isPlainObject(entry.metadata) ? clonePlainObject(entry.metadata) : {};
+  const id = Number.isFinite(Number(entry.id)) ? Number(entry.id) : null;
+  const source = typeof entry.source === 'string' ? entry.source : (entry.persisted ? 'database' : defaultSource);
+  const persisted = typeof entry.persisted === 'boolean'
+    ? entry.persisted
+    : (source !== 'bundled' && id !== null);
+  const updatedAt = typeof entry.updatedAt === 'string' ? entry.updatedAt : null;
+
+  return {
+    id,
+    name: rawName,
+    kind,
+    faction,
+    description,
+    nightOrder,
+    nightPrompt,
+    nightAction,
+    abilityScript,
+    limits,
+    hooks,
+    metadata,
+    source,
+    persisted,
+    updatedAt,
+  };
+}
+
+function rebuildRoleState(entries) {
+  const normalizedEntries = Array.isArray(entries)
+    ? entries
+        .map((entry) => normalizeCatalogEntry(entry, entry?.persisted ? 'database' : 'bundled'))
+        .filter(Boolean)
+    : [];
+
+  const sortedEntries = normalizedEntries
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name, 'de'));
+
+  roleCatalogEntries = sortedEntries;
+  roleCatalogByName = new Map(sortedEntries.map((entry) => [entry.name, entry]));
+
+  const nextCategories = { village: [], werwolf: [], special: [] };
+  const nextDescriptions = {};
+  const bodyguardEligible = new Set();
+  const doctorEligible = new Set();
+  const nightCandidates = [];
+  const nextNightTexts = { ...BUNDLED_NIGHT_PROMPTS };
+
+  sortedEntries.forEach((entry) => {
+    if (entry.kind === 'role') {
+      const factionKey = ROLE_FACTIONS.has(entry.faction) ? entry.faction : 'special';
+      nextCategories[factionKey].push(entry.name);
+    }
+
+    if (entry.description) {
+      nextDescriptions[entry.name] = entry.description;
+    }
+
+    entry.hooks.forEach((hook) => {
+      if (hook === ROLE_HOOKS.NIGHT_SEQUENCE) {
+        nightCandidates.push(entry);
+      } else if (hook === ROLE_HOOKS.JOB_BODYGUARD) {
+        bodyguardEligible.add(entry.name);
+      } else if (hook === ROLE_HOOKS.JOB_DOCTOR) {
+        doctorEligible.add(entry.name);
+      }
+    });
+
+    if (entry.nightPrompt) {
+      nextNightTexts[entry.name] = entry.nightPrompt;
+    }
+  });
+
+  nextCategories.village.sort((a, b) => a.localeCompare(b, 'de'));
+  nextCategories.werwolf.sort((a, b) => a.localeCompare(b, 'de'));
+  nextCategories.special.sort((a, b) => a.localeCompare(b, 'de'));
+
+  categorizedRoles = nextCategories;
+  roleDescriptions = nextDescriptions;
+  jobEligibility = {
+    bodyguard: bodyguardEligible,
+    doctor: doctorEligible,
+  };
+
+  nightSequence = nightCandidates
+    .slice()
+    .sort((a, b) => {
+      const orderA = Number.isFinite(a.nightOrder) ? a.nightOrder : getFallbackNightOrder(a.name);
+      const orderB = Number.isFinite(b.nightOrder) ? b.nightOrder : getFallbackNightOrder(b.name);
+      if (orderA === orderB) {
+        return a.name.localeCompare(b.name, 'de');
+      }
+      return orderA - orderB;
+    })
+    .map((entry) => entry.name);
+
+  nightTexts = nextNightTexts;
+}
+
+function buildCombinedCatalog(customEntries = []) {
+  const combinedMap = new Map();
+
+  BUNDLED_ROLE_ENTRIES.forEach((entry) => {
+    const normalized = normalizeCatalogEntry(entry, 'bundled');
+    if (normalized) {
+      combinedMap.set(normalized.name.toLowerCase(), normalized);
+    }
+  });
+
+  if (Array.isArray(customEntries)) {
+    customEntries.forEach((entry) => {
+      const normalized = normalizeCatalogEntry(entry, 'database');
+      if (!normalized) {
+        return;
+      }
+      combinedMap.set(normalized.name.toLowerCase(), normalized);
+    });
+  }
+
+  return Array.from(combinedMap.values());
+}
+
+async function hydrateRoleCatalog() {
+  let remoteEntries = [];
+  try {
+    const data = await apiClient.roles.list();
+    if (Array.isArray(data) && data.length > 0) {
+      remoteEntries = data;
+    }
+  } catch (error) {
+    console.error('Rollenkatalog konnte nicht geladen werden.', error);
+  }
+
+  const combined = buildCombinedCatalog(remoteEntries);
+  rebuildRoleState(combined);
+  return combined;
+}
+
+function getRoleCatalogEntry(name) {
+  if (!name) {
+    return null;
+  }
+  return roleCatalogByName.get(name) || null;
+}
+
+function getRoleCatalogSnapshot() {
+  return serializeRoleCatalog();
+}
+
+function applyRoleCatalogSnapshot(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    rebuildRoleState(buildCombinedCatalog([]));
+    return;
+  }
+  rebuildRoleState(entries);
+}
+
+function serializeRoleCatalog() {
+  return roleCatalogEntries.map((entry) => ({
+    id: entry.id,
+    name: entry.name,
+    kind: entry.kind,
+    faction: entry.faction,
+    description: entry.description,
+    nightOrder: entry.nightOrder,
+    nightPrompt: entry.nightPrompt,
+    nightAction: entry.nightAction,
+    abilityScript: entry.abilityScript,
+    limits: clonePlainObject(entry.limits),
+    hooks: Array.isArray(entry.hooks) ? entry.hooks.slice() : [],
+    metadata: clonePlainObject(entry.metadata),
+    source: entry.source,
+    persisted: entry.persisted,
+    updatedAt: entry.updatedAt || null,
+  }));
+}
+
+function getJobEligibleRoles(jobKey) {
+  if (!jobKey || !jobEligibility[jobKey]) {
+    return new Set();
+  }
+  return jobEligibility[jobKey];
+}
+
+rebuildRoleState(buildCombinedCatalog([]));
 
 function createAuthManager() {
   const welcomeScreen = document.getElementById('welcome-screen');
@@ -745,6 +1234,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   await initTheme();
+
+  await hydrateRoleCatalog();
 
   // Sidebar elements and toggle
   const sessionsSidebar = document.getElementById('sessions-sidebar');
@@ -2678,9 +3169,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (Math.random() >= chance) {
       return null;
     }
+    const bodyguardEligible = getJobEligibleRoles('bodyguard');
     const eligible = players
       .map((player, index) => ({ player, index }))
-      .filter(({ index }) => bodyguardEligibleRoles.has(rolesAssigned[index]));
+      .filter(({ index }) => bodyguardEligible.has(rolesAssigned[index]));
     if (eligible.length === 0) {
       return null;
     }
@@ -2704,9 +3196,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (Math.random() >= chance) {
       return null;
     }
+    const doctorEligible = getJobEligibleRoles('doctor');
     const eligible = players
       .map((player, index) => ({ player, index }))
-      .filter(({ index }) => doctorEligibleRoles.has(rolesAssigned[index]));
+      .filter(({ index }) => doctorEligible.has(rolesAssigned[index]));
     if (eligible.length === 0) {
       return null;
     }
@@ -2986,70 +3479,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     row.appendChild(removeBtn);
     container.appendChild(row);
   }
-
-  const categorizedRoles = {
-      village: ["Dorfbewohner", "Seer", "Jäger", "Hexe", "Stumme Jule", "Inquisitor", "Sündenbock", "Geschwister", "Geist"],
-      werwolf: ["Werwolf", "Verfluchte"],
-      special: ["Amor", "Trickster", "Henker", "Friedenstifter", "Michael Jackson"]
-  };
-
-  // Descriptions for roles
-  const roleDescriptions = {
-    Werwolf: "Gewinnt, wenn sie alle Dorfbewohner eliminieren.",
-    Dorfbewohner: "Gewinnt, wenn alle Werwölfe eliminiert sind.",
-    Hexe: "Hat einen Heil- und einen Gifttrank.",
-    Seer: "Kann jede Nacht die Rolle eines Spielers sehen.",
-    Jäger: "Darf vor seinem Tod einen Spieler erschießen.",
-    Amor: "Verknüpft zwei Liebende, die gemeinsam gewinnen.",
-    Trickster: "Gewinnt, wenn er gelyncht wird, bevor die Werwölfe gewinnen.",
-    "Stumme Jule": "Wählt jede Nacht jemanden, der bis zum nächsten Tag nicht reden darf.",
-    Henker: "Gewinnt, wenn sein geheimes Ziel vom Dorf gelyncht wird. Spielt für sich allein.",
-    Inquisitor: "Kann jede Nacht prüfen, ob jemand zur Werwolf-Fraktion gehört.",
-    Verfluchte: "Startet als Dorfbewohner, wird aber zum Werwolf, wenn er von Werwölfen angegriffen wird.",
-    Sündenbock: "Wird anstelle der anderen Spieler gelyncht, wenn es bei der Abstimmung einen Gleichstand gibt.",
-    Geschwister: "Zwei Dorfbewohner, die sich gegenseitig kennen.",
-    Geist: "Kann nach seinem Tod weiterhin eine Nachricht an die Lebenden senden.",
-    Friedenstifter: "Gewinnt, wenn für zwei aufeinanderfolgende Runden (Tag und Nacht) niemand stirbt.",
-    "Michael Jackson": "Dorfbewohner-Sonderrolle: Ab der ersten Beschuldigung zählt seine Stimme doppelt, bei der zweiten Beschuldigung stirbt er sofort."
-  };
-
-  const jobDescriptions = {
-    Bodyguard: "Wählt jede Nacht eine Person und schützt sie vor Angriffen der Werwölfe.",
-    Doctor: "Wacht nach einer blutigen Nacht auf und kann eine der Opferpersonen zurück ins Leben holen."
-  };
-
-  const villagerJobEligibleRoles = new Set([
-    "Dorfbewohner",
-    "Seer",
-    "Jäger",
-    "Hexe",
-    "Stumme Jule",
-    "Inquisitor",
-    "Verfluchte",
-    "Sündenbock",
-    "Geschwister",
-    "Geist",
-    "Michael Jackson",
-    "Friedenstifter"
-  ]);
-
-  const bodyguardEligibleRoles = villagerJobEligibleRoles;
-  const doctorEligibleRoles = villagerJobEligibleRoles;
-
-  /* -------------------- Erste Nacht Logik -------------------- */
-  const nightSequence = ["Bodyguard", "Doctor", "Henker", "Geschwister", "Amor", "Seer", "Inquisitor", "Werwolf", "Hexe", "Stumme Jule"];
-  const nightTexts = {
-    Bodyguard: "Der Bodyguard wacht auf. Bitte wähle eine Person zum Beschützen.",
-    Doctor: "Der Arzt wacht auf. Du darfst eine der Opferpersonen der letzten Nacht heilen.",
-    Henker: "Der Henker wacht auf und erfährt sein Ziel.",
-    Amor: "Amor wacht auf. Bitte wähle zwei Liebende.",
-    Seer: "Der Seher wacht auf. Bitte wähle eine Person zum Ansehen.",
-    Werwolf: "Werwölfe wachen auf. Sucht euer Opfer.",
-    Hexe: "Die Hexe wacht auf. Entscheide Heil- oder Gifttrank.",
-    "Stumme Jule": "Stumme Jule wacht auf. Wähle eine Person, die nicht reden darf.",
-    Geschwister: "Die Geschwister wachen auf und sehen sich.",
-    Inquisitor: "Der Inquisitor wacht auf. Wähle eine Person zum Befragen."
-  };
 
   let nightMode = false;
   let dayMode = false;
@@ -6177,6 +6606,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       doctorLastHealedNight,
       jobsAssigned: jobsAssigned.map(jobs => Array.isArray(jobs) ? jobs.slice() : []),
       jobConfig: { bodyguardChance: jobConfig.bodyguardChance, doctorChance: jobConfig.doctorChance },
+      roleCatalog: serializeRoleCatalog(),
       timeline,
       metadata: sessionMetadata
     };
@@ -6550,6 +6980,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     const sessionWinner = session?.metadata?.winner;
     lastWinner = sessionWinner ? { ...sessionWinner } : null;
 
+    if (Array.isArray(session.roleCatalog)) {
+      applyRoleCatalogSnapshot(session.roleCatalog);
+    } else {
+      applyRoleCatalogSnapshot([]);
+    }
+    refreshRoleCatalogUi();
+
     players = Array.isArray(session.players) ? session.players.slice() : [];
     rolesAssigned = Array.isArray(session.rolesAssigned) ? session.rolesAssigned.slice() : [];
     jobsAssigned = Array.isArray(session.jobsAssigned)
@@ -6857,6 +7294,30 @@ document.addEventListener("DOMContentLoaded", async () => {
   const adminChangeRolePlayerSelect = document.getElementById('admin-change-role-player-select');
   const adminChangeRoleRoleSelect = document.getElementById('admin-change-role-role-select');
   const adminChangeRoleBtn = document.getElementById('admin-change-role-btn');
+  const roleCatalogSelect = document.getElementById('role-catalog-select');
+  const roleCatalogNewBtn = document.getElementById('role-catalog-new-btn');
+  const roleCatalogDeleteBtn = document.getElementById('role-catalog-delete-btn');
+  const roleEditorForm = document.getElementById('role-editor-form');
+  const roleEditorNameInput = document.getElementById('role-editor-name');
+  const roleEditorKindSelect = document.getElementById('role-editor-kind');
+  const roleEditorFactionSelect = document.getElementById('role-editor-faction');
+  const roleEditorNightOrderInput = document.getElementById('role-editor-night-order');
+  const roleEditorDescriptionInput = document.getElementById('role-editor-description');
+  const roleEditorNightPromptInput = document.getElementById('role-editor-night-prompt');
+  const roleEditorNightActionInput = document.getElementById('role-editor-night-action');
+  const roleEditorAbilityScriptInput = document.getElementById('role-editor-ability-script');
+  const roleEditorLimitMinInput = document.getElementById('role-limit-min');
+  const roleEditorLimitMaxInput = document.getElementById('role-limit-max');
+  const roleEditorLimitCopiesInput = document.getElementById('role-limit-copies');
+  const roleEditorStatusEl = document.getElementById('role-editor-status');
+  const roleEditorResetBtn = document.getElementById('role-editor-reset-btn');
+  const roleEditorSaveBtn = document.getElementById('role-editor-save-btn');
+  const roleHookCheckboxes = roleEditorForm
+    ? Array.from(roleEditorForm.querySelectorAll('[data-role-hook]'))
+    : [];
+
+  let activeRoleEditorEntry = null;
+  let roleEditorDirty = false;
 
   const adminTimelineList = document.getElementById('admin-timeline');
   const undoHistoryList = document.getElementById('admin-undo-history');
@@ -7186,7 +7647,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       jobsAssigned: jobsAssigned.map(jobs => Array.isArray(jobs) ? jobs.slice() : []),
       jobConfig: { bodyguardChance: jobConfig.bodyguardChance, doctorChance: jobConfig.doctorChance },
       firstNightShieldUsed,
-      eventEngineState: getEventEngineSnapshot()
+      eventEngineState: getEventEngineSnapshot(),
+      roleCatalog: serializeRoleCatalog()
     };
   }
 
@@ -7212,6 +7674,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (resetNightHistory) {
       nightStepHistory = [];
     }
+
+    if (snapshot.roleCatalog) {
+      applyRoleCatalogSnapshot(snapshot.roleCatalog);
+    } else {
+      applyRoleCatalogSnapshot([]);
+    }
+    refreshRoleCatalogUi();
 
     players = snapshot.players.slice();
     rolesAssigned = snapshot.rolesAssigned.slice();
@@ -7734,21 +8203,334 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
 
     adminChangeRoleRoleSelect.innerHTML = '';
-    const allRoles = [...categorizedRoles.village, ...categorizedRoles.werwolf, ...categorizedRoles.special];
-    const roleOptionValues = [...allRoles, 'Bodyguard', 'Doctor'];
-    roleOptionValues.forEach(r => {
+    roleCatalogEntries.forEach(entry => {
       const option = document.createElement('option');
-      option.value = r;
-      if (r === 'Bodyguard') {
-        option.textContent = 'Bodyguard (Job)';
-      } else if (r === 'Doctor') {
+      option.value = entry.name;
+      if (entry.name === 'Doctor') {
         option.textContent = 'Arzt (Job)';
+      } else if (entry.name === 'Bodyguard') {
+        option.textContent = 'Bodyguard (Job)';
+      } else if (entry.kind === 'ability') {
+        option.textContent = `${entry.name} (Fähigkeit)`;
       } else {
-        option.textContent = r;
+        option.textContent = entry.name;
       }
       adminChangeRoleRoleSelect.appendChild(option);
     });
   }
+
+  function setRoleEditorStatus(message, tone = 'info') {
+    if (!roleEditorStatusEl) {
+      return;
+    }
+    roleEditorStatusEl.textContent = message || '';
+    roleEditorStatusEl.classList.remove('status-info', 'status-success', 'status-error');
+    if (!message) {
+      return;
+    }
+    const toneClass = tone === 'success' ? 'status-success' : tone === 'error' ? 'status-error' : 'status-info';
+    roleEditorStatusEl.classList.add(toneClass);
+  }
+
+  function readRoleEditorForm() {
+    const hooks = roleHookCheckboxes
+      .filter((input) => input && input.checked && typeof input.value === 'string')
+      .map((input) => input.value);
+
+    const limits = {};
+    if (roleEditorLimitMinInput && roleEditorLimitMinInput.value !== '') {
+      const value = Number(roleEditorLimitMinInput.value);
+      if (Number.isFinite(value)) {
+        limits.minPlayers = Math.max(0, Math.trunc(value));
+      }
+    }
+    if (roleEditorLimitMaxInput && roleEditorLimitMaxInput.value !== '') {
+      const value = Number(roleEditorLimitMaxInput.value);
+      if (Number.isFinite(value)) {
+        limits.maxPlayers = Math.max(0, Math.trunc(value));
+      }
+    }
+    if (roleEditorLimitCopiesInput && roleEditorLimitCopiesInput.value !== '') {
+      const value = Number(roleEditorLimitCopiesInput.value);
+      if (Number.isFinite(value)) {
+        limits.maxPerGame = Math.max(0, Math.trunc(value));
+      }
+    }
+
+    const nightOrderRaw = roleEditorNightOrderInput ? roleEditorNightOrderInput.value.trim() : '';
+    let nightOrder = null;
+    if (nightOrderRaw !== '') {
+      const parsed = Number(nightOrderRaw);
+      if (Number.isFinite(parsed)) {
+        nightOrder = Math.trunc(parsed);
+      }
+    }
+
+    const name = roleEditorNameInput ? roleEditorNameInput.value.trim() : '';
+    const description = roleEditorDescriptionInput ? roleEditorDescriptionInput.value.trim() : '';
+    const nightPrompt = roleEditorNightPromptInput ? roleEditorNightPromptInput.value.trim() : '';
+    const nightAction = roleEditorNightActionInput ? roleEditorNightActionInput.value.trim() : '';
+    const abilityScript = roleEditorAbilityScriptInput ? roleEditorAbilityScriptInput.value : '';
+
+    return {
+      name,
+      kind: roleEditorKindSelect && roleEditorKindSelect.value === 'ability' ? 'ability' : 'role',
+      faction: roleEditorFactionSelect && roleEditorFactionSelect.value ? roleEditorFactionSelect.value : null,
+      description: description || null,
+      nightOrder,
+      nightPrompt: nightPrompt || null,
+      nightAction: nightAction || null,
+      abilityScript: abilityScript && abilityScript.trim().length > 0 ? abilityScript : null,
+      hooks,
+      limits,
+      metadata: clonePlainObject(activeRoleEditorEntry?.metadata || {}),
+    };
+  }
+
+  function loadRoleIntoEditor(entry) {
+    if (!roleEditorForm) {
+      activeRoleEditorEntry = entry ? { ...entry } : null;
+      return;
+    }
+
+    activeRoleEditorEntry = entry ? { ...entry } : null;
+    roleEditorDirty = false;
+
+    if (roleCatalogSelect) {
+      const targetValue = entry ? entry.name : '';
+      if (roleCatalogSelect.value !== targetValue) {
+        roleCatalogSelect.value = targetValue;
+      }
+    }
+
+    if (!entry) {
+      if (roleEditorNameInput) roleEditorNameInput.value = '';
+      if (roleEditorKindSelect) roleEditorKindSelect.value = 'role';
+      if (roleEditorFactionSelect) roleEditorFactionSelect.value = '';
+      if (roleEditorNightOrderInput) roleEditorNightOrderInput.value = '';
+      if (roleEditorDescriptionInput) roleEditorDescriptionInput.value = '';
+      if (roleEditorNightPromptInput) roleEditorNightPromptInput.value = '';
+      if (roleEditorNightActionInput) roleEditorNightActionInput.value = '';
+      if (roleEditorAbilityScriptInput) roleEditorAbilityScriptInput.value = '';
+      if (roleEditorLimitMinInput) roleEditorLimitMinInput.value = '';
+      if (roleEditorLimitMaxInput) roleEditorLimitMaxInput.value = '';
+      if (roleEditorLimitCopiesInput) roleEditorLimitCopiesInput.value = '';
+      roleHookCheckboxes.forEach((input) => {
+        input.checked = false;
+      });
+      if (roleCatalogDeleteBtn) {
+        roleCatalogDeleteBtn.disabled = true;
+      }
+      setRoleEditorStatus('Neue Rolle erstellen.', 'info');
+      return;
+    }
+
+    if (roleEditorNameInput) roleEditorNameInput.value = entry.name;
+    if (roleEditorKindSelect) roleEditorKindSelect.value = entry.kind === 'ability' ? 'ability' : 'role';
+    if (roleEditorFactionSelect) roleEditorFactionSelect.value = entry.faction || '';
+    if (roleEditorNightOrderInput) {
+      roleEditorNightOrderInput.value = Number.isFinite(entry.nightOrder) ? entry.nightOrder : '';
+    }
+    if (roleEditorDescriptionInput) roleEditorDescriptionInput.value = entry.description || '';
+    if (roleEditorNightPromptInput) roleEditorNightPromptInput.value = entry.nightPrompt || '';
+    if (roleEditorNightActionInput) roleEditorNightActionInput.value = entry.nightAction || '';
+    if (roleEditorAbilityScriptInput) roleEditorAbilityScriptInput.value = entry.abilityScript || '';
+
+    const limits = isPlainObject(entry.limits) ? entry.limits : {};
+    if (roleEditorLimitMinInput) {
+      roleEditorLimitMinInput.value = Number.isFinite(limits.minPlayers) ? limits.minPlayers : '';
+    }
+    if (roleEditorLimitMaxInput) {
+      roleEditorLimitMaxInput.value = Number.isFinite(limits.maxPlayers) ? limits.maxPlayers : '';
+    }
+    if (roleEditorLimitCopiesInput) {
+      const copies = Number.isFinite(limits.maxPerGame)
+        ? limits.maxPerGame
+        : (Number.isFinite(limits.maxCopies) ? limits.maxCopies : '');
+      roleEditorLimitCopiesInput.value = copies;
+    }
+
+    const hookSet = new Set(Array.isArray(entry.hooks) ? entry.hooks : []);
+    roleHookCheckboxes.forEach((input) => {
+      input.checked = hookSet.has(input.value);
+    });
+
+    if (roleCatalogDeleteBtn) {
+      roleCatalogDeleteBtn.disabled = !entry.persisted || !entry.id;
+    }
+
+    if (entry.persisted) {
+      setRoleEditorStatus('Server-Rolle geladen.', 'info');
+    } else {
+      setRoleEditorStatus('Bundled Standardrolle – Änderungen werden gespeichert.', 'info');
+    }
+  }
+
+  function populateRoleCatalogSelect(selectedName) {
+    if (!roleCatalogSelect) {
+      return;
+    }
+    const previousValue = typeof selectedName === 'string' ? selectedName : roleCatalogSelect.value;
+    roleCatalogSelect.innerHTML = '';
+
+    roleCatalogEntries.forEach((entry) => {
+      const option = document.createElement('option');
+      option.value = entry.name;
+      const baseLabel = entry.name === 'Doctor'
+        ? 'Arzt (Job)'
+        : entry.name === 'Bodyguard'
+          ? 'Bodyguard (Job)'
+          : (entry.kind === 'ability' ? `${entry.name} (Fähigkeit)` : entry.name);
+      option.textContent = entry.persisted ? `${baseLabel} (Server)` : baseLabel;
+      option.dataset.roleId = entry.id != null ? String(entry.id) : '';
+      option.dataset.roleSource = entry.source || '';
+      roleCatalogSelect.appendChild(option);
+    });
+
+    if (roleCatalogEntries.length === 0) {
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Keine Rollen verfügbar';
+      placeholder.disabled = true;
+      placeholder.selected = true;
+      roleCatalogSelect.appendChild(placeholder);
+      loadRoleIntoEditor(null);
+      return;
+    }
+
+    const resolvedValue = roleCatalogEntries.find((entry) => entry.name === previousValue)?.name
+      || roleCatalogEntries[0].name;
+    roleCatalogSelect.value = resolvedValue;
+    loadRoleIntoEditor(getRoleCatalogEntry(resolvedValue));
+  }
+
+  function refreshRoleCatalogUi(selectedName) {
+    if (roleCatalogSelect) {
+      populateRoleCatalogSelect(selectedName);
+    } else {
+      const resolvedEntry = typeof selectedName === 'string'
+        ? getRoleCatalogEntry(selectedName)
+        : null;
+      const fallbackEntry = resolvedEntry || (roleCatalogEntries.length > 0 ? roleCatalogEntries[0] : null);
+      loadRoleIntoEditor(fallbackEntry);
+    }
+
+    if (adminChangeRolePlayerSelect && adminChangeRoleRoleSelect) {
+      populateAdminChangeRoleSelects();
+    }
+  }
+
+  if (roleCatalogSelect) {
+    roleCatalogSelect.addEventListener('change', () => {
+      const entry = getRoleCatalogEntry(roleCatalogSelect.value);
+      loadRoleIntoEditor(entry);
+    });
+  }
+
+  if (roleCatalogNewBtn) {
+    roleCatalogNewBtn.addEventListener('click', () => {
+      if (roleCatalogSelect) {
+        roleCatalogSelect.value = '';
+      }
+      loadRoleIntoEditor(null);
+      roleEditorDirty = false;
+      setRoleEditorStatus('Neue Rolle erstellen.', 'info');
+      if (roleEditorNameInput) {
+        roleEditorNameInput.focus();
+      }
+    });
+  }
+
+  if (roleEditorForm) {
+    roleEditorForm.addEventListener('input', () => {
+      if (!roleEditorDirty) {
+        roleEditorDirty = true;
+        setRoleEditorStatus('Nicht gespeicherte Änderungen.', 'info');
+      }
+    });
+  }
+
+  if (roleEditorResetBtn) {
+    roleEditorResetBtn.addEventListener('click', () => {
+      loadRoleIntoEditor(activeRoleEditorEntry);
+      roleEditorDirty = false;
+      setRoleEditorStatus('Formular zurückgesetzt.', 'info');
+    });
+  }
+
+  if (roleEditorForm && roleEditorSaveBtn) {
+    roleEditorForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const payload = readRoleEditorForm();
+      if (!payload.name) {
+        setRoleEditorStatus('Bitte einen Rollen-Namen angeben.', 'error');
+        if (roleEditorNameInput) {
+          roleEditorNameInput.focus();
+        }
+        return;
+      }
+
+      await withButtonLoading(roleEditorSaveBtn, 'Speichere …', async () => {
+        try {
+          let persistedName = payload.name;
+          if (activeRoleEditorEntry && activeRoleEditorEntry.persisted && activeRoleEditorEntry.id) {
+            const updated = await apiClient.roles.update(activeRoleEditorEntry.id, payload);
+            persistedName = updated?.name || payload.name;
+            setRoleEditorStatus('Rolle aktualisiert.', 'success');
+          } else {
+            const created = await apiClient.roles.create(payload);
+            persistedName = created?.name || payload.name;
+            setRoleEditorStatus('Rolle gespeichert.', 'success');
+          }
+          await hydrateRoleCatalog();
+          refreshRoleCatalogUi(persistedName);
+          activeRoleEditorEntry = getRoleCatalogEntry(persistedName);
+          roleEditorDirty = false;
+        } catch (error) {
+          console.error('Rolle konnte nicht gespeichert werden.', error);
+          const message = error?.message || 'Rolle konnte nicht gespeichert werden.';
+          setRoleEditorStatus(message, 'error');
+        }
+      });
+    });
+  }
+
+  if (roleCatalogDeleteBtn) {
+    roleCatalogDeleteBtn.addEventListener('click', () => {
+      if (!activeRoleEditorEntry || !activeRoleEditorEntry.persisted || !activeRoleEditorEntry.id) {
+        setRoleEditorStatus('Diese Rolle ist noch nicht auf dem Server gespeichert.', 'info');
+        return;
+      }
+
+      const roleName = activeRoleEditorEntry.name;
+      showConfirmation('Rolle löschen?', `Soll die Rolle „${roleName}“ dauerhaft entfernt werden?`, () => {
+        void (async () => {
+          try {
+            if (roleCatalogDeleteBtn) {
+              roleCatalogDeleteBtn.disabled = true;
+            }
+            setRoleEditorStatus('Rolle wird gelöscht …', 'info');
+            await apiClient.roles.remove(activeRoleEditorEntry.id);
+            await hydrateRoleCatalog();
+            activeRoleEditorEntry = null;
+            roleEditorDirty = false;
+            refreshRoleCatalogUi();
+            setRoleEditorStatus('Rolle gelöscht.', 'success');
+          } catch (error) {
+            console.error('Rolle konnte nicht entfernt werden.', error);
+            const message = error?.message || 'Rolle konnte nicht entfernt werden.';
+            setRoleEditorStatus(message, 'error');
+          } finally {
+            if (roleCatalogDeleteBtn) {
+              roleCatalogDeleteBtn.disabled = !activeRoleEditorEntry || !activeRoleEditorEntry.persisted || !activeRoleEditorEntry.id;
+            }
+          }
+        })();
+      }, 'Löschen');
+    });
+  }
+
+  refreshRoleCatalogUi();
 
   function populateMacroSelect() {
     if (!macroSelect) return;
@@ -8484,7 +9266,8 @@ document.addEventListener("DOMContentLoaded", async () => {
           jobsAssigned: jobsAssigned.map(jobs => Array.isArray(jobs) ? jobs.slice() : []),
           jobConfig: { bodyguardChance: jobConfig.bodyguardChance, doctorChance: jobConfig.doctorChance },
           eventEngineState: getEventEngineSnapshot(),
-          timeline: buildSessionTimeline()
+          timeline: buildSessionTimeline(),
+          roleCatalog: serializeRoleCatalog()
         };
       },
       setState(partial = {}) {
@@ -8570,6 +9353,10 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
         if ('peaceDays' in partial) {
           peaceDays = partial.peaceDays;
+        }
+        if (Array.isArray(partial.roleCatalog)) {
+          applyRoleCatalogSnapshot(partial.roleCatalog);
+          refreshRoleCatalogUi();
         }
         if ('bodyguardProtectionTarget' in partial) {
           bodyguardProtectionTarget = partial.bodyguardProtectionTarget;
