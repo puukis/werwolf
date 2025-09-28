@@ -505,11 +505,80 @@ async function upsertSession(session) {
     [session.timestamp, session]
   );
 
+  await pruneSessionStorage(20);
+}
+
+async function upsertSessionTimeline(session) {
+  if (!session?.timeline || typeof session.timeline !== 'object') {
+    return;
+  }
+
+  await query(
+    `INSERT INTO session_timelines (session_timestamp, timeline, created_at)
+     VALUES ($1, $2, NOW())
+     ON CONFLICT (session_timestamp)
+     DO UPDATE SET timeline = EXCLUDED.timeline, updated_at = NOW()`,
+    [session.timestamp, session.timeline]
+  );
+}
+
+async function upsertSessionMetrics(session) {
+  const metadata = session?.metadata || {};
+  const timeline = session?.timeline || {};
+  const actions = Array.isArray(timeline.actions) ? timeline.actions : [];
+  const checkpoints = Array.isArray(timeline.checkpoints) ? timeline.checkpoints : [];
+  const winnerTitle = typeof metadata?.winner?.title === 'string' ? metadata.winner.title : (typeof metadata?.winner?.message === 'string' ? metadata.winner.message : null);
+  const playerCount = Number.isFinite(metadata.playerCount) ? metadata.playerCount : Array.isArray(session.players) ? session.players.length : null;
+  const actionCount = Number.isFinite(metadata.actionCount) ? metadata.actionCount : actions.length;
+  const checkpointCount = Number.isFinite(metadata.checkpointCount) ? metadata.checkpointCount : checkpoints.length;
+
+  let gameLengthMs = Number.isFinite(metadata.gameDurationMs) ? metadata.gameDurationMs : null;
+  if (!Number.isFinite(gameLengthMs) && actions.length > 1) {
+    const first = actions[0]?.timestamp;
+    const last = actions[actions.length - 1]?.timestamp;
+    const duration = Number(last) - Number(first);
+    if (Number.isFinite(duration) && duration >= 0) {
+      gameLengthMs = duration;
+    }
+  }
+
+  await query(
+    `INSERT INTO session_metrics (session_timestamp, winner, player_count, action_count, checkpoint_count, game_length_ms, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, NOW())
+     ON CONFLICT (session_timestamp)
+     DO UPDATE SET winner = EXCLUDED.winner,
+                   player_count = EXCLUDED.player_count,
+                   action_count = EXCLUDED.action_count,
+                   checkpoint_count = EXCLUDED.checkpoint_count,
+                   game_length_ms = EXCLUDED.game_length_ms,
+                   updated_at = NOW()`,
+    [session.timestamp, winnerTitle, playerCount, actionCount, checkpointCount, gameLengthMs]
+  );
+}
+
+async function pruneSessionStorage(limit = 20) {
   await query(
     `DELETE FROM sessions
       WHERE timestamp NOT IN (
-        SELECT timestamp FROM sessions ORDER BY timestamp DESC LIMIT 20
-      )`
+        SELECT timestamp FROM sessions ORDER BY timestamp DESC LIMIT $1
+      )`,
+    [limit]
+  );
+
+  await query(
+    `DELETE FROM session_timelines
+      WHERE session_timestamp NOT IN (
+        SELECT timestamp FROM sessions ORDER BY timestamp DESC LIMIT $1
+      )`,
+    [limit]
+  );
+
+  await query(
+    `DELETE FROM session_metrics
+      WHERE session_timestamp NOT IN (
+        SELECT timestamp FROM sessions ORDER BY timestamp DESC LIMIT $1
+      )`,
+    [limit]
   );
 }
 
@@ -531,10 +600,35 @@ app.post('/api/sessions', async (req, res) => {
     const timestamp = Number(session.timestamp || Date.now());
     const normalized = { ...session, timestamp };
     await upsertSession(normalized);
+    await upsertSessionTimeline(normalized);
+    await upsertSessionMetrics(normalized);
     const sessions = await listSessions();
     res.status(201).json({ session: normalized, sessions });
   } catch (error) {
     res.status(500).json({ error: 'Session konnte nicht gespeichert werden.' });
+  }
+});
+
+app.get('/api/sessions/:timestamp/timeline', async (req, res) => {
+  try {
+    const timestamp = Number(req.params.timestamp);
+    if (!Number.isFinite(timestamp)) {
+      return res.status(400).json({ error: 'Ungültiger Zeitstempel.' });
+    }
+    const result = await query(
+      `SELECT timeline
+         FROM session_timelines
+        WHERE session_timestamp = $1
+        LIMIT 1`,
+      [timestamp]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Keine Timeline für diese Session gefunden.' });
+    }
+    return res.json({ timeline: result.rows[0].timeline });
+  } catch (error) {
+    console.error('Timeline konnte nicht geladen werden:', error);
+    return res.status(500).json({ error: 'Timeline konnte nicht geladen werden.' });
   }
 });
 
@@ -545,9 +639,65 @@ app.delete('/api/sessions/:timestamp', async (req, res) => {
       return res.status(400).json({ error: 'Ungültiger Zeitstempel.' });
     }
     await query('DELETE FROM sessions WHERE timestamp = $1', [timestamp]);
+    await query('DELETE FROM session_timelines WHERE session_timestamp = $1', [timestamp]);
+    await query('DELETE FROM session_metrics WHERE session_timestamp = $1', [timestamp]);
     res.status(204).end();
   } catch (error) {
     res.status(500).json({ error: 'Session konnte nicht gelöscht werden.' });
+  }
+});
+
+app.get('/api/analytics', async (req, res) => {
+  try {
+    const summaryResult = await query(
+      `SELECT
+         COUNT(*)::int AS session_count,
+         AVG(game_length_ms)::bigint AS average_game_length_ms,
+         AVG(action_count)::numeric AS average_action_count,
+         AVG(player_count)::numeric AS average_player_count
+        FROM session_metrics`
+    );
+    const summaryRow = summaryResult.rows[0] || {};
+
+    const winRateResult = await query(
+      `SELECT winner, COUNT(*)::int AS count
+         FROM session_metrics
+        WHERE winner IS NOT NULL AND winner <> ''
+        GROUP BY winner
+        ORDER BY count DESC`
+    );
+    const totalWins = winRateResult.rows.reduce((acc, row) => acc + Number(row.count || 0), 0);
+    const winRates = winRateResult.rows.map((row) => ({
+      winner: row.winner,
+      count: row.count,
+      rate: totalWins > 0 ? Number(row.count) / totalWins : null,
+    }));
+
+    const metaResult = await query(
+      `SELECT
+         AVG((data->'metadata'->>'dayCount')::numeric) AS average_day_count,
+         AVG((data->'metadata'->>'nightCount')::numeric) AS average_night_count
+        FROM sessions
+       WHERE data ? 'metadata'`
+    );
+    const metaRow = metaResult.rows[0] || {};
+
+    res.json({
+      summary: {
+        sessionCount: Number(summaryRow.session_count || 0),
+        averageGameLengthMs: summaryRow.average_game_length_ms !== null ? Number(summaryRow.average_game_length_ms) : null,
+        averageActionCount: summaryRow.average_action_count !== null ? Number(summaryRow.average_action_count) : null,
+        averagePlayerCount: summaryRow.average_player_count !== null ? Number(summaryRow.average_player_count) : null,
+      },
+      winRates,
+      meta: {
+        averageDayCount: metaRow.average_day_count !== null ? Number(metaRow.average_day_count) : null,
+        averageNightCount: metaRow.average_night_count !== null ? Number(metaRow.average_night_count) : null,
+      },
+    });
+  } catch (error) {
+    console.error('Analytics konnten nicht geladen werden:', error);
+    res.status(500).json({ error: 'Analytics konnten nicht geladen werden.' });
   }
 });
 

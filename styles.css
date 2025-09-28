@@ -2649,6 +2649,120 @@ body.phoenix-pulse-charged .container::before {
   box-shadow: inset 0 1px 3px var(--shadow-color);
 }
 
+.replay-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.replay-controls select,
+.replay-controls input[type="range"] {
+  width: 100%;
+}
+
+.replay-action-label {
+  font-size: 0.85rem;
+  color: var(--text-light);
+  min-height: 1.2rem;
+}
+
+.replay-action-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--input-bg);
+  box-shadow: inset 0 1px 3px var(--shadow-color);
+}
+
+.replay-action-list .empty {
+  padding: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-light);
+  text-align: center;
+}
+
+.replay-entry {
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid var(--border-color);
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.replay-entry:last-child {
+  border-bottom: none;
+}
+
+.replay-entry:hover,
+.replay-entry.active {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.replay-entry-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.75rem;
+  color: var(--text-light);
+  margin-bottom: 0.2rem;
+}
+
+.replay-entry-type {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.replay-entry-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.replay-entry-detail {
+  font-size: 0.8rem;
+  color: var(--text-light);
+  margin-top: 0.2rem;
+}
+
+.analytics-summary {
+  font-size: 0.9rem;
+  color: var(--text-color);
+}
+
+.analytics-winrates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.analytics-winrates li {
+  font-size: 0.85rem;
+  padding: 0.25rem 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.analytics-winrates li strong {
+  font-weight: 600;
+}
+
+.analytics-winrates .empty {
+  color: var(--text-light);
+  font-size: 0.85rem;
+  text-align: center;
+  padding: 0.5rem 0;
+}
+
+.analytics-meta {
+  font-size: 0.8rem;
+  color: var(--text-light);
+}
+
 .admin-timeline .empty,
 .undo-history .empty {
   padding: 0.75rem;

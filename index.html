@@ -440,6 +440,25 @@ Carla
             <h5>Aktions-Timeline</h5>
             <ul id="admin-timeline" class="admin-timeline" aria-live="polite" aria-label="Zuletzt ausgeführte Aktionen"></ul>
         </div>
+        <div class="admin-section replay-section">
+            <h5>Replay</h5>
+            <div class="replay-controls">
+                <label class="sr-only" for="replay-session-select">Session auswählen</label>
+                <select id="replay-session-select">
+                    <option value="" disabled selected>Session auswählen…</option>
+                </select>
+                <input id="replay-scrubber" type="range" min="0" max="0" value="0" disabled aria-label="Replay Zeitleiste" />
+                <div id="replay-action-label" class="replay-action-label">–</div>
+                <button id="replay-apply-btn" type="button" class="secondary-btn small-btn" disabled>Snapshot anwenden</button>
+            </div>
+            <ul id="replay-action-list" class="replay-action-list" aria-live="polite" aria-label="Replay Aktionen"></ul>
+        </div>
+        <div class="admin-section analytics-section">
+            <h5>Statistiken</h5>
+            <div id="analytics-summary" class="analytics-summary">Keine Daten.</div>
+            <ul id="analytics-winrates" class="analytics-winrates"></ul>
+            <div id="analytics-meta" class="analytics-meta"></div>
+        </div>
         <div class="admin-section undo-section">
             <h5>Undo &amp; Redo</h5>
             <div class="undo-controls">
