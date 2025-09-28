@@ -1092,6 +1092,20 @@ h2 {
   margin-bottom: 1.5rem;
 }
 
+.input-section.card {
+  background: transparent;
+  background-color: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.input-section.card::before,
+.input-section.card::after {
+  display: none;
+}
+
 textarea,
 input[type="text"],
 input[type="email"],
