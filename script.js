@@ -1,29 +1,278 @@
 /* Rollen Geber – Client-side JS */
 
-// Theme handling
-function setTheme(theme) {
-  document.documentElement.setAttribute('data-theme', theme);
-  localStorage.setItem('theme', theme);
-}
+const apiClient = (() => {
+  const baseUrl = '/api';
+  const storageCache = new Map();
+  const inflightReads = new Map();
 
-// Initialize theme from localStorage or system preference
-function initTheme() {
-  const savedTheme = localStorage.getItem('theme');
-  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  
-  if (savedTheme) {
-    setTheme(savedTheme);
-  } else if (prefersDark) {
-    setTheme('dark');
-  } else {
-    setTheme('light');
+  async function request(path, options = {}) {
+    const method = (options.method || 'GET').toUpperCase();
+    const headers = { ...(options.headers || {}) };
+    const config = { method, headers };
+
+    if (options.body !== undefined) {
+      config.body = options.body;
+      if (!headers['Content-Type'] && method !== 'GET' && method !== 'HEAD') {
+        headers['Content-Type'] = 'application/json';
+      }
+    }
+
+    const response = await fetch(`${baseUrl}${path}`, config);
+
+    if (!response.ok) {
+      let message = `Anfrage fehlgeschlagen (${response.status})`;
+      try {
+        if (typeof response.json === 'function') {
+          const data = await response.json();
+          if (data && typeof data.error === 'string') {
+            message = data.error;
+          } else if (data && typeof data.message === 'string') {
+            message = data.message;
+          }
+        } else if (typeof response.text === 'function') {
+          const text = await response.text();
+          if (text) {
+            message = text;
+          }
+        }
+      } catch (error) {
+        // ignore parsing issues – fall back to default message
+      }
+      const error = new Error(message);
+      error.status = response.status;
+      throw error;
+    }
+
+    if (response.status === 204) {
+      return null;
+    }
+
+    if (typeof response.json === 'function') {
+      try {
+        return await response.json();
+      } catch (error) {
+        return null;
+      }
+    }
+
+    if (typeof response.text === 'function') {
+      const text = await response.text();
+      if (!text) {
+        return null;
+      }
+      try {
+        return JSON.parse(text);
+      } catch (error) {
+        return null;
+      }
+    }
+
+    return null;
   }
+
+  function cacheValue(key, value) {
+    storageCache.set(key, value ?? null);
+  }
+
+  async function getStorageItem(key) {
+    if (storageCache.has(key)) {
+      return storageCache.get(key);
+    }
+    if (inflightReads.has(key)) {
+      return inflightReads.get(key);
+    }
+
+    const promise = request(`/storage/${encodeURIComponent(key)}`)
+      .then((data) => {
+        const value = data && Object.prototype.hasOwnProperty.call(data, 'value')
+          ? data.value
+          : null;
+        cacheValue(key, value);
+        inflightReads.delete(key);
+        return value;
+      })
+      .catch((error) => {
+        inflightReads.delete(key);
+        throw error;
+      });
+
+    inflightReads.set(key, promise);
+    return promise;
+  }
+
+  function getCachedStorageItem(key) {
+    return storageCache.has(key) ? storageCache.get(key) : null;
+  }
+
+  async function setStorageItem(key, value) {
+    cacheValue(key, value);
+    await request(`/storage/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ value }),
+    });
+    return value;
+  }
+
+  async function removeStorageItem(key) {
+    storageCache.delete(key);
+    await request(`/storage/${encodeURIComponent(key)}`, { method: 'DELETE' });
+  }
+
+  async function prefetchStorage(keys) {
+    await Promise.all(
+      keys.map((key) =>
+        getStorageItem(key).catch(() => null)
+      )
+    );
+  }
+
+  return {
+    request,
+    storage: {
+      getItem: getStorageItem,
+      getCachedItem: getCachedStorageItem,
+      setItem: setStorageItem,
+      removeItem: removeStorageItem,
+      prefetch: prefetchStorage,
+    },
+    theme: {
+      async get() {
+        const data = await request('/theme');
+        return typeof data?.theme === 'string' ? data.theme : null;
+      },
+      async set(theme) {
+        await request('/theme', {
+          method: 'PUT',
+          body: JSON.stringify({ theme }),
+        });
+        cacheValue('theme', theme);
+        return theme;
+      },
+    },
+    savedNames: {
+      async get() {
+        const data = await request('/saved-names');
+        const names = Array.isArray(data?.names) ? data.names : [];
+        cacheValue('werwolfSavedNames', names);
+        return names;
+      },
+      async set(names) {
+        await request('/saved-names', {
+          method: 'PUT',
+          body: JSON.stringify({ names }),
+        });
+        cacheValue('werwolfSavedNames', names);
+        return names;
+      },
+    },
+    rolePresets: {
+      async get() {
+        const data = await request('/role-presets');
+        const roles = Array.isArray(data?.roles) ? data.roles : [];
+        cacheValue('werwolfSavedRoles', roles);
+        return roles;
+      },
+      async set(roles) {
+        await request('/role-presets', {
+          method: 'PUT',
+          body: JSON.stringify({ roles }),
+        });
+        cacheValue('werwolfSavedRoles', roles);
+        return roles;
+      },
+    },
+    sessions: {
+      async list() {
+        const data = await request('/sessions');
+        return Array.isArray(data?.sessions) ? data.sessions : [];
+      },
+      async create(session) {
+        return request('/sessions', {
+          method: 'POST',
+          body: JSON.stringify({ session }),
+        });
+      },
+      async remove(timestamp) {
+        await request(`/sessions/${encodeURIComponent(timestamp)}`, {
+          method: 'DELETE',
+        });
+      },
+    },
+  };
+})();
+
+let currentTheme = 'light';
+let themePreferenceStored = false;
+
+async function setTheme(theme, { persist = true, markPreference = true } = {}) {
+  currentTheme = theme;
+  document.documentElement.setAttribute('data-theme', theme);
+
+  if (!persist) {
+    return theme;
+  }
+
+  try {
+    await apiClient.theme.set(theme);
+    if (markPreference) {
+      themePreferenceStored = true;
+    }
+  } catch (error) {
+    themePreferenceStored = false;
+    throw error;
+  }
+
+  return theme;
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+// Initialize theme from the backend or system preference
+async function initTheme() {
+  try {
+    const savedTheme = await apiClient.theme.get();
+    if (typeof savedTheme === 'string' && savedTheme.trim().length > 0) {
+      currentTheme = savedTheme;
+      themePreferenceStored = true;
+      document.documentElement.setAttribute('data-theme', savedTheme);
+      return savedTheme;
+    }
+  } catch (error) {
+    console.error('Theme konnte nicht geladen werden.', error);
+  }
+
+  themePreferenceStored = false;
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  try {
+    await setTheme(prefersDark ? 'dark' : 'light', { markPreference: false });
+  } catch (error) {
+    console.error('Theme konnte nicht gespeichert werden.', error);
+  }
+  return currentTheme;
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("players").value = "";
-  // Initialize theme
-  initTheme();
+
+  const storageKeysToPrefetch = [
+    'werwolfEventConfig',
+    'werwolfJobConfig',
+    'werwolfBloodMoonConfig',
+    'werwolfPhoenixPulseConfig',
+    'werwolfEventEngineState',
+    'eventsEnabled',
+    'revealDeadRoles',
+    'bloodMoonPityTimer',
+    'werwolfSavedNames',
+    'werwolfSavedRoles',
+    'werwolfLastUsed'
+  ];
+
+  try {
+    await apiClient.storage.prefetch(storageKeysToPrefetch);
+  } catch (error) {
+    console.error('Persistente Werte konnten nicht geladen werden.', error);
+  }
+
+  await initTheme();
 
   // Sidebar elements and toggle
   const sessionsSidebar = document.getElementById('sessions-sidebar');
@@ -39,16 +288,28 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const saveGameBtn = document.getElementById('save-game-btn');
   if (saveGameBtn) {
-    saveGameBtn.addEventListener('click', () => {
-      saveSession();
-      const detail = players.length
-        ? `${players.length} Spielende gespeichert.`
-        : 'Leerer Spielstand gespeichert.';
-      showInfoMessage({
-        title: 'Spiel gespeichert',
-        text: 'Der aktuelle Spielstand wurde gesichert.',
-        confirmText: 'Okay',
-        log: { type: 'info', label: 'Session gespeichert', detail }
+    saveGameBtn.addEventListener('click', async () => {
+      await withButtonLoading(saveGameBtn, 'Speichere …', async () => {
+        try {
+          const session = await saveSession();
+          const playerCount = Array.isArray(session.players) ? session.players.length : players.length;
+          const detail = playerCount
+            ? `${playerCount} Spielende gespeichert.`
+            : 'Leerer Spielstand gespeichert.';
+          showInfoMessage({
+            title: 'Spiel gespeichert',
+            text: 'Der aktuelle Spielstand wurde gesichert.',
+            confirmText: 'Okay',
+            log: { type: 'info', label: 'Session gespeichert', detail }
+          });
+        } catch (error) {
+          showInfoMessage({
+            title: 'Speichern fehlgeschlagen',
+            text: 'Der aktuelle Spielstand konnte nicht gesichert werden.',
+            confirmText: 'Okay',
+            log: { type: 'error', label: 'Session speichern fehlgeschlagen', detail: error?.message || 'Unbekannter Fehler.' }
+          });
+        }
       });
     });
   }
@@ -56,17 +317,30 @@ document.addEventListener("DOMContentLoaded", () => {
   // Theme toggle button
   const themeToggle = document.getElementById('theme-toggle');
   if (themeToggle) {
-    themeToggle.addEventListener('click', () => {
-      const currentTheme = document.documentElement.getAttribute('data-theme');
-      const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-      setTheme(newTheme);
+    themeToggle.addEventListener('click', async () => {
+      const previousTheme = currentTheme;
+      const newTheme = previousTheme === 'dark' ? 'light' : 'dark';
+      try {
+        await setTheme(newTheme);
+      } catch (error) {
+        document.documentElement.setAttribute('data-theme', previousTheme);
+        currentTheme = previousTheme;
+        showInfoMessage({
+          title: 'Theme konnte nicht gespeichert werden',
+          text: 'Die Verbindung zum Speicher-Backend ist fehlgeschlagen.',
+          confirmText: 'Okay',
+          log: { type: 'error', label: 'Theme speichern fehlgeschlagen', detail: error?.message || 'Unbekannter Fehler.' }
+        });
+      }
     });
   }
-  
-  // Listen for system theme changes
-  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
-    if (!localStorage.getItem('theme')) { // Only if user hasn't set a preference
-      setTheme(e.matches ? 'dark' : 'light');
+
+  const systemThemeMedia = window.matchMedia('(prefers-color-scheme: dark)');
+  systemThemeMedia.addEventListener('change', (event) => {
+    if (!themePreferenceStored) {
+      setTheme(event.matches ? 'dark' : 'light').catch((error) => {
+        console.error('Automatische Theme-Aktualisierung fehlgeschlagen.', error);
+      });
     }
   });
   const rolesContainerVillage = document.getElementById("roles-container-village");
@@ -115,6 +389,44 @@ document.addEventListener("DOMContentLoaded", () => {
   let jobConfigSaveTimeout = null;
   const defaultBloodMoonConfig = { baseChance: 0.2 };
   const defaultPhoenixPulseConfig = { chance: DEFAULT_PHOENIX_PULSE_CHANCE };
+
+  function getPersistedValue(key) {
+    return apiClient.storage.getCachedItem(key);
+  }
+
+  function persistValue(key, value) {
+    apiClient.storage.setItem(key, value).catch((error) => {
+      console.error(`Speichern des Schlüssels "${key}" fehlgeschlagen.`, error);
+    });
+  }
+
+  async function refreshPersistedValue(key) {
+    try {
+      return await apiClient.storage.getItem(key);
+    } catch (error) {
+      console.error(`Laden des Schlüssels "${key}" fehlgeschlagen.`, error);
+      return apiClient.storage.getCachedItem(key);
+    }
+  }
+
+  async function withButtonLoading(button, loadingText, task) {
+    if (!button) {
+      return task();
+    }
+    const originalText = button.textContent;
+    button.disabled = true;
+    if (typeof loadingText === 'string') {
+      button.textContent = loadingText;
+    }
+    try {
+      return await task();
+    } finally {
+      button.disabled = false;
+      if (typeof loadingText === 'string') {
+        button.textContent = originalText;
+      }
+    }
+  }
 
   const eventDeckMetadata = Array.isArray(window.WERWOLF_EVENT_DECKS)
     ? window.WERWOLF_EVENT_DECKS.slice()
@@ -383,7 +695,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function loadEventConfig() {
     try {
-      const raw = localStorage.getItem(EVENT_CONFIG_STORAGE_KEY);
+      const raw = getPersistedValue(EVENT_CONFIG_STORAGE_KEY);
       const defaults = {
         bloodMoonEnabled: defaultEventConfig.bloodMoonEnabled,
         phoenixPulseEnabled: defaultEventConfig.phoenixPulseEnabled,
@@ -424,7 +736,7 @@ document.addEventListener("DOMContentLoaded", () => {
         decks: sanitizeDeckConfig(eventConfig.decks || {}),
         campaignId: eventConfig.campaignId || null
       };
-      localStorage.setItem(EVENT_CONFIG_STORAGE_KEY, JSON.stringify(payload));
+      persistValue(EVENT_CONFIG_STORAGE_KEY, JSON.stringify(payload));
     } catch (error) {
       // Ignore storage errors
     }
@@ -452,7 +764,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function loadJobConfig() {
     try {
-      const raw = localStorage.getItem(JOB_CONFIG_STORAGE_KEY);
+      const raw = getPersistedValue(JOB_CONFIG_STORAGE_KEY);
       if (!raw) {
         return { ...defaultJobConfig };
       }
@@ -486,7 +798,7 @@ document.addEventListener("DOMContentLoaded", () => {
         bodyguardChance: normalizeChance(jobConfig.bodyguardChance, defaultJobConfig.bodyguardChance),
         doctorChance: normalizeChance(jobConfig.doctorChance, defaultJobConfig.doctorChance)
       };
-      localStorage.setItem(JOB_CONFIG_STORAGE_KEY, JSON.stringify(payload));
+      persistValue(JOB_CONFIG_STORAGE_KEY, JSON.stringify(payload));
     } catch (error) {
       // Ignore storage errors
     }
@@ -494,7 +806,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function loadBloodMoonConfig() {
     try {
-      const raw = localStorage.getItem(BLOOD_MOON_CONFIG_STORAGE_KEY);
+      const raw = getPersistedValue(BLOOD_MOON_CONFIG_STORAGE_KEY);
       if (!raw) {
         return { ...defaultBloodMoonConfig };
       }
@@ -516,7 +828,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const payload = {
         baseChance: Math.min(Math.max(bloodMoonConfig.baseChance || 0, 0), 1)
       };
-      localStorage.setItem(BLOOD_MOON_CONFIG_STORAGE_KEY, JSON.stringify(payload));
+      persistValue(BLOOD_MOON_CONFIG_STORAGE_KEY, JSON.stringify(payload));
     } catch (error) {
       // Ignore storage errors
     }
@@ -524,7 +836,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function loadPhoenixPulseConfig() {
     try {
-      const raw = localStorage.getItem(PHOENIX_PULSE_CONFIG_STORAGE_KEY);
+      const raw = getPersistedValue(PHOENIX_PULSE_CONFIG_STORAGE_KEY);
       if (!raw) {
         return { ...defaultPhoenixPulseConfig };
       }
@@ -546,7 +858,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const payload = {
         chance: Math.min(Math.max(phoenixPulseConfig.chance || 0, 0), 1)
       };
-      localStorage.setItem(PHOENIX_PULSE_CONFIG_STORAGE_KEY, JSON.stringify(payload));
+      persistValue(PHOENIX_PULSE_CONFIG_STORAGE_KEY, JSON.stringify(payload));
     } catch (error) {
       // Ignore storage errors
     }
@@ -698,7 +1010,7 @@ document.addEventListener("DOMContentLoaded", () => {
   updateBloodMoonOdds();
 
   // Load existing sessions on startup
-  loadSessions();
+  await loadSessions();
 
   // Confirmation Modal Elements
   const confirmationModal = document.getElementById('confirmation-modal');
@@ -1151,7 +1463,7 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     try {
-      const raw = localStorage.getItem(EVENT_ENGINE_STORAGE_KEY);
+      const raw = getPersistedValue(EVENT_ENGINE_STORAGE_KEY);
       if (!raw) {
         return defaults;
       }
@@ -1191,7 +1503,7 @@ document.addEventListener("DOMContentLoaded", () => {
             : []
         }
       };
-      localStorage.setItem(EVENT_ENGINE_STORAGE_KEY, JSON.stringify(payload));
+      persistValue(EVENT_ENGINE_STORAGE_KEY, JSON.stringify(payload));
     } catch (error) {
       // Ignore persistence errors
     }
@@ -1487,13 +1799,13 @@ document.addEventListener("DOMContentLoaded", () => {
   let deferInitialEventEnablement = false;
 
   if (eventsEnabledCheckbox) {
-    const savedEventsEnabled = localStorage.getItem('eventsEnabled');
+    const savedEventsEnabled = getPersistedValue('eventsEnabled');
     if (savedEventsEnabled !== null) {
       eventsEnabledCheckbox.checked = savedEventsEnabled === 'true';
     }
     deferInitialEventEnablement = true;
     eventsEnabledCheckbox.addEventListener('change', () => {
-      localStorage.setItem('eventsEnabled', eventsEnabledCheckbox.checked);
+      persistValue('eventsEnabled', eventsEnabledCheckbox.checked);
       applyGlobalEventsEnabledState();
       renderNarratorDashboard();
     });
@@ -1555,14 +1867,14 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // Load reveal dead roles state
-  const savedRevealDeadRoles = localStorage.getItem('revealDeadRoles');
+  const savedRevealDeadRoles = getPersistedValue('revealDeadRoles');
   if (savedRevealDeadRoles !== null) {
     revealDeadRolesCheckbox.checked = savedRevealDeadRoles === 'true';
   }
 
   // Save reveal dead roles state
   revealDeadRolesCheckbox.addEventListener('change', () => {
-    localStorage.setItem('revealDeadRoles', revealDeadRolesCheckbox.checked);
+    persistValue('revealDeadRoles', revealDeadRolesCheckbox.checked);
   });
 
   // New roles state
@@ -4073,7 +4385,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    const rawTimer = parseInt(localStorage.getItem('bloodMoonPityTimer') || '0', 10);
+    const rawTimer = parseInt(getPersistedValue('bloodMoonPityTimer') || '0', 10);
     const pityTimer = Number.isFinite(rawTimer) ? Math.max(rawTimer, 0) : 0;
     const bloodMoonChance = getBloodMoonChance(pityTimer);
     oddsEl.textContent = `Blutmond-Chance diese Nacht: ${Math.round(bloodMoonChance * 100)}%`;
@@ -4092,7 +4404,7 @@ document.addEventListener("DOMContentLoaded", () => {
       },
       storage: {
         getNumber(key, fallback = 0) {
-          const raw = localStorage.getItem(key);
+          const raw = getPersistedValue(key);
           if (raw === null || raw === undefined) {
             return fallback;
           }
@@ -4102,7 +4414,7 @@ document.addEventListener("DOMContentLoaded", () => {
         setNumber(key, value) {
           try {
             const numeric = Number.isFinite(value) ? value : 0;
-            localStorage.setItem(key, String(numeric));
+            persistValue(key, String(numeric));
           } catch (error) {
             // Ignore storage errors
           }
@@ -4452,8 +4764,8 @@ document.addEventListener("DOMContentLoaded", () => {
       .filter(Boolean).length
   );
 
-  // Save names to localStorage
-  saveNamesBtn.addEventListener("click", () => {
+  // Save names to backend
+  saveNamesBtn.addEventListener("click", async () => {
     const names = playersTextarea.value
       .split(/\n|\r/)
       .map((n) => n.trim())
@@ -4467,43 +4779,56 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       return;
     }
-    localStorage.setItem("werwolfSavedNames", JSON.stringify(names));
-    showInfoMessage({
-      title: 'Namen gespeichert',
-      text: 'Alle Spielernamen wurden lokal gesichert.',
-      confirmText: 'Okay',
-      log: { type: 'info', label: 'Namen gespeichert', detail: `${names.length} Namen abgelegt.` }
+
+    await withButtonLoading(saveNamesBtn, 'Speichere …', async () => {
+      try {
+        await apiClient.savedNames.set(names);
+        showInfoMessage({
+          title: 'Namen gespeichert',
+          text: 'Alle Spielernamen wurden gesichert.',
+          confirmText: 'Okay',
+          log: { type: 'info', label: 'Namen gespeichert', detail: `${names.length} Namen abgelegt.` }
+        });
+      } catch (error) {
+        showInfoMessage({
+          title: 'Speichern fehlgeschlagen',
+          text: 'Die Namen konnten nicht gesichert werden.',
+          confirmText: 'Okay',
+          log: { type: 'error', label: 'Speichern der Namen fehlgeschlagen', detail: error?.message || 'Unbekannter Fehler.' }
+        });
+      }
     });
   });
 
-  // Load names from localStorage
-  loadNamesBtn.addEventListener("click", () => {
-    const data = localStorage.getItem("werwolfSavedNames");
-    if (!data) {
-      showInfoMessage({
-        title: 'Keine gespeicherten Namen',
-        text: 'Es wurden noch keine Namen gesichert.',
-        confirmText: 'Okay',
-        log: { type: 'info', label: 'Keine gespeicherten Namen', detail: 'Lokaler Speicher ohne Einträge.' }
-      });
-      return;
-    }
-    try {
-      const names = JSON.parse(data);
-      playersTextarea.value = names.join("\n");
-      playersTextarea.dispatchEvent(new Event("input"));
-    } catch (e) {
-      showInfoMessage({
-        title: 'Laden fehlgeschlagen',
-        text: 'Fehler beim Laden der Namen.',
-        confirmText: 'Okay',
-        log: { type: 'error', label: 'Fehler beim Laden der Namen', detail: e.message || 'Unbekannter Fehler.' }
-      });
-    }
+  // Load names from backend
+  loadNamesBtn.addEventListener("click", async () => {
+    await withButtonLoading(loadNamesBtn, 'Lade …', async () => {
+      try {
+        const names = await apiClient.savedNames.get();
+        if (!Array.isArray(names) || names.length === 0) {
+          showInfoMessage({
+            title: 'Keine gespeicherten Namen',
+            text: 'Es wurden noch keine Namen gesichert.',
+            confirmText: 'Okay',
+            log: { type: 'info', label: 'Keine gespeicherten Namen', detail: 'Backend ohne gespeicherte Einträge.' }
+          });
+          return;
+        }
+        playersTextarea.value = names.join("\n");
+        playersTextarea.dispatchEvent(new Event("input"));
+      } catch (error) {
+        showInfoMessage({
+          title: 'Laden fehlgeschlagen',
+          text: 'Fehler beim Laden der Namen.',
+          confirmText: 'Okay',
+          log: { type: 'error', label: 'Fehler beim Laden der Namen', detail: error?.message || 'Unbekannter Fehler.' }
+        });
+      }
+    });
   });
 
-  // Save roles to localStorage
-  saveRolesBtn.addEventListener("click", () => {
+  // Save roles to backend
+  saveRolesBtn.addEventListener("click", async () => {
     const roleRows = [
         ...rolesContainerVillage.querySelectorAll(".role-row"),
         ...rolesContainerWerwolf.querySelectorAll(".role-row"),
@@ -4527,30 +4852,41 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       return;
     }
-    localStorage.setItem("werwolfSavedRoles", JSON.stringify(roleSetup));
-    showInfoMessage({
-      title: 'Rollen gespeichert',
-      text: 'Die aktuelle Rollenverteilung wurde gesichert.',
-      confirmText: 'Okay',
-      log: { type: 'info', label: 'Rollen gespeichert', detail: `${roleSetup.length} Rolleneinträge gespeichert.` }
+    await withButtonLoading(saveRolesBtn, 'Speichere …', async () => {
+      try {
+        await apiClient.rolePresets.set(roleSetup);
+        showInfoMessage({
+          title: 'Rollen gespeichert',
+          text: 'Die aktuelle Rollenverteilung wurde gesichert.',
+          confirmText: 'Okay',
+          log: { type: 'info', label: 'Rollen gespeichert', detail: `${roleSetup.length} Rolleneinträge gespeichert.` }
+        });
+      } catch (error) {
+        showInfoMessage({
+          title: 'Speichern fehlgeschlagen',
+          text: 'Die Rollen konnten nicht gesichert werden.',
+          confirmText: 'Okay',
+          log: { type: 'error', label: 'Speichern der Rollen fehlgeschlagen', detail: error?.message || 'Unbekannter Fehler.' }
+        });
+      }
     });
   });
 
-  // Load roles from localStorage
-  loadRolesBtn.addEventListener("click", () => {
-    const data = localStorage.getItem("werwolfSavedRoles");
-    if (!data) {
-      showInfoMessage({
-        title: 'Keine gespeicherten Rollen',
-        text: 'Es wurden noch keine Rollen gesichert.',
-        confirmText: 'Okay',
-        log: { type: 'info', label: 'Keine gespeicherten Rollen', detail: 'Lokaler Speicher ohne Rollendaten.' }
-      });
-      return;
-    }
-    try {
-      const savedRoles = JSON.parse(data);
-      
+  // Load roles from backend
+  loadRolesBtn.addEventListener("click", async () => {
+    await withButtonLoading(loadRolesBtn, 'Lade …', async () => {
+      try {
+        const savedRoles = await apiClient.rolePresets.get();
+        if (!Array.isArray(savedRoles) || savedRoles.length === 0) {
+          showInfoMessage({
+            title: 'Keine gespeicherten Rollen',
+            text: 'Es wurden noch keine Rollen gesichert.',
+            confirmText: 'Okay',
+            log: { type: 'info', label: 'Keine gespeicherten Rollen', detail: 'Backend ohne Rollendaten.' }
+          });
+          return;
+        }
+
       rolesContainerVillage.innerHTML = "";
       rolesContainerWerwolf.innerHTML = "";
       rolesContainerSpecial.innerHTML = "";
@@ -4586,30 +4922,32 @@ document.addEventListener("DOMContentLoaded", () => {
       lastSuggestionSnapshot = null;
       roleLayoutCustomized = true;
 
-    } catch (e) {
-      showInfoMessage({
-        title: 'Laden fehlgeschlagen',
-        text: 'Fehler beim Laden der Rollen.',
-        confirmText: 'Okay',
-        log: { type: 'error', label: 'Fehler beim Laden der Rollen', detail: e.message || 'Unbekannter Fehler.' }
-      });
-    }
+      } catch (error) {
+        showInfoMessage({
+          title: 'Laden fehlgeschlagen',
+          text: 'Fehler beim Laden der Rollen.',
+          confirmText: 'Okay',
+          log: { type: 'error', label: 'Fehler beim Laden der Rollen', detail: error?.message || 'Unbekannter Fehler.' }
+        });
+      }
+    });
   });
 
-  loadLastUsedBtn.addEventListener("click", () => {
-    const data = localStorage.getItem("werwolfLastUsed");
-    if (!data) {
-      showInfoMessage({
-        title: 'Keine zuletzt benutzten Optionen',
-        text: 'Es wurde noch kein Setup automatisch gesichert.',
-        confirmText: 'Okay',
-        log: { type: 'info', label: 'Keine zuletzt benutzten Optionen', detail: 'Noch kein automatischer Spielstand vorhanden.' }
-      });
-      return;
-    }
-    try {
-      isLoadingLastUsed = true;
-      const lastUsed = JSON.parse(data);
+  loadLastUsedBtn.addEventListener("click", async () => {
+    await withButtonLoading(loadLastUsedBtn, 'Lade …', async () => {
+      const data = await refreshPersistedValue('werwolfLastUsed');
+      if (!data) {
+        showInfoMessage({
+          title: 'Keine zuletzt benutzten Optionen',
+          text: 'Es wurde noch kein Setup automatisch gesichert.',
+          confirmText: 'Okay',
+          log: { type: 'info', label: 'Keine zuletzt benutzten Optionen', detail: 'Noch kein automatischer Spielstand vorhanden.' }
+        });
+        return;
+      }
+      try {
+        isLoadingLastUsed = true;
+        const lastUsed = JSON.parse(data);
       playersTextarea.value = lastUsed.players.join("\n");
 
       rolesContainerVillage.innerHTML = "";
@@ -4652,16 +4990,17 @@ document.addEventListener("DOMContentLoaded", () => {
       lastSuggestionSnapshot = null;
       roleLayoutCustomized = true;
 
-    } catch (e) {
-      showInfoMessage({
-        title: 'Laden fehlgeschlagen',
-        text: 'Fehler beim Laden der zuletzt benutzten Optionen.',
-        confirmText: 'Okay',
-        log: { type: 'error', label: 'Fehler beim Laden der zuletzt benutzten Optionen', detail: e.message || 'Unbekannter Fehler.' }
-      });
-    } finally {
-      isLoadingLastUsed = false;
-    }
+      } catch (error) {
+        showInfoMessage({
+          title: 'Laden fehlgeschlagen',
+          text: 'Fehler beim Laden der zuletzt benutzten Optionen.',
+          confirmText: 'Okay',
+          log: { type: 'error', label: 'Fehler beim Laden der zuletzt benutzten Optionen', detail: error?.message || 'Unbekannter Fehler.' }
+        });
+      } finally {
+        isLoadingLastUsed = false;
+      }
+    });
   });
 
 
@@ -4709,7 +5048,7 @@ document.addEventListener("DOMContentLoaded", () => {
       jobConfig: { bodyguardChance: jobConfig.bodyguardChance, doctorChance: jobConfig.doctorChance },
       eventEngineState: getEventEngineSnapshot()
     };
-    localStorage.setItem('werwolfLastUsed', JSON.stringify(lastUsedOptions));
+    persistValue('werwolfLastUsed', JSON.stringify(lastUsedOptions));
 
     roles = roles.filter(Boolean);
 
@@ -5042,7 +5381,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // Session Management
-  function saveSession() {
+  async function saveSession() {
     const roleCounts = rolesAssigned.reduce((acc, role) => {
       acc[role] = (acc[role] || 0) + 1;
       return acc;
@@ -5108,24 +5447,28 @@ document.addEventListener("DOMContentLoaded", () => {
       jobConfig: { bodyguardChance: jobConfig.bodyguardChance, doctorChance: jobConfig.doctorChance }
     };
 
-    let sessions = JSON.parse(localStorage.getItem('werwolfSessions')) || [];
-    sessions.unshift(session); // Add to the beginning
-    if (sessions.length > 20) {
-      sessions = sessions.slice(0, 20); // Limit to 20 sessions
-    }
-
-    localStorage.setItem('werwolfSessions', JSON.stringify(sessions));
-    loadSessions();
+    await apiClient.sessions.create(session);
+    await loadSessions();
+    return session;
   }
 
-  function loadSessions() {
-    const sessions = JSON.parse(localStorage.getItem('werwolfSessions')) || [];
+  async function loadSessions() {
     sessionsList.innerHTML = '';
-
-    if (sessions.length === 0) {
-      sessionsList.innerHTML = '<li>Keine gespeicherten Sessions.</li>';
-      return;
+    let sessions = [];
+    try {
+      sessions = await apiClient.sessions.list();
+    } catch (error) {
+      sessionsList.innerHTML = '<li>Sessions konnten nicht geladen werden.</li>';
+      console.error('Sessions konnten nicht geladen werden.', error);
+      return [];
     }
+
+    if (!Array.isArray(sessions) || sessions.length === 0) {
+      sessionsList.innerHTML = '<li>Keine gespeicherten Sessions.</li>';
+      return [];
+    }
+
+    sessionsList.innerHTML = '';
 
     sessions.forEach(session => {
       const li = document.createElement('li');
@@ -5152,17 +5495,29 @@ document.addEventListener("DOMContentLoaded", () => {
     document.querySelectorAll('.delete-session-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const timestamp = e.target.dataset.timestamp;
+        const timestamp = Number(e.target.dataset.timestamp);
+        if (!Number.isFinite(timestamp)) {
+          return;
+        }
         deleteSession(timestamp);
       });
     });
+
+    return sessions;
   }
 
-  function deleteSession(timestamp) {
-    let sessions = JSON.parse(localStorage.getItem('werwolfSessions')) || [];
-    sessions = sessions.filter(s => s.timestamp != timestamp);
-    localStorage.setItem('werwolfSessions', JSON.stringify(sessions));
-    loadSessions();
+  async function deleteSession(timestamp) {
+    try {
+      await apiClient.sessions.remove(timestamp);
+      await loadSessions();
+    } catch (error) {
+      showInfoMessage({
+        title: 'Löschen fehlgeschlagen',
+        text: 'Die Session konnte nicht entfernt werden.',
+        confirmText: 'Okay',
+        log: { type: 'error', label: 'Session löschen fehlgeschlagen', detail: error?.message || 'Unbekannter Fehler.' }
+      });
+    }
   }
 
   function applySession(session) {
@@ -6844,11 +7199,7 @@ document.addEventListener("DOMContentLoaded", () => {
         label: '🌕 Blutmond (manuell)',
         expiresAfterNight: nightCounter + 1
       });
-      try {
-        localStorage.setItem('bloodMoonPityTimer', '0');
-      } catch (error) {
-        // ignore
-      }
+      persistValue('bloodMoonPityTimer', '0');
       persistEventEngineState();
       renderNarratorDashboard();
 
@@ -6872,11 +7223,7 @@ document.addEventListener("DOMContentLoaded", () => {
             label: '🌕 Blutmond (manuell)',
             expiresAfterNight: nightCounter + 1
           });
-          try {
-            localStorage.setItem('bloodMoonPityTimer', '0');
-          } catch (error) {
-            // ignore
-          }
+          persistValue('bloodMoonPityTimer', '0');
           persistEventEngineState();
           renderNarratorDashboard();
         }

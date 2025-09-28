@@ -3,40 +3,208 @@
 const fs = require('fs');
 const path = require('path');
 
-describe('Narrator dashboard integrations', () => {
-  let testApi;
+function createBackendMock() {
+  const storage = new Map();
+  let savedNames = [];
+  let savedRoles = [];
+  let theme = null;
+  let sessions = [];
 
-  beforeEach(() => {
-    jest.resetModules();
-    jest.clearAllTimers();
-    const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-    const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-    const headMatch = html.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
-
-    document.body.innerHTML = bodyMatch ? bodyMatch[1].replace(/<script[^>]*src="script\.js"[^>]*><\/script>/i, '') : '';
-    document.head.innerHTML = headMatch ? headMatch[1] : '';
-
-    window.alert = jest.fn();
-    window.confirm = jest.fn(() => true);
-    window.matchMedia = window.matchMedia || jest.fn(() => ({
-      matches: false,
-      addEventListener: jest.fn(),
-      removeEventListener: jest.fn()
-    }));
-
-    require('../script.js');
-    document.dispatchEvent(new Event('DOMContentLoaded'));
-
-    testApi = window.__WERWOLF_TEST__;
-    if (!testApi) {
-      throw new Error('Test API not available');
+  const normalizeTheme = (value) => {
+    if (typeof value !== 'string') {
+      return null;
     }
+    const trimmed = value.trim().toLowerCase();
+    return trimmed === 'dark' || trimmed === 'light' ? trimmed : null;
+  };
 
-    localStorage.clear();
+  const response = (status, body) => ({
+    ok: status >= 200 && status < 300,
+    status,
+    async json() {
+      return body;
+    },
+  });
 
-    testApi.setState({
-      players: [],
-      rolesAssigned: [],
+  const empty = () => ({
+    ok: true,
+    status: 204,
+    async json() {
+      return {};
+    },
+  });
+
+  const backend = {
+    fetch: jest.fn(async (url, options = {}) => {
+      const { pathname } = new URL(url, 'http://localhost');
+      const method = (options.method || 'GET').toUpperCase();
+      let payload = null;
+      if (options.body) {
+        try {
+          payload = JSON.parse(options.body);
+        } catch (error) {
+          payload = null;
+        }
+      }
+
+      if (pathname === '/api/theme') {
+        if (method === 'GET') {
+          return response(200, { theme });
+        }
+        if (method === 'PUT') {
+          const normalized = normalizeTheme(payload?.theme);
+          if (!normalized) {
+            return response(400, { error: 'Ungültiges Theme.' });
+          }
+          theme = normalized;
+          storage.set('theme', normalized);
+          return response(200, { theme });
+        }
+      }
+
+      if (pathname === '/api/saved-names') {
+        if (method === 'GET') {
+          return response(200, { names: savedNames.slice() });
+        }
+        if (method === 'PUT') {
+          const names = Array.isArray(payload?.names)
+            ? payload.names.filter((name) => typeof name === 'string' && name.trim().length > 0)
+            : [];
+          savedNames = names.map((name) => name.trim());
+          storage.set('werwolfSavedNames', savedNames.slice());
+          return response(200, { names: savedNames.slice() });
+        }
+      }
+
+      if (pathname === '/api/role-presets') {
+        if (method === 'GET') {
+          return response(200, { roles: savedRoles.slice() });
+        }
+        if (method === 'PUT') {
+          const roles = Array.isArray(payload?.roles)
+            ? payload.roles
+                .filter((role) => role && typeof role.name === 'string' && role.name.trim().length > 0)
+                .map((role) => ({
+                  name: role.name.trim(),
+                  quantity: Number.isFinite(role.quantity) ? Math.max(0, Math.round(role.quantity)) : 0,
+                }))
+            : [];
+          savedRoles = roles;
+          storage.set('werwolfSavedRoles', roles.map((role) => ({ ...role })));
+          return response(200, { roles: roles.map((role) => ({ ...role })) });
+        }
+      }
+
+      if (pathname.startsWith('/api/storage/')) {
+        const key = decodeURIComponent(pathname.replace('/api/storage/', ''));
+        if (method === 'GET') {
+          return response(200, { key, value: storage.has(key) ? storage.get(key) : null });
+        }
+        if (method === 'PUT') {
+          const value = payload ? payload.value ?? null : null;
+          storage.set(key, value);
+          return response(200, { key, value });
+        }
+        if (method === 'DELETE') {
+          storage.delete(key);
+          return empty();
+        }
+      }
+
+      if (pathname === '/api/sessions') {
+        if (method === 'GET') {
+          const ordered = sessions.slice().sort((a, b) => b.timestamp - a.timestamp);
+          return response(200, { sessions: ordered.slice(0, 20) });
+        }
+        if (method === 'POST') {
+          if (!payload || typeof payload.session !== 'object') {
+            return response(400, { error: 'Ungültige Session.' });
+          }
+          const timestamp = Number(payload.session.timestamp || Date.now());
+          const normalized = { ...payload.session, timestamp };
+          sessions = sessions.filter((session) => session.timestamp !== timestamp);
+          sessions.push(normalized);
+          sessions.sort((a, b) => b.timestamp - a.timestamp);
+          sessions = sessions.slice(0, 20);
+          return response(201, { session: normalized, sessions: sessions.slice() });
+        }
+      }
+
+      if (pathname.startsWith('/api/sessions/')) {
+        if (method === 'DELETE') {
+          const timestamp = Number(pathname.split('/').pop());
+          sessions = sessions.filter((session) => session.timestamp !== timestamp);
+          return empty();
+        }
+      }
+
+      return response(404, { error: 'Nicht gefunden' });
+    }),
+    reset() {
+      storage.clear();
+      savedNames = [];
+      savedRoles = [];
+      theme = null;
+      sessions = [];
+    },
+    setTheme(value) {
+      theme = typeof value === 'string' ? value : null;
+      if (theme) {
+        storage.set('theme', theme);
+      } else {
+        storage.delete('theme');
+      }
+    },
+    getTheme() {
+      return theme;
+    },
+    getStorage(key) {
+      return storage.has(key) ? storage.get(key) : null;
+    },
+  };
+
+  return backend;
+}
+
+const flushAsync = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  describe('Narrator dashboard integrations', () => {
+    let testApi;
+    let backend;
+
+    beforeEach(async () => {
+      jest.resetModules();
+      jest.clearAllTimers();
+      const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+      const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+      const headMatch = html.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
+
+      document.body.innerHTML = bodyMatch ? bodyMatch[1].replace(/<script[^>]*src="script\.js"[^>]*><\/script>/i, '') : '';
+      document.head.innerHTML = headMatch ? headMatch[1] : '';
+
+      window.alert = jest.fn();
+      window.confirm = jest.fn(() => true);
+      backend = createBackendMock();
+      backend.reset();
+      global.fetch = backend.fetch;
+      window.matchMedia = window.matchMedia || jest.fn(() => ({
+        matches: false,
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn()
+      }));
+
+      require('../script.js');
+      document.dispatchEvent(new Event('DOMContentLoaded'));
+      await flushAsync();
+
+      testApi = window.__WERWOLF_TEST__;
+      if (!testApi) {
+        throw new Error('Test API not available');
+      }
+
+      testApi.setState({
+        players: [],
+        rolesAssigned: [],
       deadPlayers: [],
       lovers: [],
       nightSteps: [],
@@ -139,11 +307,12 @@ describe('Narrator dashboard integrations', () => {
     expect(testApi.getActionLog()[0].label).toContain('Makro: Alle Spieler wiederbeleben');
   });
 
-  test('saving a session surfaces the confirmation modal', () => {
+  test('saving a session surfaces the confirmation modal', async () => {
     const modal = document.getElementById('confirmation-modal');
     expect(modal.style.display).not.toBe('flex');
 
     document.getElementById('save-game-btn').click();
+    await flushAsync();
 
     expect(window.alert).not.toHaveBeenCalled();
     expect(modal.style.display).toBe('flex');
@@ -156,11 +325,12 @@ describe('Narrator dashboard integrations', () => {
     expect(latest.type).toBe('info');
   });
 
-  test('saving empty player names logs an error via modal', () => {
+  test('saving empty player names logs an error via modal', async () => {
     const playersInput = document.getElementById('players');
     playersInput.value = '';
 
     document.getElementById('save-names-manually').click();
+    await flushAsync();
 
     const modal = document.getElementById('confirmation-modal');
     expect(window.alert).not.toHaveBeenCalled();
@@ -192,7 +362,7 @@ describe('Narrator dashboard integrations', () => {
     dispatchEvent(slider, 'change');
 
     expect(display.textContent).toBe('80%');
-    const storedConfigRaw = localStorage.getItem('werwolfJobConfig');
+    const storedConfigRaw = backend.getStorage('werwolfJobConfig');
     expect(storedConfigRaw).not.toBeNull();
     const storedConfig = JSON.parse(storedConfigRaw);
     expect(storedConfig.bodyguardChance).toBeCloseTo(0.8, 5);
@@ -219,7 +389,7 @@ describe('Narrator dashboard integrations', () => {
     slider.value = '70';
     dispatchEvent(slider, 'change');
 
-    const storedConfigRaw = localStorage.getItem('werwolfJobConfig');
+    const storedConfigRaw = backend.getStorage('werwolfJobConfig');
     expect(storedConfigRaw).not.toBeNull();
     const storedConfig = JSON.parse(storedConfigRaw);
     expect(storedConfig.doctorChance).toBeCloseTo(0.7, 5);

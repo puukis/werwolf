@@ -7,9 +7,179 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
 const headMatch = html.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
 
-function bootstrap({ savedTheme, matchMediaDark = false } = {}) {
+function createBackendMock() {
+  const storage = new Map();
+  let savedNames = [];
+  let savedRoles = [];
+  let theme = null;
+  let sessions = [];
+
+  const normalizeTheme = (value) => {
+    if (typeof value !== 'string') {
+      return null;
+    }
+    const trimmed = value.trim().toLowerCase();
+    return trimmed === 'dark' || trimmed === 'light' ? trimmed : null;
+  };
+
+  const response = (status, body) => ({
+    ok: status >= 200 && status < 300,
+    status,
+    async json() {
+      return body;
+    },
+  });
+
+  const empty = () => ({
+    ok: true,
+    status: 204,
+    async json() {
+      return {};
+    },
+  });
+
+  const backend = {
+    fetch: jest.fn(async (url, options = {}) => {
+      const { pathname } = new URL(url, 'http://localhost');
+      const method = (options.method || 'GET').toUpperCase();
+      let payload = null;
+      if (options.body) {
+        try {
+          payload = JSON.parse(options.body);
+        } catch (error) {
+          payload = null;
+        }
+      }
+
+      if (pathname === '/api/theme') {
+        if (method === 'GET') {
+          return response(200, { theme });
+        }
+        if (method === 'PUT') {
+          const normalized = normalizeTheme(payload?.theme);
+          if (!normalized) {
+            return response(400, { error: 'Ungültiges Theme.' });
+          }
+          theme = normalized;
+          storage.set('theme', normalized);
+          return response(200, { theme });
+        }
+      }
+
+      if (pathname === '/api/saved-names') {
+        if (method === 'GET') {
+          return response(200, { names: savedNames.slice() });
+        }
+        if (method === 'PUT') {
+          const names = Array.isArray(payload?.names)
+            ? payload.names.filter((name) => typeof name === 'string' && name.trim().length > 0)
+            : [];
+          savedNames = names.map((name) => name.trim());
+          storage.set('werwolfSavedNames', savedNames.slice());
+          return response(200, { names: savedNames.slice() });
+        }
+      }
+
+      if (pathname === '/api/role-presets') {
+        if (method === 'GET') {
+          return response(200, { roles: savedRoles.slice() });
+        }
+        if (method === 'PUT') {
+          const roles = Array.isArray(payload?.roles)
+            ? payload.roles
+                .filter((role) => role && typeof role.name === 'string' && role.name.trim().length > 0)
+                .map((role) => ({
+                  name: role.name.trim(),
+                  quantity: Number.isFinite(role.quantity) ? Math.max(0, Math.round(role.quantity)) : 0,
+                }))
+            : [];
+          savedRoles = roles;
+          storage.set('werwolfSavedRoles', roles.map((role) => ({ ...role })));
+          return response(200, { roles: roles.map((role) => ({ ...role })) });
+        }
+      }
+
+      if (pathname.startsWith('/api/storage/')) {
+        const key = decodeURIComponent(pathname.replace('/api/storage/', ''));
+        if (method === 'GET') {
+          return response(200, { key, value: storage.has(key) ? storage.get(key) : null });
+        }
+        if (method === 'PUT') {
+          const value = payload ? payload.value ?? null : null;
+          storage.set(key, value);
+          return response(200, { key, value });
+        }
+        if (method === 'DELETE') {
+          storage.delete(key);
+          return empty();
+        }
+      }
+
+      if (pathname === '/api/sessions') {
+        if (method === 'GET') {
+          const ordered = sessions.slice().sort((a, b) => b.timestamp - a.timestamp);
+          return response(200, { sessions: ordered.slice(0, 20) });
+        }
+        if (method === 'POST') {
+          if (!payload || typeof payload.session !== 'object') {
+            return response(400, { error: 'Ungültige Session.' });
+          }
+          const timestamp = Number(payload.session.timestamp || Date.now());
+          const normalized = { ...payload.session, timestamp };
+          sessions = sessions.filter((session) => session.timestamp !== timestamp);
+          sessions.push(normalized);
+          sessions.sort((a, b) => b.timestamp - a.timestamp);
+          sessions = sessions.slice(0, 20);
+          return response(201, { session: normalized, sessions: sessions.slice() });
+        }
+      }
+
+      if (pathname.startsWith('/api/sessions/')) {
+        if (method === 'DELETE') {
+          const timestamp = Number(pathname.split('/').pop());
+          sessions = sessions.filter((session) => session.timestamp !== timestamp);
+          return empty();
+        }
+      }
+
+      return response(404, { error: 'Nicht gefunden' });
+    }),
+    reset() {
+      storage.clear();
+      savedNames = [];
+      savedRoles = [];
+      theme = null;
+      sessions = [];
+    },
+    setTheme(value) {
+      theme = typeof value === 'string' ? value : null;
+      if (theme) {
+        storage.set('theme', theme);
+      } else {
+        storage.delete('theme');
+      }
+    },
+    getTheme() {
+      return theme;
+    },
+    getStorage(key) {
+      return storage.has(key) ? storage.get(key) : null;
+    },
+  };
+
+  return backend;
+}
+
+async function bootstrap({ savedTheme, matchMediaDark = false } = {}) {
   jest.resetModules();
   jest.clearAllTimers();
+
+  const backend = createBackendMock();
+  backend.reset();
+  if (typeof savedTheme === 'string') {
+    backend.setTheme(savedTheme);
+  }
+  global.fetch = backend.fetch;
 
   document.body.innerHTML = bodyMatch
     ? bodyMatch[1].replace(/<script[^>]*src="script\.js"[^>]*><\/script>/i, '')
@@ -18,11 +188,6 @@ function bootstrap({ savedTheme, matchMediaDark = false } = {}) {
 
   window.alert = jest.fn();
   window.confirm = jest.fn(() => true);
-
-  localStorage.clear();
-  if (typeof savedTheme === 'string') {
-    localStorage.setItem('theme', savedTheme);
-  }
 
   const themeListeners = [];
   const mediaQueryList = {
@@ -38,6 +203,7 @@ function bootstrap({ savedTheme, matchMediaDark = false } = {}) {
 
   require('../script.js');
   document.dispatchEvent(new Event('DOMContentLoaded'));
+  await new Promise((resolve) => setTimeout(resolve, 0));
 
   const testApi = window.__WERWOLF_TEST__;
   if (!testApi) {
@@ -47,6 +213,7 @@ function bootstrap({ savedTheme, matchMediaDark = false } = {}) {
   testApi.setState({ peaceDays: 0 });
 
   return {
+    backend,
     testApi,
     triggerThemeChange(matches) {
       themeListeners.forEach((listener) => listener({ matches }));
@@ -59,8 +226,8 @@ describe('State management and utility flows', () => {
     jest.clearAllTimers();
   });
 
-  test('setState converts legacy Bodyguard roles into jobs and updates trackers', () => {
-    const { testApi } = bootstrap();
+  test('setState converts legacy Bodyguard roles into jobs and updates trackers', async () => {
+    const { testApi } = await bootstrap();
 
     testApi.setState({
       players: ['Anna', 'Bert', 'Clara'],
@@ -75,8 +242,8 @@ describe('State management and utility flows', () => {
     expect(state.bodyguardPlayers).toEqual(['Anna']);
   });
 
-  test('explicit bodyguardPlayers reassignment replaces the current holder', () => {
-    const { testApi } = bootstrap();
+  test('explicit bodyguardPlayers reassignment replaces the current holder', async () => {
+    const { testApi } = await bootstrap();
 
     testApi.setState({
       players: ['Anna', 'Bert', 'Clara'],
@@ -97,8 +264,8 @@ describe('State management and utility flows', () => {
     expect(state.jobsAssigned[1]).toEqual([]);
   });
 
-  test('jobConfig updates clamp bodyguard chance and persist to storage', () => {
-    const { testApi } = bootstrap();
+  test('jobConfig updates clamp bodyguard chance and persist to storage', async () => {
+    const { testApi, backend } = await bootstrap();
     const slider = document.getElementById('bodyguard-job-chance');
     const display = document.getElementById('bodyguard-job-chance-display');
 
@@ -107,18 +274,18 @@ describe('State management and utility flows', () => {
     expect(state.jobConfig.bodyguardChance).toBeCloseTo(1, 5);
     expect(slider.value).toBe('100');
     expect(display.textContent).toBe('100%');
-    expect(JSON.parse(localStorage.getItem('werwolfJobConfig')).bodyguardChance).toBe(1);
+    expect(JSON.parse(backend.getStorage('werwolfJobConfig')).bodyguardChance).toBe(1);
 
     testApi.setState({ jobConfig: { bodyguardChance: -0.3 } });
     state = testApi.getState();
     expect(state.jobConfig.bodyguardChance).toBeCloseTo(0, 5);
     expect(slider.value).toBe('0');
     expect(display.textContent).toBe('0%');
-    expect(JSON.parse(localStorage.getItem('werwolfJobConfig')).bodyguardChance).toBe(0);
+    expect(JSON.parse(backend.getStorage('werwolfJobConfig')).bodyguardChance).toBe(0);
   });
 
-  test('reset-witch macro refreshes potions and records an action', () => {
-    const { testApi } = bootstrap();
+  test('reset-witch macro refreshes potions and records an action', async () => {
+    const { testApi } = await bootstrap();
 
     testApi.setState({ healRemaining: 0, poisonRemaining: 0 });
     const executed = testApi.runMacro('reset-witch');
@@ -133,8 +300,8 @@ describe('State management and utility flows', () => {
     expect(logEntry.detail).toContain('Heil 0');
   });
 
-  test('reset-witch macro logs a no-op when both potions are available', () => {
-    const { testApi } = bootstrap();
+  test('reset-witch macro logs a no-op when both potions are available', async () => {
+    const { testApi } = await bootstrap();
 
     const executed = testApi.runMacro('reset-witch');
 
@@ -144,8 +311,8 @@ describe('State management and utility flows', () => {
     expect(logEntry.detail).toContain('bereits über beide Tränke');
   });
 
-  test('rewind-night macro revives current victims and clears pending list', () => {
-    const { testApi } = bootstrap();
+  test('rewind-night macro revives current victims and clears pending list', async () => {
+    const { testApi } = await bootstrap();
 
     testApi.setState({
       players: ['Anna', 'Bert'],
@@ -166,8 +333,8 @@ describe('State management and utility flows', () => {
     expect(logEntry.detail).toContain('Bert');
   });
 
-  test('running an unknown macro returns false without crashing', () => {
-    const { testApi } = bootstrap();
+  test('running an unknown macro returns false without crashing', async () => {
+    const { testApi } = await bootstrap();
 
     const beforeLog = testApi.getActionLog().slice();
     const executed = testApi.runMacro('does-not-exist');
@@ -176,25 +343,24 @@ describe('State management and utility flows', () => {
     expect(testApi.getActionLog()).toEqual(beforeLog);
   });
 
-  test('theme initialization respects stored preference and responds to changes without preference', () => {
-    let env = bootstrap({ savedTheme: 'dark', matchMediaDark: false });
+  test('theme initialization respects stored preference and responds to changes without preference', async () => {
+    let env = await bootstrap({ savedTheme: 'dark', matchMediaDark: false });
 
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
-    expect(localStorage.getItem('theme')).toBe('dark');
+    expect(env.backend.getTheme()).toBe('dark');
     env.triggerThemeChange(false);
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
 
-    env = bootstrap({ matchMediaDark: false });
+    env = await bootstrap({ matchMediaDark: false });
     expect(document.documentElement.getAttribute('data-theme')).toBe('light');
-    expect(localStorage.getItem('theme')).toBe('light');
-    localStorage.removeItem('theme');
+    expect(env.backend.getTheme()).toBe('light');
     env.triggerThemeChange(true);
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
-    expect(localStorage.getItem('theme')).toBe('dark');
+    expect(env.backend.getTheme()).toBe('dark');
   });
 
-  test('job chances persist across rounds and assigned cards display the jobs', () => {
-    const { testApi } = bootstrap();
+  test('job chances persist across rounds and assigned cards display the jobs', async () => {
+    const { testApi } = await bootstrap();
 
     const bodyguardSlider = document.getElementById('bodyguard-job-chance');
     const doctorSlider = document.getElementById('doctor-job-chance');
@@ -257,4 +423,3 @@ describe('State management and utility flows', () => {
     expect(state.jobConfig.doctorChance).toBe(1);
   });
 });
-
