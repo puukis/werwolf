@@ -139,7 +139,7 @@
   right: 1.5rem;
   background: var(--theme-toggle-bg);
   border: 1px solid var(--theme-toggle-border);
-  border-radius: 50%;
+  border-radius: 0.85rem;
   width: 2.5rem;
   height: 2.5rem;
   display: flex;
@@ -2513,7 +2513,7 @@ body.night-active main.container {
     left: 1.5rem;
     background: var(--theme-toggle-bg);
     border: none;
-    border-radius: 50%;
+    border-radius: 0.85rem;
     width: 2.5rem;
     height: 2.5rem;
     display: flex;
@@ -2877,7 +2877,7 @@ body.phoenix-pulse-charged .container::before {
     right: 1rem;
     background: var(--theme-toggle-bg);
     border: 1px solid var(--border-color);
-    border-radius: 50%;
+    border-radius: 0.85rem;
     width: 3rem;
     height: 3rem;
     display: flex;
