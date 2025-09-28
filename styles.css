@@ -1048,6 +1048,14 @@ textarea {
   margin-top: 0.75rem;
 }
 
+.role-actions {
+  margin-bottom: 0.5rem;
+}
+
+#add-role {
+  margin-bottom: 0.5rem;
+}
+
 .large-btn {
   padding: 0.8rem 2rem;
   font-size: 1.1rem;
