@@ -1,52 +1,76 @@
 :root {
   /* Light theme (default) */
-  --bg-color: #f5f7fa;
-  --container-bg: #ffffff;
-  --text-color: #333333;
-  --text-light: #666666;
-  --border-color: #dfe3e9;
-  --button-bg: #0077ff;
-  --button-hover: #005fd1;
-  --button-secondary-bg: #e7eaf1;
-  --button-secondary-hover: #d2d5df;
-  --result-bg: #f9fafc;
-  --role-color: #333333;
-  --special-role-color: #8b5cf6;
-  --job-bodyguard-bg: #1f9d8f;
-  --job-bodyguard-text: #ffffff;
-  --job-doctor-bg: #f6c343;
-  --job-doctor-text: #2d2100;
-  --input-bg: #ffffff;
-  --input-border: #ccc;
-  --shadow-color: rgba(0, 0, 0, 0.08);
-  --theme-toggle-bg: #e7eaf1;
-  --theme-toggle-hover: #d2d5df;
-  --glow-color: rgba(0, 119, 255, 0.3);
+  --bg-fallback: #eef3fb;
+  --bg-color: radial-gradient(120% 120% at 50% 0%, rgba(59, 130, 246, 0.16) 0%, rgba(14, 165, 233, 0.08) 32%, rgba(255, 255, 255, 0.92) 100%),
+    linear-gradient(180deg, rgba(239, 246, 255, 0.92) 0%, rgba(226, 232, 240, 0.8) 100%);
+  --ambient-overlay: radial-gradient(120% 120% at 80% 20%, rgba(79, 70, 229, 0.12) 0%, rgba(79, 70, 229, 0) 70%);
+  --container-bg: rgba(255, 255, 255, 0.68);
+  --container-bg-strong: rgba(255, 255, 255, 0.82);
+  --text-color: rgba(31, 41, 55, 0.95);
+  --text-light: rgba(71, 85, 105, 0.8);
+  --border-color: rgba(148, 163, 184, 0.35);
+  --border-strong: rgba(148, 163, 184, 0.55);
+  --button-bg: rgba(0, 119, 255, 0.88);
+  --button-hover: rgba(0, 95, 209, 0.92);
+  --button-secondary-bg: rgba(231, 234, 241, 0.7);
+  --button-secondary-hover: rgba(210, 213, 223, 0.75);
+  --result-bg: rgba(248, 250, 252, 0.65);
+  --role-color: rgba(30, 41, 59, 0.95);
+  --special-role-color: rgba(139, 92, 246, 0.85);
+  --job-bodyguard-bg: rgba(31, 157, 143, 0.85);
+  --job-bodyguard-text: rgba(255, 255, 255, 0.98);
+  --job-doctor-bg: rgba(246, 195, 67, 0.88);
+  --job-doctor-text: rgba(45, 33, 0, 0.85);
+  --input-bg: rgba(255, 255, 255, 0.72);
+  --input-border: rgba(148, 163, 184, 0.45);
+  --shadow-color: rgba(15, 23, 42, 0.16);
+  --glass-blur-sm: 14px;
+  --glass-blur-lg: 30px;
+  --glass-shadow-soft: 0 22px 54px rgba(15, 23, 42, 0.14);
+  --glass-shadow-strong: 0 48px 96px rgba(15, 23, 42, 0.18);
+  --theme-toggle-bg: rgba(255, 255, 255, 0.7);
+  --theme-toggle-border: rgba(148, 163, 184, 0.35);
+  --theme-toggle-hover: rgba(255, 255, 255, 0.88);
+  --theme-toggle-shadow: 0 18px 32px rgba(15, 23, 42, 0.18);
+  --theme-toggle-fallback: rgba(231, 234, 241, 0.9);
+  --glow-color: rgba(59, 130, 246, 0.26);
 }
 
 [data-theme="dark"] {
-  --bg-color: #1a1a1a;
-  --container-bg: #2d2d2d;
-  --text-color: #f0f0f0;
-  --text-light: #b0b0b0;
-  --border-color: #444444;
-  --button-bg: #4a90e2;
-  --button-hover: #3a7bc8;
-  --button-secondary-bg: #3d3d3d;
-  --button-secondary-hover: #4d4d4d;
-  --result-bg: #333333;
-  --role-color: #f0f0f0;
-  --special-role-color: #a78bfa;
-  --job-bodyguard-bg: #1a8579;
-  --job-bodyguard-text: #ffffff;
-  --job-doctor-bg: #e7aa36;
-  --job-doctor-text: #1f1400;
-  --input-bg: #3d3d3d;
-  --input-border: #555555;
-  --shadow-color: rgba(0, 0, 0, 0.3);
-  --theme-toggle-bg: #3d3d3d;
-  --theme-toggle-hover: #4d4d4d;
-  --glow-color: rgba(74, 144, 226, 0.2);
+  --bg-fallback: #0b1120;
+  --bg-color: radial-gradient(120% 120% at 50% 0%, rgba(56, 189, 248, 0.15) 0%, rgba(14, 165, 233, 0.1) 32%, rgba(15, 23, 42, 0.92) 100%),
+    linear-gradient(200deg, rgba(15, 23, 42, 0.92) 0%, rgba(30, 41, 59, 0.88) 55%, rgba(17, 24, 39, 0.95) 100%);
+  --ambient-overlay: radial-gradient(120% 120% at 20% 20%, rgba(59, 130, 246, 0.16) 0%, rgba(59, 130, 246, 0) 70%);
+  --container-bg: rgba(17, 25, 40, 0.72);
+  --container-bg-strong: rgba(30, 41, 59, 0.78);
+  --text-color: rgba(240, 244, 255, 0.96);
+  --text-light: rgba(148, 163, 184, 0.78);
+  --border-color: rgba(94, 106, 135, 0.42);
+  --border-strong: rgba(148, 163, 184, 0.55);
+  --button-bg: rgba(74, 144, 226, 0.82);
+  --button-hover: rgba(58, 123, 200, 0.88);
+  --button-secondary-bg: rgba(60, 72, 96, 0.72);
+  --button-secondary-hover: rgba(73, 84, 110, 0.78);
+  --result-bg: rgba(45, 55, 72, 0.65);
+  --role-color: rgba(240, 244, 255, 0.95);
+  --special-role-color: rgba(167, 139, 250, 0.85);
+  --job-bodyguard-bg: rgba(26, 133, 121, 0.82);
+  --job-bodyguard-text: rgba(255, 255, 255, 0.96);
+  --job-doctor-bg: rgba(231, 170, 54, 0.82);
+  --job-doctor-text: rgba(31, 20, 0, 0.86);
+  --input-bg: rgba(45, 55, 72, 0.72);
+  --input-border: rgba(94, 106, 135, 0.5);
+  --shadow-color: rgba(5, 10, 25, 0.65);
+  --glass-blur-sm: 16px;
+  --glass-blur-lg: 34px;
+  --glass-shadow-soft: 0 24px 54px rgba(3, 7, 18, 0.45);
+  --glass-shadow-strong: 0 56px 104px rgba(3, 7, 18, 0.55);
+  --theme-toggle-bg: rgba(17, 25, 40, 0.58);
+  --theme-toggle-border: rgba(94, 106, 135, 0.45);
+  --theme-toggle-hover: rgba(30, 41, 59, 0.72);
+  --theme-toggle-shadow: 0 20px 36px rgba(3, 7, 18, 0.55);
+  --theme-toggle-fallback: rgba(61, 61, 61, 0.85);
+  --glow-color: rgba(56, 189, 248, 0.32);
 }
 
 /* Theme toggle button */
@@ -55,7 +79,7 @@
   top: 1.5rem;
   right: 1.5rem;
   background: var(--theme-toggle-bg);
-  border: none;
+  border: 1px solid var(--theme-toggle-border);
   border-radius: 50%;
   width: 2.5rem;
   height: 2.5rem;
@@ -64,12 +88,16 @@
   justify-content: center;
   cursor: pointer;
   z-index: 1000;
-  transition: background-color 0.3s ease;
+  box-shadow: var(--theme-toggle-shadow);
+  backdrop-filter: blur(var(--glass-blur-sm)) saturate(130%);
+  -webkit-backdrop-filter: blur(var(--glass-blur-sm)) saturate(130%);
+  transition: background-color 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
   padding: 0;
 }
 
 .theme-toggle:hover {
   background: var(--theme-toggle-hover);
+  box-shadow: var(--glass-shadow-soft);
 }
 
 .theme-toggle svg {
@@ -91,6 +119,14 @@
   display: block;
 }
 
+@supports not ((backdrop-filter: blur(0.5rem))) {
+  .theme-toggle {
+    background: var(--theme-toggle-fallback);
+    box-shadow: 0 12px 24px var(--shadow-color);
+    border-color: var(--border-strong);
+  }
+}
+
 /* Basic reset */
 * {
   box-sizing: border-box;
@@ -99,8 +135,12 @@
 }
 
 html {
-  background: var(--bg-color);
-  transition: background-color 0.3s ease;
+  min-height: 100%;
+  background-color: var(--bg-fallback);
+  background-image: var(--bg-color);
+  background-attachment: fixed;
+  background-size: cover;
+  transition: background-color 0.4s ease, background-image 0.6s ease;
 }
 
 body {
@@ -112,6 +152,28 @@ body {
   justify-content: center;
   padding: 2rem;
   transition: color 0.3s ease;
+  position: relative;
+  isolation: isolate;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: var(--ambient-overlay);
+  opacity: 1;
+  z-index: -2;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  background: radial-gradient(120% 120% at 50% 100%, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0) 60%);
+  mix-blend-mode: soft-light;
 }
 
 .sr-only {
@@ -128,12 +190,22 @@ body {
 
 .container {
   background: var(--container-bg);
-  border-radius: 12px;
+  border-radius: 16px;
+  border: 1px solid var(--border-color);
   max-width: 900px;
   width: 100%;
-  box-shadow: 0 8px 24px var(--shadow-color);
+  box-shadow: var(--glass-shadow-soft);
   padding: 2.5rem;
-  transition: background-color 0.3s ease, box-shadow 0.3s ease;
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(125%);
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(125%);
+  transition: background-color 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+@supports not ((backdrop-filter: blur(0.5rem))) {
+  .container {
+    background: var(--container-bg-strong);
+    border-color: var(--border-strong);
+  }
 }
 
 body.auth-locked {
