@@ -1,5 +1,7 @@
 /* Rollen Geber – Client-side JS */
 
+let authManager = null;
+
 const apiClient = (() => {
   const baseUrl = '/api';
   const storageCache = new Map();
@@ -17,7 +19,16 @@ const apiClient = (() => {
       }
     }
 
-    const response = await fetch(`${baseUrl}${path}`, config);
+    config.credentials = 'include';
+
+    let response;
+    try {
+      response = await fetch(`${baseUrl}${path}`, config);
+    } catch (networkError) {
+      const error = new Error('Verbindung zum Server konnte nicht hergestellt werden.');
+      error.cause = networkError;
+      throw error;
+    }
 
     if (!response.ok) {
       let message = `Anfrage fehlgeschlagen (${response.status})`;
@@ -40,6 +51,9 @@ const apiClient = (() => {
       }
       const error = new Error(message);
       error.status = response.status;
+      if (error.status === 401 && authManager && typeof authManager.handleUnauthorized === 'function') {
+        authManager.handleUnauthorized(message);
+      }
       throw error;
     }
 
@@ -72,6 +86,11 @@ const apiClient = (() => {
 
   function cacheValue(key, value) {
     storageCache.set(key, value ?? null);
+  }
+
+  function clearCaches() {
+    storageCache.clear();
+    inflightReads.clear();
   }
 
   async function getStorageItem(key) {
@@ -128,6 +147,7 @@ const apiClient = (() => {
 
   return {
     request,
+    clearCaches,
     storage: {
       getItem: getStorageItem,
       getCachedItem: getCachedStorageItem,
@@ -198,8 +218,432 @@ const apiClient = (() => {
         });
       },
     },
+    auth: {
+      async me() {
+        const data = await request('/auth/me');
+        return data?.user ?? null;
+      },
+      async login(credentials) {
+        const data = await request('/auth/login', {
+          method: 'POST',
+          body: JSON.stringify(credentials),
+        });
+        return data?.user ?? null;
+      },
+      async register(payload) {
+        const data = await request('/auth/register', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        return data?.user ?? null;
+      },
+      async logout() {
+        await request('/auth/logout', { method: 'POST' });
+      },
+    },
   };
 })();
+
+function createAuthManager() {
+  const welcomeScreen = document.getElementById('welcome-screen');
+  const authTabs = Array.from(document.querySelectorAll('[data-auth-target]'));
+  const loginForm = document.getElementById('login-form');
+  const registerForm = document.getElementById('register-form');
+  const authForms = { login: loginForm, register: registerForm };
+  const authMessage = document.getElementById('auth-message');
+  const loginEmailInput = document.getElementById('login-email');
+  const loginPasswordInput = document.getElementById('login-password');
+  const registerNameInput = document.getElementById('register-display-name');
+  const registerEmailInput = document.getElementById('register-email');
+  const registerPasswordInput = document.getElementById('register-password');
+  const registerAdminInput = document.getElementById('register-admin-code');
+  const userChip = document.getElementById('user-chip');
+  const userNameEl = document.getElementById('user-name');
+  const userRoleEl = document.getElementById('user-role');
+  const logoutBtn = document.getElementById('logout-btn');
+
+  let activeForm = 'login';
+  let messageTimeout = null;
+  let formPending = false;
+  let currentUser = null;
+  const waiters = [];
+
+  const cloneUser = (user) => (user ? { ...user } : null);
+
+  function clearMessage() {
+    if (!authMessage) {
+      return;
+    }
+    if (messageTimeout) {
+      clearTimeout(messageTimeout);
+      messageTimeout = null;
+    }
+    authMessage.textContent = '';
+    authMessage.classList.remove('visible', 'error', 'success', 'info');
+    authMessage.removeAttribute('data-variant');
+  }
+
+  function setMessage(text, variant = 'info', { persist = false } = {}) {
+    if (!authMessage) {
+      return;
+    }
+
+    if (messageTimeout) {
+      clearTimeout(messageTimeout);
+      messageTimeout = null;
+    }
+
+    authMessage.textContent = text;
+    authMessage.dataset.variant = variant;
+    authMessage.classList.add('visible');
+    authMessage.classList.remove('error', 'success', 'info');
+    authMessage.classList.add(variant);
+
+    if (!persist) {
+      messageTimeout = setTimeout(() => {
+        if (authMessage) {
+          authMessage.classList.remove('visible', 'error', 'success', 'info');
+          authMessage.textContent = '';
+          authMessage.removeAttribute('data-variant');
+        }
+        messageTimeout = null;
+      }, 6000);
+    }
+  }
+
+  function focusActiveForm() {
+    const targetInput = activeForm === 'register'
+      ? (registerNameInput || registerEmailInput)
+      : loginEmailInput;
+    if (targetInput) {
+      const focusHandler = () => {
+        targetInput.focus();
+        targetInput.select?.();
+      };
+
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(focusHandler);
+      } else {
+        setTimeout(focusHandler, 0);
+      }
+    }
+  }
+
+  function toggleScreen(show) {
+    if (!welcomeScreen) {
+      return;
+    }
+
+    if (show) {
+      welcomeScreen.classList.add('visible');
+      welcomeScreen.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('auth-locked');
+      focusActiveForm();
+    } else {
+      welcomeScreen.classList.remove('visible');
+      welcomeScreen.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('auth-locked');
+    }
+  }
+
+  function setActiveForm(target) {
+    const normalized = target === 'register' ? 'register' : 'login';
+    activeForm = normalized;
+
+    authTabs.forEach((tab) => {
+      if (!tab) {
+        return;
+      }
+      const tabTarget = tab.dataset.authTarget;
+      const isActive = tabTarget === normalized;
+      tab.classList.toggle('active', isActive);
+      tab.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+
+    Object.entries(authForms).forEach(([name, form]) => {
+      if (!form) {
+        return;
+      }
+      form.classList.toggle('active', name === normalized);
+    });
+
+    if (welcomeScreen?.classList.contains('visible')) {
+      focusActiveForm();
+    }
+  }
+
+  function updateUserChip() {
+    if (!userChip) {
+      return;
+    }
+
+    if (!currentUser) {
+      userChip.classList.add('hidden');
+      userChip.setAttribute('aria-hidden', 'true');
+      if (userNameEl) {
+        userNameEl.textContent = '';
+      }
+      if (userRoleEl) {
+        userRoleEl.textContent = '';
+        userRoleEl.classList.add('hidden');
+      }
+      if (logoutBtn) {
+        logoutBtn.classList.add('hidden');
+        logoutBtn.disabled = false;
+      }
+      return;
+    }
+
+    userChip.classList.remove('hidden');
+    userChip.setAttribute('aria-hidden', 'false');
+    if (userNameEl) {
+      userNameEl.textContent = currentUser.displayName || currentUser.email || 'Spielleitung';
+    }
+    if (userRoleEl) {
+      if (currentUser.isAdmin) {
+        userRoleEl.textContent = 'Admin';
+        userRoleEl.classList.remove('hidden');
+      } else {
+        userRoleEl.textContent = '';
+        userRoleEl.classList.add('hidden');
+      }
+    }
+    if (logoutBtn) {
+      logoutBtn.classList.remove('hidden');
+      logoutBtn.disabled = false;
+    }
+  }
+
+  function resolveWaiters(user) {
+    if (!waiters.length) {
+      return;
+    }
+    const snapshot = cloneUser(user);
+    while (waiters.length) {
+      const resolve = waiters.shift();
+      try {
+        resolve(snapshot);
+      } catch (error) {
+        console.error('Auth-Warteschlange fehlgeschlagen:', error);
+      }
+    }
+  }
+
+  function applyUser(user, { refreshCaches = false, suppressScreen = false } = {}) {
+    const previousId = currentUser?.id ?? null;
+    currentUser = user ? cloneUser(user) : null;
+
+    const nextId = currentUser?.id ?? null;
+    const shouldRefreshCaches = refreshCaches || previousId !== nextId;
+    if (shouldRefreshCaches) {
+      apiClient.clearCaches();
+    }
+
+    updateUserChip();
+
+    if (currentUser) {
+      if (!suppressScreen) {
+        toggleScreen(false);
+      }
+      clearMessage();
+      resolveWaiters(currentUser);
+    } else if (!suppressScreen) {
+      setActiveForm('login');
+      toggleScreen(true);
+    }
+  }
+
+  function handleUnauthorized(message) {
+    if (message) {
+      setMessage(message, 'error', { persist: true });
+    }
+    applyUser(null, { refreshCaches: true });
+    setActiveForm('login');
+  }
+
+  function waitForAuth() {
+    if (currentUser) {
+      return Promise.resolve(cloneUser(currentUser));
+    }
+    return new Promise((resolve) => {
+      waiters.push((user) => resolve(cloneUser(user)));
+    });
+  }
+
+  authTabs.forEach((tab) => {
+    if (!tab) {
+      return;
+    }
+    tab.addEventListener('click', () => {
+      setActiveForm(tab.dataset.authTarget);
+      clearMessage();
+    });
+  });
+
+  if (loginForm) {
+    loginForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (formPending) {
+        return;
+      }
+
+      const email = loginEmailInput?.value.trim() ?? '';
+      const password = loginPasswordInput?.value ?? '';
+
+      if (!email || !password) {
+        setMessage('Bitte gib E-Mail und Passwort ein.', 'error');
+        return;
+      }
+
+      formPending = true;
+      const submitBtn = loginForm.querySelector('button[type="submit"]');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.classList.add('loading');
+      }
+
+      try {
+        const user = await apiClient.auth.login({ email, password });
+        if (user) {
+          loginForm.reset();
+          applyUser(user, { refreshCaches: true });
+        } else {
+          setMessage('Anmeldung fehlgeschlagen.', 'error', { persist: true });
+        }
+      } catch (error) {
+        setMessage(error?.message || 'Anmeldung fehlgeschlagen.', 'error', { persist: true });
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.classList.remove('loading');
+        }
+        formPending = false;
+      }
+    });
+  }
+
+  if (registerForm) {
+    registerForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (formPending) {
+        return;
+      }
+
+      const displayName = registerNameInput?.value.trim() ?? '';
+      const email = registerEmailInput?.value.trim() ?? '';
+      const password = registerPasswordInput?.value ?? '';
+      const adminCodeRaw = registerAdminInput?.value.trim() ?? '';
+
+      if (!displayName || !email || !password) {
+        setMessage('Bitte fülle alle Pflichtfelder aus.', 'error');
+        return;
+      }
+
+      formPending = true;
+      const submitBtn = registerForm.querySelector('button[type="submit"]');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.classList.add('loading');
+      }
+
+      try {
+        const payload = { displayName, email, password };
+        if (adminCodeRaw) {
+          payload.adminCode = adminCodeRaw;
+        }
+        const user = await apiClient.auth.register(payload);
+        if (user) {
+          registerForm.reset();
+          applyUser(user, { refreshCaches: true });
+        } else {
+          setMessage('Registrierung fehlgeschlagen.', 'error', { persist: true });
+        }
+      } catch (error) {
+        setMessage(error?.message || 'Registrierung fehlgeschlagen.', 'error', { persist: true });
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.classList.remove('loading');
+        }
+        formPending = false;
+      }
+    });
+  }
+
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+      if (formPending) {
+        return;
+      }
+      formPending = true;
+      logoutBtn.disabled = true;
+      try {
+        await apiClient.auth.logout();
+        setMessage('Du wurdest abgemeldet. Bis bald!', 'info');
+      } catch (error) {
+        setMessage(error?.message || 'Abmelden fehlgeschlagen.', 'error', { persist: true });
+      } finally {
+        applyUser(null, { refreshCaches: true });
+        setActiveForm('login');
+        formPending = false;
+        logoutBtn.disabled = false;
+      }
+    });
+  }
+
+  async function bootstrap() {
+    setActiveForm('login');
+    updateUserChip();
+
+    const bootUser = typeof window !== 'undefined' && window.__WERWOLF_TEST_BOOT__
+      ? window.__WERWOLF_TEST_BOOT__.user
+      : null;
+
+    if (bootUser) {
+      applyUser(bootUser, { refreshCaches: true, suppressScreen: true });
+      toggleScreen(false);
+      return cloneUser(currentUser);
+    }
+
+    try {
+      const user = await apiClient.auth.me();
+      if (user) {
+        applyUser(user, { suppressScreen: true });
+        toggleScreen(false);
+        return cloneUser(currentUser);
+      }
+      setMessage('Bitte melde dich an, um weiterzuspielen.', 'info');
+    } catch (error) {
+      if (error?.status && error.status !== 401) {
+        setMessage(error.message || 'Anmeldung momentan nicht möglich.', 'error', { persist: true });
+      }
+    }
+
+    setActiveForm('login');
+    toggleScreen(true);
+    return null;
+  }
+
+  return {
+    bootstrap,
+    waitForAuth,
+    getUser() {
+      return cloneUser(currentUser);
+    },
+    forceUser(user, options = {}) {
+      applyUser(user, { refreshCaches: true, suppressScreen: Boolean(options?.suppressScreen) });
+    },
+    handleUnauthorized,
+    showLogin() {
+      setActiveForm('login');
+      toggleScreen(true);
+    },
+    showRegister() {
+      setActiveForm('register');
+      toggleScreen(true);
+    },
+  };
+}
 
 let currentTheme = 'light';
 let themePreferenceStored = false;
@@ -250,7 +694,22 @@ async function initTheme() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  document.getElementById("players").value = "";
+  authManager = createAuthManager();
+  await authManager.bootstrap();
+
+  try {
+    if (!authManager.getUser()) {
+      await authManager.waitForAuth();
+    }
+  } catch (error) {
+    console.error('Anmeldung konnte nicht abgeschlossen werden.', error);
+    return;
+  }
+
+  const playersInput = document.getElementById('players');
+  if (playersInput) {
+    playersInput.value = '';
+  }
 
   const storageKeysToPrefetch = [
     'werwolfEventConfig',
@@ -7534,7 +7993,28 @@ document.addEventListener("DOMContentLoaded", async () => {
         triggerRandomEvents();
         nightCounter = upcomingNight;
       },
-      resolvePhoenixPulse: applyPhoenixPulseRevival
+      resolvePhoenixPulse: applyPhoenixPulseRevival,
+      auth: {
+        getUser() {
+          return authManager?.getUser() || null;
+        },
+        forceUser(user) {
+          if (authManager) {
+            authManager.forceUser(user, { suppressScreen: true });
+          }
+        },
+        async requireLogin() {
+          if (!authManager) {
+            return null;
+          }
+          const user = authManager.getUser();
+          if (user) {
+            return user;
+          }
+          authManager.showLogin();
+          return authManager.waitForAuth();
+        },
+      }
     };
   }
 

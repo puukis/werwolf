@@ -43,6 +43,7 @@ A web-based role-playing game of deception and deduction. This is a digital vers
 - **Random Events**: An optional "Full Moon" event that gives werewolves an extra kill, adding a layer of unpredictability.
 - **Responsive Design**: Playable on both desktop and mobile devices.
 - **Persistenter Speicher**: Alle Spielstände und Einstellungen werden über einen kleinen Express-Server mit PostgreSQL-Backend gespeichert.
+- **Authentifizierung & Admin-Rollen**: Eine Passwort-gestützte Anmeldung mit hübschem Begrüßungsbildschirm schützt das Dashboard. Der erste Account wird automatisch Administrator, weitere Admins können über einen optionalen Code freigeschaltet werden.
 
 ---
 
@@ -155,7 +156,15 @@ The Erzähler tools keep the flow of the evening under control and give you reco
     ```bash
     npm install
     ```
-4.  Starte einen lokalen Webserver deiner Wahl (z. B. über eine IDE oder `npx http-server`) und öffne anschließend `index.html` über `http://localhost:<PORT>`. Für die persistente Speicherung muss der API-Server unter derselben Origin laufen (siehe [Backend & Datenbank](#%EF%B8%8F-backend--datenbank)).
+4.  Führe einmalig die Datenbankmigrationen aus:
+    ```bash
+    npm run migrate
+    ```
+5.  Starte den API-Server in einem separaten Terminal:
+    ```bash
+    npm start
+    ```
+6.  Starte einen lokalen Webserver deiner Wahl (z. B. über eine IDE oder `npx http-server`) und öffne anschließend `index.html` über `http://localhost:<PORT>`. Für die persistente Speicherung muss der API-Server unter derselben Origin laufen (siehe [Backend & Datenbank](#%EF%B8%8F-backend--datenbank)).
 
 > 💡 Wenn du die Datei nur per `file://` öffnest, kann der Browser den API-Server nicht erreichen und der Status wird nicht gespeichert.
 
@@ -196,6 +205,8 @@ PGPORT=5432
 PGUSER=werwolf_user
 PGPASSWORD=wechselmich
 PGDATABASE=werwolf
+# Optional: Geheimen Admin-Code festlegen, um weitere Admin-Accounts zu schützen
+# WERWOLF_ADMIN_CODE=supergeheimer-code
 ```
 
 Bei gehosteten Datenbanken kannst du stattdessen eine vollständige URL setzen:
@@ -206,6 +217,8 @@ export DATABASE_URL="postgres://werwolf_user:wechselmich@db.example.com:5432/wer
 
 Wenn dein Anbieter SSL erzwingt, ergänze `PGSSLMODE=require`, damit `pg` die Verbindung korrekt aufbaut.
 
+> ℹ️ Ohne `WERWOLF_ADMIN_CODE` erhält nur der allererste registrierte Account Administratorrechte. Mit gesetztem Code können spätere Benutzer:innen im Registrierungsformular den Code angeben, um ebenfalls Admin zu werden.
+
 ### 3. Migrationen ausführen
 
 Nach der Konfiguration einmalig alle Tabellen anlegen:
@@ -214,7 +227,7 @@ Nach der Konfiguration einmalig alle Tabellen anlegen:
 npm run migrate
 ```
 
-Das Script legt eine Tabelle `kv_store` (für Einstellungen & Namenslisten) sowie `sessions` (für Spielstände) an und protokolliert ausgeführte Migrationen in `schema_migrations`.
+Das Script legt Tabellen für Einstellungen (`kv_store`), Spielstände (`sessions`), Benutzer (`users`) sowie Session-Tokens (`user_sessions`) an und protokolliert ausgeführte Migrationen in `schema_migrations`.
 
 ### 4. API-Server starten
 
@@ -247,7 +260,18 @@ Viele Tools (VS Code *Live Server*, `vite preview`, `serve`, usw.) bieten Proxy
 > psql $PGDATABASE $PGUSER
 > SELECT key, value, updated_at FROM kv_store;
 > SELECT timestamp, created_at FROM sessions;
+> SELECT email, display_name, is_admin FROM users;
 > ```
+
+---
+
+## 🔐 Authentifizierung & Benutzerverwaltung
+
+- **Willkommensbildschirm**: Ohne aktive Sitzung blendet das Frontend automatisch eine vollflächige Willkommenskarte mit Login- und Registrierformular ein. Nach erfolgreicher Anmeldung steht die komplette Erzähleroberfläche zur Verfügung.
+- **Registrierung**: Das Formular erwartet eine gültige E-Mail-Adresse, einen Anzeigenamen (≥ 2 Zeichen) und ein Passwort (≥ 8 Zeichen). Der erste angelegte Account wird automatisch Administrator.
+- **Admin-Code**: Setze optional die Umgebungsvariable `WERWOLF_ADMIN_CODE`, um weitere Administrator:innen nur mit einem geheimen Code freizuschalten. Ohne Code erhalten zusätzliche Konten Standardrechte.
+- **Sessions & Cookies**: Nach Login oder Registrierung legt der Server ein httpOnly-Cookie (`werwolf_session`) an, das sieben Tage gültig bleibt. Über `/api/auth/logout` kann die Sitzung jederzeit beendet werden.
+- **Tests & Automatisierung**: `npm test -- --runInBand` führt alle Jest-Suites aus. Die Tests mocken den Login, damit UI-Regressionen auch ohne echte Sessions abgedeckt werden.
 
 ---
 

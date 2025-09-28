@@ -1,9 +1,236 @@
 const express = require('express');
+const crypto = require('crypto');
 const runMigrations = require('./migrate');
 const { query } = require('./db');
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
+app.use(cookieParserMiddleware);
+app.use(loadUserFromSession);
+
+const SESSION_COOKIE_NAME = 'werwolf_session';
+const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
+const isProduction = process.env.NODE_ENV === 'production';
+const baseCookieOptions = {
+  httpOnly: true,
+  sameSite: 'lax',
+  secure: isProduction,
+  path: '/',
+};
+
+function parseCookies(headerValue) {
+  if (!headerValue || typeof headerValue !== 'string') {
+    return {};
+  }
+
+  return headerValue
+    .split(';')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+    .reduce((acc, part) => {
+      const separator = part.indexOf('=');
+      if (separator === -1) {
+        return acc;
+      }
+
+      const key = decodeURIComponent(part.slice(0, separator).trim());
+      const value = decodeURIComponent(part.slice(separator + 1).trim());
+      if (key.length > 0) {
+        acc[key] = value;
+      }
+      return acc;
+    }, {});
+}
+
+function cookieParserMiddleware(req, res, next) {
+  req.cookies = parseCookies(req.headers?.cookie || '');
+  next();
+}
+
+function hashToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function scryptAsync(password, salt) {
+  return new Promise((resolve, reject) => {
+    crypto.scrypt(password, salt, 64, (error, derivedKey) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve(derivedKey);
+      }
+    });
+  });
+}
+
+async function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derivedKey = await scryptAsync(password, salt);
+  return `${salt}:${derivedKey.toString('hex')}`;
+}
+
+async function verifyPassword(password, storedHash) {
+  if (typeof storedHash !== 'string' || storedHash.indexOf(':') === -1) {
+    return false;
+  }
+  const [salt, key] = storedHash.split(':');
+  if (!salt || !key) {
+    return false;
+  }
+  const derivedKey = await scryptAsync(password, salt);
+  const storedKey = Buffer.from(key, 'hex');
+  if (storedKey.length !== derivedKey.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(storedKey, derivedKey);
+}
+
+function normalizeEmail(email) {
+  if (typeof email !== 'string') {
+    return null;
+  }
+  const normalized = email.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
+    return null;
+  }
+  return normalized;
+}
+
+function normalizeDisplayName(name) {
+  if (typeof name !== 'string') {
+    return null;
+  }
+  const normalized = name.replace(/\s+/g, ' ').trim();
+  if (normalized.length < 2) {
+    return null;
+  }
+  return normalized;
+}
+
+function formatUser(row) {
+  if (!row) {
+    return null;
+  }
+  return {
+    id: row.id,
+    email: row.email,
+    displayName: row.display_name,
+    isAdmin: row.is_admin,
+  };
+}
+
+async function cleanupExpiredSessions() {
+  await query('DELETE FROM user_sessions WHERE expires_at <= NOW()');
+}
+
+async function createSession(userId) {
+  await cleanupExpiredSessions();
+  const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const token = crypto.randomBytes(32).toString('hex');
+    const tokenHash = hashToken(token);
+    try {
+      await query(
+        'INSERT INTO user_sessions (token_hash, user_id, expires_at) VALUES ($1, $2, $3)',
+        [tokenHash, userId, expiresAt]
+      );
+      return { token, expiresAt };
+    } catch (error) {
+      if (error?.code === '23505') {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new Error('Sitzung konnte nicht gespeichert werden.');
+}
+
+async function destroySessionByToken(token) {
+  if (!token) {
+    return;
+  }
+  const tokenHash = hashToken(token);
+  await query('DELETE FROM user_sessions WHERE token_hash = $1', [tokenHash]);
+}
+
+async function loadSession(token) {
+  if (!token) {
+    return null;
+  }
+  const tokenHash = hashToken(token);
+  const result = await query(
+    `SELECT s.token_hash, s.expires_at, u.id, u.email, u.display_name, u.is_admin
+       FROM user_sessions s
+       JOIN users u ON u.id = s.user_id
+      WHERE s.token_hash = $1`,
+    [tokenHash]
+  );
+
+  if (result.rowCount === 0) {
+    return null;
+  }
+
+  const row = result.rows[0];
+  const expiresAt = new Date(row.expires_at);
+  if (Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) {
+    await query('DELETE FROM user_sessions WHERE token_hash = $1', [tokenHash]);
+    return null;
+  }
+
+  return {
+    tokenHash: row.token_hash,
+    expiresAt,
+    user: {
+      id: row.id,
+      email: row.email,
+      displayName: row.display_name,
+      isAdmin: row.is_admin,
+    },
+  };
+}
+
+function setSessionCookie(res, token, expiresAt) {
+  res.cookie(SESSION_COOKIE_NAME, token, { ...baseCookieOptions, expires: expiresAt });
+}
+
+function clearSessionCookie(res) {
+  res.clearCookie(SESSION_COOKIE_NAME, { ...baseCookieOptions, expires: new Date(0) });
+}
+
+async function loadUserFromSession(req, res, next) {
+  const token = req.cookies?.[SESSION_COOKIE_NAME];
+  req.user = null;
+
+  if (!token) {
+    return next();
+  }
+
+  try {
+    const session = await loadSession(token);
+    if (!session) {
+      clearSessionCookie(res);
+      return next();
+    }
+
+    req.user = session.user;
+    req.sessionTokenHash = session.tokenHash;
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+}
+
+function requireAuthForApi(req, res, next) {
+  if (req.path?.startsWith('/auth')) {
+    return next();
+  }
+  if (!req.user) {
+    return res.status(401).json({ error: 'Bitte melde dich an.' });
+  }
+  return next();
+}
 
 function normalizeTheme(theme) {
   if (typeof theme !== 'string') {
@@ -36,6 +263,127 @@ async function setSetting(key, value) {
 async function removeSetting(key) {
   await query('DELETE FROM kv_store WHERE key = $1', [key]);
 }
+
+app.get('/api/auth/me', (req, res) => {
+  if (!req.user) {
+    return res.json({ user: null });
+  }
+  return res.json({ user: { ...req.user } });
+});
+
+app.post('/api/auth/logout', async (req, res) => {
+  try {
+    const token = req.cookies?.[SESSION_COOKIE_NAME];
+    if (token) {
+      await destroySessionByToken(token);
+    }
+    clearSessionCookie(res);
+    return res.status(204).end();
+  } catch (error) {
+    console.error('Abmelden fehlgeschlagen:', error);
+    return res.status(500).json({ error: 'Abmelden fehlgeschlagen.' });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    const normalizedEmail = normalizeEmail(email);
+    if (!normalizedEmail || typeof password !== 'string' || password.length === 0) {
+      return res.status(400).json({ error: 'E-Mail oder Passwort ist ungültig.' });
+    }
+
+    const result = await query(
+      `SELECT id, email, display_name, is_admin, password_hash
+         FROM users
+        WHERE LOWER(email) = LOWER($1)
+        LIMIT 1`,
+      [normalizedEmail]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(400).json({ error: 'E-Mail oder Passwort ist falsch.' });
+    }
+
+    const userRow = result.rows[0];
+    const passwordValid = await verifyPassword(password, userRow.password_hash);
+    if (!passwordValid) {
+      return res.status(400).json({ error: 'E-Mail oder Passwort ist falsch.' });
+    }
+
+    const { token, expiresAt } = await createSession(userRow.id);
+    setSessionCookie(res, token, expiresAt);
+
+    return res.json({ user: formatUser(userRow) });
+  } catch (error) {
+    console.error('Anmeldung fehlgeschlagen:', error);
+    return res.status(500).json({ error: 'Anmeldung fehlgeschlagen.' });
+  }
+});
+
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { email, password, displayName, adminCode, adminKey } = req.body || {};
+    const normalizedEmail = normalizeEmail(email);
+    const normalizedDisplayName = normalizeDisplayName(displayName);
+    const providedAdminCode = (() => {
+      if (typeof adminCode === 'string' && adminCode.trim().length > 0) {
+        return adminCode.trim();
+      }
+      if (typeof adminKey === 'string' && adminKey.trim().length > 0) {
+        return adminKey.trim();
+      }
+      return '';
+    })();
+
+    if (!normalizedEmail) {
+      return res.status(400).json({ error: 'Bitte gib eine gültige E-Mail-Adresse an.' });
+    }
+    if (!normalizedDisplayName) {
+      return res.status(400).json({ error: 'Der Anzeigename muss mindestens zwei Zeichen enthalten.' });
+    }
+    if (typeof password !== 'string' || password.length < 8) {
+      return res.status(400).json({ error: 'Das Passwort muss mindestens 8 Zeichen haben.' });
+    }
+
+    const existing = await query('SELECT 1 FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [normalizedEmail]);
+    if (existing.rowCount > 0) {
+      return res.status(409).json({ error: 'Diese E-Mail-Adresse wird bereits verwendet.' });
+    }
+
+    const adminCountResult = await query('SELECT COUNT(*)::int AS count FROM users WHERE is_admin = TRUE');
+    const hasAdmin = Number(adminCountResult.rows[0].count || 0) > 0;
+    const expectedAdminCode = (process.env.WERWOLF_ADMIN_CODE || '').trim();
+    let isAdmin = false;
+
+    if (!hasAdmin) {
+      isAdmin = true;
+    } else if (providedAdminCode && expectedAdminCode && providedAdminCode === expectedAdminCode) {
+      isAdmin = true;
+    } else if (providedAdminCode && (!expectedAdminCode || providedAdminCode !== expectedAdminCode)) {
+      return res.status(403).json({ error: 'Der angegebene Admin-Code ist ungültig.' });
+    }
+
+    const passwordHash = await hashPassword(password);
+    const insertResult = await query(
+      `INSERT INTO users (email, password_hash, display_name, is_admin)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, email, display_name, is_admin`,
+      [normalizedEmail, passwordHash, normalizedDisplayName, isAdmin]
+    );
+
+    const userRow = insertResult.rows[0];
+    const { token, expiresAt } = await createSession(userRow.id);
+    setSessionCookie(res, token, expiresAt);
+
+    return res.status(201).json({ user: formatUser(userRow) });
+  } catch (error) {
+    console.error('Registrierung fehlgeschlagen:', error);
+    return res.status(500).json({ error: 'Registrierung fehlgeschlagen.' });
+  }
+});
+
+app.use('/api', requireAuthForApi);
 
 app.get('/api/theme', async (req, res) => {
   try {

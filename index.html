@@ -49,10 +49,77 @@
             <path d="M10 7a7 7 0 0 0 12 4.9v.1c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2h.1A6.979 6.979 0 0 0 10 7zm-6 5a8 8 0 0 0 15.062 3.762A9 9 0 0 1 8.238 4.938 7.999 7.999 0 0 0 4 12z"/>
         </svg>
     </button>
+    <div id="welcome-screen" class="welcome-screen" aria-hidden="true">
+        <div class="welcome-panel">
+            <div class="welcome-hero">
+                <h2>Willkommen zurück, Erzähler:in</h2>
+                <p>Verwalte Sessions, Rollen und Ereignisse mit wenigen Klicks und behalte dein Dorf jederzeit im Blick.</p>
+                <ul class="welcome-highlights">
+                    <li>
+                        <span class="welcome-icon">🛡️</span>
+                        <div>
+                            <strong>Geschützt</strong>
+                            <p>Nur angemeldete Leitungen sehen gespeicherte Sessions, Rollenlayouts und Spielstände.</p>
+                        </div>
+                    </li>
+                    <li>
+                        <span class="welcome-icon">⚡</span>
+                        <div>
+                            <strong>Schneller Einstieg</strong>
+                            <p>Deine zuletzt genutzten Einstellungen stehen direkt bereit – auch auf neuen Geräten.</p>
+                        </div>
+                    </li>
+                    <li>
+                        <span class="welcome-icon">🌙</span>
+                        <div>
+                            <strong>Atmosphäre pur</strong>
+                            <p>Wechsle dynamisch zwischen hellen und dunklen Themen und bring das Dorf zum Leuchten.</p>
+                        </div>
+                    </li>
+                </ul>
+            </div>
+            <div class="auth-card" role="dialog" aria-labelledby="auth-tabs" aria-modal="true">
+                <div class="auth-tabs" id="auth-tabs" role="tablist" aria-label="Anmeldung und Registrierung">
+                    <button type="button" class="auth-tab active" data-auth-target="login" aria-pressed="true">Anmelden</button>
+                    <button type="button" class="auth-tab" data-auth-target="register" aria-pressed="false">Registrieren</button>
+                </div>
+                <div id="auth-message" class="auth-message" aria-live="polite"></div>
+                <form id="login-form" class="auth-form active" autocomplete="on">
+                    <label for="login-email">E-Mail-Adresse</label>
+                    <input id="login-email" type="email" name="email" autocomplete="email" required placeholder="du@beispiel.de" />
+                    <label for="login-password">Passwort</label>
+                    <input id="login-password" type="password" name="password" autocomplete="current-password" required placeholder="••••••••" />
+                    <button type="submit" class="primary-btn">Loslegen</button>
+                </form>
+                <form id="register-form" class="auth-form" autocomplete="on">
+                    <label for="register-display-name">Anzeigename</label>
+                    <input id="register-display-name" type="text" name="displayName" autocomplete="name" required placeholder="Spielleitung" />
+                    <label for="register-email">E-Mail-Adresse</label>
+                    <input id="register-email" type="email" name="email" autocomplete="email" required placeholder="du@beispiel.de" />
+                    <label for="register-password">Passwort</label>
+                    <input id="register-password" type="password" name="password" autocomplete="new-password" required placeholder="Mindestens 8 Zeichen" />
+                    <label for="register-admin-code">Administrator-Code <span class="optional">(optional)</span></label>
+                    <input id="register-admin-code" type="text" name="adminCode" autocomplete="one-time-code" placeholder="Nur falls vorhanden" />
+                    <p class="auth-hint">Die erste registrierte Person wird automatisch Admin. Weitere Admins benötigen einen Code.</p>
+                    <button type="submit" class="primary-btn">Registrieren</button>
+                </form>
+            </div>
+        </div>
+    </div>
     <main class="container">
         <div class="main-header">
             <h1>Werwolf</h1>
             <p class="subtitle">Rollenverteiler für das Werwolf-Spiel</p>
+            <div class="user-toolbar">
+                <div id="user-chip" class="user-chip hidden" aria-live="polite" aria-atomic="true">
+                    <span class="user-avatar" aria-hidden="true">🎲</span>
+                    <div class="user-info">
+                        <span id="user-name" class="user-name">Spielleitung</span>
+                        <span id="user-role" class="user-role-badge hidden">Admin</span>
+                    </div>
+                </div>
+                <button id="logout-btn" type="button" class="secondary-btn subtle-btn hidden">Abmelden</button>
+            </div>
             <div id="blood-moon-odds" class="blood-moon-odds"></div>
             <div id="phoenix-pulse-status" class="phoenix-pulse-status" aria-live="polite">Phoenix Pulse: –</div>
             <div class="config-action">
