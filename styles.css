@@ -34,6 +34,30 @@
   --theme-toggle-shadow: 0 18px 32px rgba(15, 23, 42, 0.18);
   --theme-toggle-fallback: rgba(231, 234, 241, 0.9);
   --glow-color: rgba(59, 130, 246, 0.26);
+  --glass-panel-bg: rgba(255, 255, 255, 0.64);
+  --glass-panel-strong-bg: rgba(255, 255, 255, 0.74);
+  --glass-panel-border: rgba(148, 163, 184, 0.4);
+  --glass-panel-highlight: rgba(255, 255, 255, 0.8);
+  --glass-panel-specular: rgba(59, 130, 246, 0.18);
+  --glass-panel-shadow: 0 24px 60px rgba(15, 23, 42, 0.16), 0 12px 28px rgba(59, 130, 246, 0.08);
+  --glass-panel-hover-shadow: 0 34px 88px rgba(15, 23, 42, 0.18), 0 18px 40px rgba(59, 130, 246, 0.12);
+  --glass-panel-fallback: rgba(255, 255, 255, 0.92);
+  --glass-button-bg-start: rgba(59, 130, 246, 0.95);
+  --glass-button-bg-end: rgba(37, 99, 235, 0.85);
+  --glass-button-hover-start: rgba(37, 99, 235, 0.98);
+  --glass-button-hover-end: rgba(29, 78, 216, 0.9);
+  --glass-button-border: rgba(255, 255, 255, 0.5);
+  --glass-button-shadow: 0 20px 36px rgba(59, 130, 246, 0.28), 0 12px 24px rgba(15, 23, 42, 0.2);
+  --glass-button-hover-shadow: 0 26px 44px rgba(59, 130, 246, 0.32), 0 14px 28px rgba(15, 23, 42, 0.22);
+  --glass-secondary-bg-start: rgba(255, 255, 255, 0.72);
+  --glass-secondary-bg-end: rgba(226, 232, 240, 0.65);
+  --glass-secondary-hover-start: rgba(241, 245, 249, 0.82);
+  --glass-secondary-hover-end: rgba(226, 232, 240, 0.72);
+  --glass-secondary-border: rgba(148, 163, 184, 0.45);
+  --glass-secondary-shadow: 0 14px 32px rgba(148, 163, 184, 0.22), 0 10px 22px rgba(15, 23, 42, 0.15);
+  --glass-secondary-hover-shadow: 0 20px 40px rgba(148, 163, 184, 0.26), 0 12px 26px rgba(15, 23, 42, 0.18);
+  --glass-focus-ring: rgba(59, 130, 246, 0.55);
+  --glass-sheen-angle: 135deg;
 }
 
 [data-theme="dark"] {
@@ -71,6 +95,29 @@
   --theme-toggle-shadow: 0 20px 36px rgba(3, 7, 18, 0.55);
   --theme-toggle-fallback: rgba(61, 61, 61, 0.85);
   --glow-color: rgba(56, 189, 248, 0.32);
+  --glass-panel-bg: rgba(20, 27, 41, 0.72);
+  --glass-panel-strong-bg: rgba(31, 43, 68, 0.78);
+  --glass-panel-border: rgba(94, 106, 135, 0.5);
+  --glass-panel-highlight: rgba(148, 163, 184, 0.28);
+  --glass-panel-specular: rgba(56, 189, 248, 0.26);
+  --glass-panel-shadow: 0 28px 64px rgba(3, 7, 18, 0.55), 0 16px 36px rgba(56, 189, 248, 0.16);
+  --glass-panel-hover-shadow: 0 36px 88px rgba(3, 7, 18, 0.6), 0 20px 44px rgba(56, 189, 248, 0.2);
+  --glass-panel-fallback: rgba(30, 41, 59, 0.85);
+  --glass-button-bg-start: rgba(96, 165, 250, 0.92);
+  --glass-button-bg-end: rgba(59, 130, 246, 0.88);
+  --glass-button-hover-start: rgba(79, 140, 231, 0.98);
+  --glass-button-hover-end: rgba(37, 99, 235, 0.92);
+  --glass-button-border: rgba(148, 197, 255, 0.35);
+  --glass-button-shadow: 0 22px 42px rgba(37, 99, 235, 0.35), 0 16px 32px rgba(3, 7, 18, 0.55);
+  --glass-button-hover-shadow: 0 28px 52px rgba(37, 99, 235, 0.4), 0 20px 40px rgba(3, 7, 18, 0.6);
+  --glass-secondary-bg-start: rgba(45, 55, 72, 0.78);
+  --glass-secondary-bg-end: rgba(30, 41, 59, 0.72);
+  --glass-secondary-hover-start: rgba(67, 78, 102, 0.86);
+  --glass-secondary-hover-end: rgba(45, 55, 72, 0.78);
+  --glass-secondary-border: rgba(94, 106, 135, 0.55);
+  --glass-secondary-shadow: 0 16px 36px rgba(5, 10, 25, 0.55), 0 10px 24px rgba(56, 189, 248, 0.18);
+  --glass-secondary-hover-shadow: 0 24px 46px rgba(5, 10, 25, 0.6), 0 12px 28px rgba(56, 189, 248, 0.22);
+  --glass-focus-ring: rgba(125, 211, 252, 0.55);
 }
 
 /* Theme toggle button */
@@ -124,6 +171,23 @@
     background: var(--theme-toggle-fallback);
     box-shadow: 0 12px 24px var(--shadow-color);
     border-color: var(--border-strong);
+  }
+
+  .welcome-highlights li,
+  .auth-card,
+  .card {
+    background: var(--glass-panel-fallback);
+    box-shadow: 0 18px 40px var(--shadow-color);
+  }
+
+  .primary-btn {
+    background: var(--btn-fallback, var(--button-bg));
+    box-shadow: 0 12px 26px rgba(15, 23, 42, 0.25);
+  }
+
+  .secondary-btn {
+    background: var(--btn-fallback, var(--button-secondary-bg));
+    box-shadow: 0 10px 20px rgba(148, 163, 184, 0.25);
   }
 }
 
@@ -281,20 +345,38 @@ body.auth-locked {
 }
 
 .welcome-highlights li {
+  --glass-overlay-color: var(--glass-panel-highlight);
+  --glass-specular-color: var(--glass-panel-specular);
+  --glass-highlight-opacity: 0.45;
+  --glass-highlight-active-opacity: 0.65;
+  --glass-specular-opacity: 0.28;
+  --glass-specular-active-opacity: 0.42;
   display: flex;
   gap: 1rem;
   align-items: flex-start;
-  background: var(--result-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 18px;
   padding: 1rem 1.25rem;
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+  border-radius: 18px;
+  position: relative;
+  background: var(--glass-panel-bg);
+  border: 1px solid var(--glass-panel-border);
+  box-shadow: var(--glass-panel-shadow);
+  backdrop-filter: blur(var(--glass-blur-sm)) saturate(135%);
+  -webkit-backdrop-filter: blur(var(--glass-blur-sm)) saturate(135%);
+  overflow: hidden;
+  transform: translateY(0);
+  transition: transform 0.35s ease, box-shadow 0.35s ease, border-color 0.35s ease;
+  will-change: transform;
+  isolation: isolate;
+}
+
+.welcome-highlights li:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--glass-panel-hover-shadow);
 }
 
 [data-theme="dark"] .welcome-highlights li {
-  background: rgba(46, 52, 74, 0.9);
-  border-color: rgba(100, 116, 139, 0.45);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  background: var(--glass-panel-strong-bg);
+  border-color: var(--glass-panel-border);
 }
 
 .welcome-icon {
@@ -316,19 +398,101 @@ body.auth-locked {
 }
 
 .auth-card {
+  --glass-overlay-color: var(--glass-panel-highlight);
+  --glass-specular-color: var(--glass-panel-specular);
+  --glass-highlight-opacity: 0.55;
+  --glass-highlight-active-opacity: 0.78;
+  --glass-specular-opacity: 0.35;
+  --glass-specular-active-opacity: 0.5;
   flex: 1 1 340px;
-  background: var(--container-bg);
-  border: 1px solid var(--border-color);
+  min-width: 320px;
+  position: relative;
+  background: var(--glass-panel-bg);
+  border: 1px solid var(--glass-panel-border);
   border-radius: 20px;
   padding: 2rem;
-  box-shadow: 0 28px 60px rgba(15, 23, 42, 0.18);
-  min-width: 320px;
+  box-shadow: var(--glass-panel-shadow);
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(135%);
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(135%);
+  overflow: hidden;
+  transform: translateY(0);
+  transition: transform 0.35s ease, box-shadow 0.35s ease, border-color 0.35s ease;
+  will-change: transform;
+  isolation: isolate;
+}
+
+.auth-card:hover,
+.auth-card:focus-within {
+  transform: translateY(-6px);
+  box-shadow: var(--glass-panel-hover-shadow);
+  border-color: var(--glass-panel-border);
 }
 
 [data-theme="dark"] .auth-card {
-  background: rgba(36, 38, 55, 0.95);
-  border-color: rgba(100, 116, 139, 0.35);
-  box-shadow: 0 28px 60px rgba(0, 0, 0, 0.6);
+  background: var(--glass-panel-strong-bg);
+}
+
+:is(.welcome-highlights li, .auth-card, .card, .primary-btn, .secondary-btn)::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  background: linear-gradient(
+      var(--glass-sheen-angle),
+      var(--glass-overlay-color, var(--glass-panel-highlight)) 0%,
+      rgba(255, 255, 255, 0) 58%
+    );
+  opacity: var(--glass-highlight-opacity, 0.6);
+  pointer-events: none;
+  mix-blend-mode: screen;
+  transition: opacity 0.35s ease;
+}
+
+:is(.welcome-highlights li, .auth-card, .card, .primary-btn, .secondary-btn)::after {
+  content: "";
+  position: absolute;
+  inset: -8% -18% 0 -18%;
+  border-radius: inherit;
+  background: radial-gradient(
+      120% 95% at 20% 0%,
+      var(--glass-specular-color, rgba(255, 255, 255, 0.45)) 0%,
+      rgba(255, 255, 255, 0) 62%
+    );
+  opacity: var(--glass-specular-opacity, 0.35);
+  pointer-events: none;
+  mix-blend-mode: screen;
+  transition: opacity 0.35s ease;
+}
+
+:is(.welcome-highlights li, .auth-card, .card, .primary-btn, .secondary-btn):hover::before,
+:is(.welcome-highlights li, .auth-card, .card):focus-within::before,
+:is(.primary-btn, .secondary-btn):focus-visible::before {
+  opacity: var(--glass-highlight-active-opacity, 0.78);
+}
+
+:is(.welcome-highlights li, .auth-card, .card, .primary-btn, .secondary-btn):hover::after,
+:is(.welcome-highlights li, .auth-card, .card):focus-within::after,
+:is(.primary-btn, .secondary-btn):focus-visible::after {
+  opacity: var(--glass-specular-active-opacity, 0.48);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-highlights li,
+  .auth-card,
+  .card,
+  .primary-btn,
+  .secondary-btn {
+    transition: none;
+    transform: none;
+  }
+
+  .welcome-highlights li:hover,
+  .auth-card:hover,
+  .card:hover,
+  .primary-btn:hover,
+  .secondary-btn:hover {
+    transform: none;
+  }
 }
 
 .auth-tabs {
@@ -809,17 +973,36 @@ body.auth-locked {
 }
 
 .card {
-  background: var(--input-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
+  --glass-overlay-color: var(--glass-panel-highlight);
+  --glass-specular-color: var(--glass-panel-specular);
+  --glass-highlight-opacity: 0.5;
+  --glass-highlight-active-opacity: 0.72;
+  --glass-specular-opacity: 0.32;
+  --glass-specular-active-opacity: 0.46;
+  position: relative;
+  background: var(--glass-panel-bg);
+  border: 1px solid var(--glass-panel-border);
+  border-radius: 16px;
   padding: 1.5rem;
-  box-shadow: 0 2px 4px var(--shadow-color);
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  box-shadow: var(--glass-panel-shadow);
+  backdrop-filter: blur(var(--glass-blur-sm)) saturate(135%);
+  -webkit-backdrop-filter: blur(var(--glass-blur-sm)) saturate(135%);
+  overflow: hidden;
+  transform: translateY(0);
+  transition: transform 0.35s ease, box-shadow 0.35s ease, border-color 0.35s ease;
+  will-change: transform;
+  isolation: isolate;
 }
 
-.card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 12px 28px var(--shadow-color);
+.card:hover,
+.card:focus-within {
+  transform: translateY(-6px);
+  box-shadow: var(--glass-panel-hover-shadow);
+  border-color: var(--glass-panel-border);
+}
+
+[data-theme="dark"] .card {
+  background: var(--glass-panel-strong-bg);
 }
 
 .card h2 {
@@ -856,19 +1039,19 @@ textarea {
 }
 
 .primary-btn.night {
-  background: #4a148c; /* Dark purple */
-}
-
-.primary-btn.night:hover {
-  background: #3a106a;
+  --btn-bg-start: rgba(120, 40, 180, 0.95);
+  --btn-bg-end: rgba(74, 20, 140, 0.92);
+  --btn-hover-start: rgba(110, 33, 170, 0.98);
+  --btn-hover-end: rgba(64, 16, 124, 0.94);
+  --btn-fallback: #4a148c;
 }
 
 [data-theme="dark"] .primary-btn.night {
-  background: #9c27b0;
-}
-
-[data-theme="dark"] .primary-btn.night:hover {
-  background: #89229b;
+  --btn-bg-start: rgba(172, 106, 219, 0.92);
+  --btn-bg-end: rgba(124, 58, 237, 0.9);
+  --btn-hover-start: rgba(154, 78, 216, 0.98);
+  --btn-hover-end: rgba(109, 40, 217, 0.94);
+  --btn-fallback: #9c27b0;
 }
 
 h1, h2, h3 {
@@ -1008,27 +1191,110 @@ button {
 }
 
 .primary-btn {
-  background: var(--button-bg);
+  --glass-overlay-color: rgba(255, 255, 255, 0.82);
+  --glass-specular-color: rgba(255, 255, 255, 0.55);
+  --glass-highlight-opacity: 0.78;
+  --glass-highlight-active-opacity: 0.98;
+  --glass-specular-opacity: 0.4;
+  --glass-specular-active-opacity: 0.55;
+  --btn-bg-start: var(--glass-button-bg-start);
+  --btn-bg-end: var(--glass-button-bg-end);
+  --btn-hover-start: var(--glass-button-hover-start);
+  --btn-hover-end: var(--glass-button-hover-end);
+  --btn-shadow-current: var(--glass-button-shadow);
+  --btn-fallback: var(--button-bg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  position: relative;
+  padding: 0.65rem 1.35rem;
+  border-radius: 999px;
+  border: 1px solid var(--glass-button-border);
+  background: linear-gradient(var(--glass-sheen-angle), var(--btn-bg-start) 0%, var(--btn-bg-end) 100%);
   color: #fff;
-  padding: 0.6rem 1.2rem;
-  transition: background-color 0.3s ease, transform 0.2s ease;
+  box-shadow: var(--btn-shadow-current);
+  text-shadow: 0 1px 3px rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(var(--glass-blur-sm)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--glass-blur-sm)) saturate(140%);
+  transition: transform 0.25s ease, box-shadow 0.35s ease, background 0.35s ease, border-color 0.35s ease, color 0.35s ease;
+  overflow: hidden;
+  isolation: isolate;
+  will-change: transform;
 }
 
 .primary-btn:hover {
-  background: var(--button-hover);
-  transform: scale(1.05);
+  --btn-shadow-current: var(--glass-button-hover-shadow);
+  background: linear-gradient(var(--glass-sheen-angle), var(--btn-hover-start) 0%, var(--btn-hover-end) 100%);
+  transform: translateY(-2px);
+}
+
+.primary-btn:active {
+  transform: translateY(0);
+  --btn-shadow-current: var(--glass-button-shadow);
+}
+
+.primary-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--btn-shadow-current), 0 0 0 3px var(--glass-focus-ring);
 }
 
 .secondary-btn {
-  background: var(--button-secondary-bg);
+  --glass-overlay-color: rgba(255, 255, 255, 0.7);
+  --glass-specular-color: rgba(255, 255, 255, 0.45);
+  --glass-highlight-opacity: 0.65;
+  --glass-highlight-active-opacity: 0.82;
+  --glass-specular-opacity: 0.36;
+  --glass-specular-active-opacity: 0.48;
+  --btn-bg-start: var(--glass-secondary-bg-start);
+  --btn-bg-end: var(--glass-secondary-bg-end);
+  --btn-hover-start: var(--glass-secondary-hover-start);
+  --btn-hover-end: var(--glass-secondary-hover-end);
+  --btn-shadow-current: var(--glass-secondary-shadow);
+  --btn-fallback: var(--button-secondary-bg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  position: relative;
+  padding: 0.6rem 1.2rem;
+  border-radius: 999px;
+  border: 1px solid var(--glass-secondary-border);
+  background: linear-gradient(var(--glass-sheen-angle), var(--btn-bg-start) 0%, var(--btn-bg-end) 100%);
   color: var(--text-color);
-  padding: 0.5rem 1rem;
-  border: 1px solid var(--border-color);
-  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+  box-shadow: var(--btn-shadow-current);
+  backdrop-filter: blur(var(--glass-blur-sm)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--glass-blur-sm)) saturate(140%);
+  transition: transform 0.25s ease, box-shadow 0.35s ease, background 0.35s ease, border-color 0.35s ease, color 0.35s ease;
+  overflow: hidden;
+  isolation: isolate;
+  will-change: transform;
 }
 
 .secondary-btn:hover {
-  background: var(--button-secondary-hover);
+  --btn-shadow-current: var(--glass-secondary-hover-shadow);
+  background: linear-gradient(var(--glass-sheen-angle), var(--btn-hover-start) 0%, var(--btn-hover-end) 100%);
+  transform: translateY(-1px);
+}
+
+.secondary-btn:active {
+  transform: translateY(0);
+  --btn-shadow-current: var(--glass-secondary-shadow);
+}
+
+.secondary-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--btn-shadow-current), 0 0 0 3px var(--glass-focus-ring);
+}
+
+[data-theme="dark"] .primary-btn {
+  --glass-overlay-color: rgba(255, 255, 255, 0.68);
+  --glass-specular-color: rgba(125, 211, 252, 0.42);
+}
+
+[data-theme="dark"] .secondary-btn {
+  --glass-overlay-color: rgba(125, 211, 252, 0.28);
+  --glass-specular-color: rgba(125, 211, 252, 0.4);
 }
 
 .actions {
