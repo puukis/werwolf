@@ -19,6 +19,11 @@
         <div class="cloud cloud-2"></div>
         <div class="cloud cloud-3"></div>
     </div>
+    <div id="scene-effects" class="scene-effects" aria-hidden="true">
+        <canvas id="fog-canvas" class="scene-canvas fog-layer"></canvas>
+        <canvas id="particle-canvas" class="scene-canvas particle-layer"></canvas>
+    </div>
+    <div id="audio-captions" class="audio-captions" role="status" aria-live="polite" aria-atomic="true"></div>
     <div id="phoenix-pulse-overlay" class="phoenix-pulse-overlay" aria-hidden="true">
         <div class="phoenix-pulse-backdrop"></div>
         <div class="phoenix-pulse-orb">
@@ -286,6 +291,45 @@ Carla
                         <h6>Mögliche Konsequenzen</h6>
                         <ul id="event-card-preview"></ul>
                     </div>
+                </div>
+            </div>
+            <div class="config-section">
+                <h4>Erzähler:innen-Einstellungen</h4>
+                <label class="config-toggle" for="narrator-mute">
+                    <span>Audio stummschalten</span>
+                    <input type="checkbox" id="narrator-mute">
+                </label>
+                <div class="config-slider">
+                    <label for="narrator-master-volume">Gesamtlautstärke</label>
+                    <input type="range" id="narrator-master-volume" min="0" max="100" step="1" value="70">
+                    <span id="narrator-master-volume-display">70%</span>
+                </div>
+                <div class="config-slider">
+                    <label for="narrator-ambient-volume">Atmosphäre</label>
+                    <input type="range" id="narrator-ambient-volume" min="0" max="100" step="1" value="60">
+                    <span id="narrator-ambient-volume-display">60%</span>
+                </div>
+                <div class="config-slider">
+                    <label for="narrator-stinger-volume">Effekte</label>
+                    <input type="range" id="narrator-stinger-volume" min="0" max="100" step="1" value="75">
+                    <span id="narrator-stinger-volume-display">75%</span>
+                </div>
+                <label class="config-toggle" for="narrator-captions">
+                    <span>Untertitel für Audiohinweise</span>
+                    <input type="checkbox" id="narrator-captions">
+                </label>
+                <label class="config-toggle" for="reduced-motion-toggle">
+                    <span>Animationen reduzieren</span>
+                    <input type="checkbox" id="reduced-motion-toggle">
+                </label>
+                <div class="config-select">
+                    <label for="theme-preset-select">Stimmungsvorlage</label>
+                    <select id="theme-preset-select">
+                        <option value="dynamic">Dynamisch</option>
+                        <option value="dawn">Morgengrauen</option>
+                        <option value="twilight">Zwielicht</option>
+                        <option value="ritual">Ritualfeuer</option>
+                    </select>
                 </div>
             </div>
             <div class="config-section">

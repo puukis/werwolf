@@ -706,6 +706,773 @@ async function initTheme() {
   return currentTheme;
 }
 
+const prefersReducedMotionMedia = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+  ? window.matchMedia('(prefers-reduced-motion: reduce)')
+  : null;
+
+const narratorSettingsDefaults = (() => {
+  const reducedMotion = !!(prefersReducedMotionMedia && prefersReducedMotionMedia.matches);
+  return {
+    masterVolume: 0.7,
+    ambientVolume: 0.55,
+    stingerVolume: 0.75,
+    muted: false,
+    captionsEnabled: false,
+    reducedMotion,
+    themePreset: 'dynamic'
+  };
+})();
+
+let narratorSettings = { ...narratorSettingsDefaults };
+let reducedMotionPreferenceStored = false;
+let currentSceneMood = 'village';
+let effectsManager = null;
+
+const sceneMoodConfig = {
+  village: {
+    intensity: 0.55,
+    fog: 0.12,
+    torch: 0.25,
+    accent: '#4ade80',
+    softAccent: 'rgba(74, 222, 128, 0.28)',
+    fogColor: 'rgba(124, 166, 146, 0.25)'
+  },
+  day: {
+    intensity: 0.75,
+    fog: 0.08,
+    torch: 0.18,
+    accent: '#facc15',
+    softAccent: 'rgba(250, 204, 21, 0.30)',
+    fogColor: 'rgba(251, 211, 141, 0.24)'
+  },
+  night: {
+    intensity: 0.5,
+    fog: 0.22,
+    torch: 0.32,
+    accent: '#60a5fa',
+    softAccent: 'rgba(96, 165, 250, 0.28)',
+    fogColor: 'rgba(46, 64, 56, 0.38)'
+  },
+  'blood-moon': {
+    intensity: 0.45,
+    fog: 0.28,
+    torch: 0.4,
+    accent: '#ff4d4d',
+    softAccent: 'rgba(255, 77, 77, 0.45)',
+    fogColor: 'rgba(94, 23, 35, 0.42)'
+  },
+  'phoenix-pulse': {
+    intensity: 0.6,
+    fog: 0.18,
+    torch: 0.65,
+    accent: '#f97316',
+    softAccent: 'rgba(249, 115, 22, 0.38)',
+    fogColor: 'rgba(129, 44, 22, 0.32)'
+  }
+};
+
+const themePresetModifiers = {
+  dynamic: { intensity: 1, fog: 1, torch: 1 },
+  dawn: {
+    intensity: 1.2,
+    fog: 0.85,
+    torch: 0.9,
+    accent: '#facc15',
+    softAccent: 'rgba(250, 204, 21, 0.36)',
+    fogColor: 'rgba(255, 236, 179, 0.36)'
+  },
+  twilight: {
+    intensity: 0.85,
+    fog: 1.15,
+    torch: 1.2,
+    accent: '#818cf8',
+    softAccent: 'rgba(129, 140, 248, 0.34)',
+    fogColor: 'rgba(72, 85, 121, 0.42)'
+  },
+  ritual: {
+    intensity: 0.95,
+    fog: 1.35,
+    torch: 1.45,
+    accent: '#ff4d4d',
+    softAccent: 'rgba(255, 77, 77, 0.48)',
+    fogColor: 'rgba(120, 21, 44, 0.45)'
+  }
+};
+
+function clamp(value, min, max) {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+  return Math.min(Math.max(value, min), max);
+}
+
+function setSceneMood(mood, { immediate = false } = {}) {
+  const root = document.documentElement;
+  const normalizedMood = Object.prototype.hasOwnProperty.call(sceneMoodConfig, mood)
+    ? mood
+    : 'village';
+
+  currentSceneMood = normalizedMood;
+
+  const base = sceneMoodConfig[normalizedMood] || sceneMoodConfig.village;
+  const preset = themePresetModifiers[narratorSettings.themePreset] || themePresetModifiers.dynamic;
+
+  const intensity = clamp((base.intensity ?? 0.55) * (preset.intensity ?? 1), 0.25, 1.35);
+  const fog = clamp((base.fog ?? 0.12) * (preset.fog ?? 1), 0, 0.8);
+  const torch = clamp((base.torch ?? 0.3) * (preset.torch ?? 1), 0, 1.6);
+  const accent = preset.accent || base.accent || sceneMoodConfig.village.accent;
+  const softAccent = preset.softAccent || base.softAccent || sceneMoodConfig.village.softAccent;
+  const fogColor = preset.fogColor || base.fogColor || sceneMoodConfig.village.fogColor;
+
+  root.setAttribute('data-scene', normalizedMood);
+  root.style.setProperty('--ambient-light-intensity', intensity.toFixed(2));
+  root.style.setProperty('--fog-density', fog.toFixed(2));
+  root.style.setProperty('--torch-flicker-strength', torch.toFixed(2));
+  if (accent) {
+    root.style.setProperty('--scene-accent-color', accent);
+  }
+  if (softAccent) {
+    root.style.setProperty('--scene-accent-soft', softAccent);
+  }
+  if (fogColor) {
+    root.style.setProperty('--scene-fog-color', fogColor);
+  }
+
+  if (effectsManager && typeof effectsManager.setPalette === 'function') {
+    effectsManager.setPalette({ accent, softAccent, fogColor });
+  }
+
+  if (immediate) {
+    return normalizedMood;
+  }
+
+  return normalizedMood;
+}
+
+const audioManager = createAudioManager();
+const captionManager = createCaptionManager();
+
+function createAudioManager() {
+  const AudioContextClass = typeof window !== 'undefined'
+    ? (window.AudioContext || window.webkitAudioContext)
+    : null;
+
+  if (!AudioContextClass) {
+    let fallbackCaptionHandler = null;
+    return {
+      ensureContext: () => null,
+      preloadAll: async () => {},
+      playPhaseAmbient: async () => null,
+      triggerStinger: (_key, { caption } = {}) => {
+        if (caption && typeof fallbackCaptionHandler === 'function') {
+          fallbackCaptionHandler(caption);
+        }
+      },
+      playRoleCue: (_key, { caption } = {}) => {
+        if (caption && typeof fallbackCaptionHandler === 'function') {
+          fallbackCaptionHandler(caption);
+        }
+      },
+      applySettings: () => {},
+      getSettings: () => ({ ...narratorSettingsDefaults }),
+      setCaptionHandler(handler) {
+        fallbackCaptionHandler = handler;
+      },
+      unlock: () => {},
+      stopAmbient: () => {},
+      resume: async () => {}
+    };
+  }
+
+  let context = null;
+  let masterGain = null;
+  const channelGains = {
+    ambient: null,
+    stinger: null,
+    cue: null
+  };
+  const buffers = {
+    ambient: new Map(),
+    stinger: new Map(),
+    cue: new Map()
+  };
+  const ambientState = {
+    source: null,
+    key: null
+  };
+  let captionHandler = null;
+
+  const settings = {
+    masterVolume: narratorSettingsDefaults.masterVolume,
+    ambientVolume: narratorSettingsDefaults.ambientVolume,
+    stingerVolume: narratorSettingsDefaults.stingerVolume,
+    cueVolume: narratorSettingsDefaults.stingerVolume,
+    muted: narratorSettingsDefaults.muted
+  };
+
+  const roleCueAlias = {
+    werwolf: 'werwolf',
+    wolf: 'werwolf',
+    hexe: 'witch',
+    witch: 'witch',
+    seer: 'seer',
+    bodyguard: 'bodyguard',
+    doctor: 'doctor',
+    amor: 'lute',
+    inquisitor: 'seer',
+    'stumme-jule': 'silence',
+    silence: 'silence',
+    henker: 'doom',
+    trickster: 'trickster',
+    default: 'default'
+  };
+
+  const ambientKeys = ['village', 'day', 'night', 'blood-moon'];
+  const stingerKeys = ['blood-moon', 'phoenix-pulse', 'phase-transition'];
+  const cueKeys = ['werwolf', 'witch', 'seer', 'bodyguard', 'doctor', 'lute', 'doom', 'silence', 'trickster', 'default'];
+
+  function ensureContext() {
+    if (!context) {
+      context = new AudioContextClass();
+      masterGain = context.createGain();
+      masterGain.connect(context.destination);
+      channelGains.ambient = context.createGain();
+      channelGains.stinger = context.createGain();
+      channelGains.cue = context.createGain();
+      channelGains.ambient.connect(masterGain);
+      channelGains.stinger.connect(masterGain);
+      channelGains.cue.connect(masterGain);
+      applyVolumes();
+    }
+    return context;
+  }
+
+  function applyVolumes() {
+    if (!masterGain) {
+      return;
+    }
+    masterGain.gain.value = settings.muted ? 0 : settings.masterVolume;
+    if (channelGains.ambient) {
+      channelGains.ambient.gain.value = settings.ambientVolume;
+    }
+    if (channelGains.stinger) {
+      channelGains.stinger.gain.value = settings.stingerVolume;
+    }
+    if (channelGains.cue) {
+      channelGains.cue.gain.value = settings.cueVolume;
+    }
+  }
+
+  async function resume() {
+    const ctx = ensureContext();
+    if (!ctx || ctx.state !== 'suspended') {
+      return;
+    }
+    try {
+      await ctx.resume();
+    } catch (error) {
+      console.warn('AudioContext konnte nicht fortgesetzt werden.', error);
+    }
+  }
+
+  function unlock() {
+    const ctx = ensureContext();
+    if (!ctx) {
+      return;
+    }
+    resume();
+  }
+
+  function stopAmbient() {
+    if (ambientState.source) {
+      try {
+        ambientState.source.stop();
+      } catch (error) {
+        // ignore stop errors
+      }
+      ambientState.source.disconnect();
+      ambientState.source = null;
+      ambientState.key = null;
+    }
+  }
+
+  function createAmbientBuffer(kind) {
+    const ctx = ensureContext();
+    if (!ctx) {
+      return null;
+    }
+    const duration = 8;
+    const sampleRate = ctx.sampleRate;
+    const buffer = ctx.createBuffer(1, sampleRate * duration, sampleRate);
+    const channel = buffer.getChannelData(0);
+    const baseFreq = kind === 'night' ? 110 : (kind === 'blood-moon' ? 90 : (kind === 'day' ? 220 : 180));
+    const pulseFreq = kind === 'blood-moon' ? 0.18 : (kind === 'night' ? 0.14 : 0.22);
+    for (let i = 0; i < channel.length; i += 1) {
+      const t = i / sampleRate;
+      const env = Math.sin(Math.PI * (i / channel.length));
+      const slow = Math.sin(2 * Math.PI * pulseFreq * t) * 0.35;
+      const fundamental = Math.sin(2 * Math.PI * baseFreq * t) * 0.12;
+      const overtone = Math.sin(2 * Math.PI * baseFreq * 0.5 * t) * 0.08;
+      const noise = (Math.random() * 2 - 1) * 0.015;
+      channel[i] = (slow + fundamental + overtone + noise) * env * 0.6;
+    }
+    return buffer;
+  }
+
+  function createStingerBuffer(kind) {
+    const ctx = ensureContext();
+    if (!ctx) {
+      return null;
+    }
+    const duration = kind === 'phoenix-pulse' ? 3.2 : 2.2;
+    const sampleRate = ctx.sampleRate;
+    const buffer = ctx.createBuffer(1, sampleRate * duration, sampleRate);
+    const data = buffer.getChannelData(0);
+    const startFreq = kind === 'blood-moon' ? 160 : (kind === 'phoenix-pulse' ? 260 : 220);
+    const endFreq = kind === 'blood-moon' ? 60 : (kind === 'phoenix-pulse' ? 660 : 380);
+    for (let i = 0; i < data.length; i += 1) {
+      const t = i / sampleRate;
+      const progress = t / duration;
+      const freq = startFreq + (endFreq - startFreq) * progress;
+      const envelope = Math.exp(-3 * progress);
+      const sine = Math.sin(2 * Math.PI * freq * t);
+      const overtone = Math.sin(2 * Math.PI * freq * 1.5 * t) * 0.4;
+      data[i] = (sine + overtone) * envelope * 0.9;
+    }
+    return buffer;
+  }
+
+  function createCueBuffer(kind) {
+    const ctx = ensureContext();
+    if (!ctx) {
+      return null;
+    }
+    const duration = 1.2;
+    const sampleRate = ctx.sampleRate;
+    const buffer = ctx.createBuffer(1, sampleRate * duration, sampleRate);
+    const data = buffer.getChannelData(0);
+    const frequencyMap = {
+      werwolf: 140,
+      witch: 620,
+      seer: 420,
+      bodyguard: 300,
+      doctor: 520,
+      lute: 392,
+      doom: 220,
+      silence: 180,
+      trickster: 500,
+      default: 400
+    };
+    const freq = frequencyMap[kind] || frequencyMap.default;
+    for (let i = 0; i < data.length; i += 1) {
+      const progress = i / data.length;
+      const env = Math.sin(Math.PI * progress);
+      const t = i / sampleRate;
+      const tone = Math.sin(2 * Math.PI * freq * t);
+      const harmonic = Math.sin(2 * Math.PI * freq * 2 * t) * 0.3;
+      data[i] = (tone + harmonic) * env * 0.5;
+    }
+    return buffer;
+  }
+
+  function getBuffer(category, key) {
+    const store = buffers[category];
+    if (store.has(key)) {
+      return Promise.resolve(store.get(key));
+    }
+
+    let buffer = null;
+    if (category === 'ambient') {
+      buffer = createAmbientBuffer(key);
+    } else if (category === 'stinger') {
+      buffer = createStingerBuffer(key);
+    } else if (category === 'cue') {
+      buffer = createCueBuffer(key);
+    }
+
+    if (buffer) {
+      store.set(key, buffer);
+    }
+    return Promise.resolve(buffer);
+  }
+
+  function mapCueKey(roleKey) {
+    if (!roleKey) {
+      return 'default';
+    }
+    const normalized = String(roleKey)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-');
+    return roleCueAlias[normalized] || roleCueAlias.default;
+  }
+
+  async function playPhaseAmbient(kind) {
+    const ctx = ensureContext();
+    if (!ctx) {
+      return null;
+    }
+
+    const key = ambientKeys.includes(kind) ? kind : (kind === 'blood-moon' ? 'blood-moon' : (kind === 'night' ? 'night' : (kind === 'day' ? 'day' : 'village')));
+
+    if (ambientState.key === key && ambientState.source) {
+      return ambientState.source;
+    }
+
+    if (settings.muted) {
+      ambientState.key = key;
+      return null;
+    }
+
+    const buffer = await getBuffer('ambient', key);
+    if (!buffer) {
+      return null;
+    }
+
+    stopAmbient();
+    await resume();
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    if (channelGains.ambient) {
+      source.connect(channelGains.ambient);
+    } else {
+      source.connect(masterGain);
+    }
+    source.start(0);
+    ambientState.source = source;
+    ambientState.key = key;
+    return source;
+  }
+
+  function triggerStinger(kind, { caption } = {}) {
+    const ctx = ensureContext();
+    if (!ctx) {
+      if (caption && typeof captionHandler === 'function') {
+        captionHandler(caption);
+      }
+      return;
+    }
+    const key = stingerKeys.includes(kind) ? kind : 'phase-transition';
+    getBuffer('stinger', key)
+      .then((buffer) => {
+        if (!buffer) {
+          if (caption && typeof captionHandler === 'function') {
+            captionHandler(caption);
+          }
+          return;
+        }
+        resume().then(() => {
+          const source = ctx.createBufferSource();
+          source.buffer = buffer;
+          if (channelGains.stinger) {
+            source.connect(channelGains.stinger);
+          } else {
+            source.connect(masterGain);
+          }
+          source.start(0);
+          if (caption && typeof captionHandler === 'function') {
+            captionHandler(caption);
+          }
+        }).catch(() => {
+          if (caption && typeof captionHandler === 'function') {
+            captionHandler(caption);
+          }
+        });
+      })
+      .catch(() => {
+        if (caption && typeof captionHandler === 'function') {
+          captionHandler(caption);
+        }
+      });
+  }
+
+  function playRoleCue(roleKey, { caption } = {}) {
+    const ctx = ensureContext();
+    if (!ctx) {
+      if (caption && typeof captionHandler === 'function') {
+        captionHandler(caption);
+      }
+      return;
+    }
+    const mapped = mapCueKey(roleKey);
+    const cueKey = cueKeys.includes(mapped) ? mapped : 'default';
+    getBuffer('cue', cueKey)
+      .then((buffer) => {
+        if (!buffer) {
+          if (caption && typeof captionHandler === 'function') {
+            captionHandler(caption);
+          }
+          return;
+        }
+        resume().then(() => {
+          const source = ctx.createBufferSource();
+          source.buffer = buffer;
+          if (channelGains.cue) {
+            source.connect(channelGains.cue);
+          } else {
+            source.connect(masterGain);
+          }
+          source.start(0);
+          if (caption && typeof captionHandler === 'function') {
+            captionHandler(caption);
+          }
+        }).catch(() => {
+          if (caption && typeof captionHandler === 'function') {
+            captionHandler(caption);
+          }
+        });
+      })
+      .catch(() => {
+        if (caption && typeof captionHandler === 'function') {
+          captionHandler(caption);
+        }
+      });
+  }
+
+  async function preloadAll() {
+    ensureContext();
+    const tasks = [];
+    ambientKeys.forEach((key) => {
+      tasks.push(getBuffer('ambient', key));
+    });
+    stingerKeys.forEach((key) => {
+      tasks.push(getBuffer('stinger', key));
+    });
+    cueKeys.forEach((key) => {
+      tasks.push(getBuffer('cue', key));
+    });
+    await Promise.all(tasks);
+  }
+
+  function applySettings(newSettings = {}) {
+    if (typeof newSettings.masterVolume === 'number') {
+      settings.masterVolume = clamp(newSettings.masterVolume, 0, 1);
+    }
+    if (typeof newSettings.ambientVolume === 'number') {
+      settings.ambientVolume = clamp(newSettings.ambientVolume, 0, 1);
+    }
+    if (typeof newSettings.stingerVolume === 'number') {
+      settings.stingerVolume = clamp(newSettings.stingerVolume, 0, 1);
+    }
+    if (typeof newSettings.cueVolume === 'number') {
+      settings.cueVolume = clamp(newSettings.cueVolume, 0, 1);
+    }
+    if (typeof newSettings.muted === 'boolean') {
+      settings.muted = newSettings.muted;
+      if (settings.muted) {
+        stopAmbient();
+      }
+    }
+    ensureContext();
+    applyVolumes();
+  }
+
+  function getSettings() {
+    return { ...settings };
+  }
+
+  function setCaptionHandler(handler) {
+    captionHandler = handler;
+  }
+
+  return {
+    ensureContext,
+    preloadAll,
+    playPhaseAmbient,
+    triggerStinger,
+    playRoleCue,
+    applySettings,
+    getSettings,
+    setCaptionHandler,
+    unlock,
+    stopAmbient,
+    resume
+  };
+}
+
+function createCaptionManager() {
+  let node = null;
+  let hideTimer = null;
+
+  return {
+    init(element) {
+      node = element || null;
+    },
+    show(message, { duration = 4000 } = {}) {
+      if (!node || !message || !narratorSettings.captionsEnabled) {
+        return;
+      }
+      node.textContent = message;
+      node.classList.add('visible');
+      if (hideTimer) {
+        clearTimeout(hideTimer);
+      }
+      hideTimer = window.setTimeout(() => {
+        node.classList.remove('visible');
+      }, duration);
+    },
+    clear() {
+      if (!node) {
+        return;
+      }
+      node.classList.remove('visible');
+      if (hideTimer) {
+        clearTimeout(hideTimer);
+        hideTimer = null;
+      }
+    }
+  };
+}
+
+function createSceneEffectsManager({ fogCanvas, particleCanvas }) {
+  const supportsCanvas = typeof window !== 'undefined'
+    && typeof window.HTMLCanvasElement !== 'undefined'
+    && typeof window.CanvasRenderingContext2D === 'function';
+  const hasParticleCanvas = supportsCanvas
+    && particleCanvas
+    && typeof particleCanvas.getContext === 'function';
+  let particleCtx = null;
+  if (hasParticleCanvas) {
+    try {
+      particleCtx = particleCanvas.getContext('2d');
+    } catch (error) {
+      particleCtx = null;
+    }
+  }
+  let reducedMotion = narratorSettings.reducedMotion;
+  let animationFrame = null;
+
+  function resize() {
+    if (fogCanvas) {
+      fogCanvas.width = window.innerWidth;
+      fogCanvas.height = window.innerHeight;
+    }
+    if (particleCanvas && particleCtx) {
+      const dpr = window.devicePixelRatio || 1;
+      particleCanvas.width = Math.floor(window.innerWidth * dpr);
+      particleCanvas.height = Math.floor(window.innerHeight * dpr);
+      particleCanvas.style.width = '100%';
+      particleCanvas.style.height = '100%';
+      particleCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+  }
+
+  function stopAnimation() {
+    if (animationFrame !== null) {
+      cancelAnimationFrame(animationFrame);
+      animationFrame = null;
+    }
+  }
+
+  function clearParticles() {
+    if (particleCtx && particleCanvas) {
+      particleCtx.clearRect(0, 0, particleCanvas.width, particleCanvas.height);
+      particleCanvas.classList.remove('active');
+    }
+  }
+
+  function animatePulse({ colorStops, duration, easing }) {
+    if (!particleCtx || reducedMotion) {
+      clearParticles();
+      return Promise.resolve();
+    }
+
+    resize();
+    particleCanvas.classList.add('active');
+    stopAnimation();
+
+    return new Promise((resolve) => {
+      const start = performance.now();
+
+      const draw = (now) => {
+        const elapsed = now - start;
+        const rawProgress = Math.min(1, elapsed / duration);
+        const progress = typeof easing === 'function' ? easing(rawProgress) : rawProgress;
+        particleCtx.clearRect(0, 0, particleCanvas.width, particleCanvas.height);
+        const radius = Math.hypot(particleCanvas.width, particleCanvas.height) * 0.5 * progress;
+        const cx = particleCanvas.width / 2;
+        const cy = particleCanvas.height / 2;
+        const gradient = particleCtx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(radius, 1));
+        colorStops.forEach(([stop, color]) => gradient.addColorStop(stop, color));
+        particleCtx.globalAlpha = 0.85 * (1 - rawProgress);
+        particleCtx.globalCompositeOperation = 'lighter';
+        particleCtx.fillStyle = gradient;
+        particleCtx.fillRect(0, 0, particleCanvas.width, particleCanvas.height);
+
+        if (rawProgress < 1) {
+          animationFrame = requestAnimationFrame(draw);
+        } else {
+          particleCtx.globalCompositeOperation = 'source-over';
+          clearParticles();
+          resolve();
+        }
+      };
+
+      animationFrame = requestAnimationFrame(draw);
+    });
+  }
+
+  function triggerPhoenixPulse() {
+    return animatePulse({
+      duration: 3200,
+      easing: (t) => 1 - Math.pow(1 - t, 3),
+      colorStops: [
+        [0, 'rgba(255, 255, 255, 0.9)'],
+        [0.2, 'rgba(253, 230, 138, 0.7)'],
+        [0.45, 'rgba(249, 115, 22, 0.55)'],
+        [1, 'rgba(249, 115, 22, 0)']
+      ]
+    });
+  }
+
+  function triggerBloodMoon() {
+    return animatePulse({
+      duration: 3600,
+      easing: (t) => t * t,
+      colorStops: [
+        [0, 'rgba(255, 255, 255, 0.85)'],
+        [0.25, 'rgba(248, 113, 113, 0.65)'],
+        [0.6, 'rgba(127, 29, 29, 0.55)'],
+        [1, 'rgba(64, 10, 25, 0)']
+      ]
+    });
+  }
+
+  function setReducedMotion(flag) {
+    reducedMotion = !!flag;
+    if (reducedMotion) {
+      stopAnimation();
+      clearParticles();
+    }
+  }
+
+  function setPalette({ accent, softAccent, fogColor } = {}) {
+    if (particleCanvas && accent) {
+      particleCanvas.style.setProperty('--scene-accent-color', accent);
+    }
+    if (fogCanvas && softAccent) {
+      fogCanvas.style.setProperty('--scene-accent-soft', softAccent);
+    }
+    if (fogCanvas && fogColor) {
+      fogCanvas.style.setProperty('--scene-fog-color', fogColor);
+    }
+  }
+
+  window.addEventListener('resize', resize);
+  resize();
+
+  return {
+    triggerPhoenixPulse,
+    triggerBloodMoon,
+    setReducedMotion,
+    setPalette,
+    resize,
+    clear: clearParticles,
+    stop: stopAnimation
+  };
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   authManager = createAuthManager();
   await authManager.bootstrap();
@@ -735,7 +1502,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     'bloodMoonPityTimer',
     'werwolfSavedNames',
     'werwolfSavedRoles',
-    'werwolfLastUsed'
+    'werwolfLastUsed',
+    'werwolfNarratorSettings'
   ];
 
   try {
@@ -760,6 +1528,29 @@ document.addEventListener("DOMContentLoaded", async () => {
   const analyticsSummaryEl = document.getElementById('analytics-summary');
   const analyticsWinratesEl = document.getElementById('analytics-winrates');
   const analyticsMetaEl = document.getElementById('analytics-meta');
+  const fogCanvasEl = document.getElementById('fog-canvas');
+  const particleCanvasEl = document.getElementById('particle-canvas');
+  const audioCaptionsEl = document.getElementById('audio-captions');
+  const narratorMuteToggle = document.getElementById('narrator-mute');
+  const narratorMasterVolumeInput = document.getElementById('narrator-master-volume');
+  const narratorMasterVolumeDisplay = document.getElementById('narrator-master-volume-display');
+  const narratorAmbientVolumeInput = document.getElementById('narrator-ambient-volume');
+  const narratorAmbientVolumeDisplay = document.getElementById('narrator-ambient-volume-display');
+  const narratorStingerVolumeInput = document.getElementById('narrator-stinger-volume');
+  const narratorStingerVolumeDisplay = document.getElementById('narrator-stinger-volume-display');
+  const narratorCaptionsToggle = document.getElementById('narrator-captions');
+  const reducedMotionToggle = document.getElementById('reduced-motion-toggle');
+  const themePresetSelect = document.getElementById('theme-preset-select');
+
+  effectsManager = createSceneEffectsManager({ fogCanvas: fogCanvasEl, particleCanvas: particleCanvasEl });
+  captionManager.init(audioCaptionsEl);
+  audioManager.setCaptionHandler((message) => captionManager.show(message));
+  document.addEventListener('pointerdown', audioManager.unlock, { once: true });
+  document.addEventListener('keydown', audioManager.unlock, { once: true });
+
+  if (effectsManager && narratorSettings.reducedMotion) {
+    effectsManager.setReducedMotion(true);
+  }
 
   let replayTimeline = null;
   let replayPointer = -1;
@@ -871,6 +1662,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const DEFAULT_PHOENIX_PULSE_CHANCE = 0.05;
   const PHOENIX_PULSE_CONFIG_STORAGE_KEY = 'werwolfPhoenixPulseConfig';
   const EVENT_ENGINE_STORAGE_KEY = 'werwolfEventEngineState';
+  const NARRATOR_SETTINGS_STORAGE_KEY = 'werwolfNarratorSettings';
   const defaultJobConfig = { bodyguardChance: 0, doctorChance: 0 };
   let jobConfigSaveTimeout = null;
   const defaultBloodMoonConfig = { baseChance: 0.2 };
@@ -893,6 +1685,239 @@ document.addEventListener("DOMContentLoaded", async () => {
       console.error(`Laden des Schlüssels "${key}" fehlgeschlagen.`, error);
       return apiClient.storage.getCachedItem(key);
     }
+  }
+
+  function serializeNarratorSettings() {
+    return {
+      masterVolume: narratorSettings.masterVolume,
+      ambientVolume: narratorSettings.ambientVolume,
+      stingerVolume: narratorSettings.stingerVolume,
+      muted: narratorSettings.muted,
+      captionsEnabled: narratorSettings.captionsEnabled,
+      reducedMotion: narratorSettings.reducedMotion,
+      themePreset: narratorSettings.themePreset
+    };
+  }
+
+  function updateNarratorSettingsUI() {
+    if (narratorMuteToggle) {
+      narratorMuteToggle.checked = !!narratorSettings.muted;
+    }
+    if (narratorMasterVolumeInput) {
+      const value = Math.round(clamp(narratorSettings.masterVolume, 0, 1) * 100);
+      narratorMasterVolumeInput.value = String(value);
+      if (narratorMasterVolumeDisplay) {
+        narratorMasterVolumeDisplay.textContent = `${value}%`;
+      }
+    }
+    if (narratorAmbientVolumeInput) {
+      const value = Math.round(clamp(narratorSettings.ambientVolume, 0, 1) * 100);
+      narratorAmbientVolumeInput.value = String(value);
+      if (narratorAmbientVolumeDisplay) {
+        narratorAmbientVolumeDisplay.textContent = `${value}%`;
+      }
+    }
+    if (narratorStingerVolumeInput) {
+      const value = Math.round(clamp(narratorSettings.stingerVolume, 0, 1) * 100);
+      narratorStingerVolumeInput.value = String(value);
+      if (narratorStingerVolumeDisplay) {
+        narratorStingerVolumeDisplay.textContent = `${value}%`;
+      }
+    }
+    if (narratorCaptionsToggle) {
+      narratorCaptionsToggle.checked = !!narratorSettings.captionsEnabled;
+    }
+    if (reducedMotionToggle) {
+      reducedMotionToggle.checked = !!narratorSettings.reducedMotion;
+    }
+    if (themePresetSelect) {
+      themePresetSelect.value = narratorSettings.themePreset || 'dynamic';
+    }
+  }
+
+  function applyNarratorSettings(partial = {}, { persist = true, skipRefresh = false } = {}) {
+    const nextSettings = { ...narratorSettings };
+
+    if (partial && typeof partial === 'object') {
+      if (partial.masterVolume !== undefined) {
+        nextSettings.masterVolume = clamp(Number(partial.masterVolume), 0, 1);
+      }
+      if (partial.ambientVolume !== undefined) {
+        nextSettings.ambientVolume = clamp(Number(partial.ambientVolume), 0, 1);
+      }
+      if (partial.stingerVolume !== undefined) {
+        nextSettings.stingerVolume = clamp(Number(partial.stingerVolume), 0, 1);
+      }
+      if (partial.muted !== undefined) {
+        nextSettings.muted = !!partial.muted;
+      }
+      if (partial.captionsEnabled !== undefined) {
+        nextSettings.captionsEnabled = !!partial.captionsEnabled;
+      }
+      if (partial.reducedMotion !== undefined) {
+        nextSettings.reducedMotion = !!partial.reducedMotion;
+        reducedMotionPreferenceStored = true;
+      }
+      if (partial.themePreset !== undefined) {
+        nextSettings.themePreset = themePresetModifiers[partial.themePreset]
+          ? partial.themePreset
+          : narratorSettingsDefaults.themePreset;
+      }
+    }
+
+    narratorSettings = nextSettings;
+
+    audioManager.applySettings({
+      masterVolume: narratorSettings.masterVolume,
+      ambientVolume: narratorSettings.ambientVolume,
+      stingerVolume: narratorSettings.stingerVolume,
+      cueVolume: narratorSettings.stingerVolume,
+      muted: narratorSettings.muted
+    });
+
+    if (effectsManager && typeof effectsManager.setReducedMotion === 'function') {
+      effectsManager.setReducedMotion(narratorSettings.reducedMotion);
+    }
+
+    document.documentElement.setAttribute('data-captions', narratorSettings.captionsEnabled ? 'true' : 'false');
+    document.documentElement.setAttribute('data-reduced-motion', narratorSettings.reducedMotion ? 'true' : 'false');
+
+    if (!narratorSettings.captionsEnabled) {
+      captionManager.clear();
+    }
+
+    if (persist) {
+      persistValue(NARRATOR_SETTINGS_STORAGE_KEY, serializeNarratorSettings());
+    }
+
+    updateNarratorSettingsUI();
+
+    if (!skipRefresh) {
+      refreshSceneMood({ immediate: true });
+    }
+  }
+
+  async function applyThemePreset(preset) {
+    const normalized = themePresetModifiers[preset] ? preset : 'dynamic';
+    let desiredTheme = null;
+    if (normalized === 'dawn') {
+      desiredTheme = 'light';
+    } else if (normalized === 'twilight' || normalized === 'ritual') {
+      desiredTheme = 'dark';
+    }
+
+    if (desiredTheme && desiredTheme !== currentTheme) {
+      try {
+        await setTheme(desiredTheme);
+      } catch (error) {
+        console.warn('Theme-Preset konnte nicht angewendet werden.', error);
+      }
+    }
+
+    applyNarratorSettings({ themePreset: normalized }, { persist: true });
+  }
+
+  async function loadNarratorSettings() {
+    try {
+      const saved = await refreshPersistedValue(NARRATOR_SETTINGS_STORAGE_KEY);
+      if (saved && typeof saved === 'object') {
+        const normalized = {
+          masterVolume: saved.masterVolume !== undefined ? Number(saved.masterVolume) : narratorSettingsDefaults.masterVolume,
+          ambientVolume: saved.ambientVolume !== undefined ? Number(saved.ambientVolume) : narratorSettingsDefaults.ambientVolume,
+          stingerVolume: saved.stingerVolume !== undefined ? Number(saved.stingerVolume) : narratorSettingsDefaults.stingerVolume,
+          muted: !!saved.muted,
+          captionsEnabled: !!saved.captionsEnabled,
+          reducedMotion: saved.reducedMotion !== undefined ? !!saved.reducedMotion : narratorSettingsDefaults.reducedMotion,
+          themePreset: typeof saved.themePreset === 'string' ? saved.themePreset : narratorSettingsDefaults.themePreset
+        };
+        reducedMotionPreferenceStored = saved.reducedMotion !== undefined;
+        applyNarratorSettings(normalized, { persist: false, skipRefresh: true });
+      } else {
+        applyNarratorSettings(narratorSettingsDefaults, { persist: false, skipRefresh: true });
+      }
+    } catch (error) {
+      console.warn('Erzähler:innen-Einstellungen konnten nicht geladen werden.', error);
+      applyNarratorSettings(narratorSettingsDefaults, { persist: false, skipRefresh: true });
+    }
+
+    updateNarratorSettingsUI();
+  }
+
+  await loadNarratorSettings();
+  audioManager.preloadAll().catch(() => {});
+
+  if (narratorMuteToggle) {
+    narratorMuteToggle.addEventListener('change', (event) => {
+      applyNarratorSettings({ muted: event.target.checked }, { persist: true });
+    });
+  }
+
+  if (narratorMasterVolumeInput) {
+    narratorMasterVolumeInput.addEventListener('input', (event) => {
+      const value = clamp(Number(event.target.value) / 100, 0, 1);
+      if (narratorMasterVolumeDisplay) {
+        narratorMasterVolumeDisplay.textContent = `${Math.round(value * 100)}%`;
+      }
+      applyNarratorSettings({ masterVolume: value }, { persist: false, skipRefresh: true });
+    });
+    narratorMasterVolumeInput.addEventListener('change', (event) => {
+      const value = clamp(Number(event.target.value) / 100, 0, 1);
+      applyNarratorSettings({ masterVolume: value }, { persist: true });
+    });
+  }
+
+  if (narratorAmbientVolumeInput) {
+    narratorAmbientVolumeInput.addEventListener('input', (event) => {
+      const value = clamp(Number(event.target.value) / 100, 0, 1);
+      if (narratorAmbientVolumeDisplay) {
+        narratorAmbientVolumeDisplay.textContent = `${Math.round(value * 100)}%`;
+      }
+      applyNarratorSettings({ ambientVolume: value }, { persist: false, skipRefresh: true });
+    });
+    narratorAmbientVolumeInput.addEventListener('change', (event) => {
+      const value = clamp(Number(event.target.value) / 100, 0, 1);
+      applyNarratorSettings({ ambientVolume: value }, { persist: true });
+    });
+  }
+
+  if (narratorStingerVolumeInput) {
+    narratorStingerVolumeInput.addEventListener('input', (event) => {
+      const value = clamp(Number(event.target.value) / 100, 0, 1);
+      if (narratorStingerVolumeDisplay) {
+        narratorStingerVolumeDisplay.textContent = `${Math.round(value * 100)}%`;
+      }
+      applyNarratorSettings({ stingerVolume: value }, { persist: false, skipRefresh: true });
+    });
+    narratorStingerVolumeInput.addEventListener('change', (event) => {
+      const value = clamp(Number(event.target.value) / 100, 0, 1);
+      applyNarratorSettings({ stingerVolume: value }, { persist: true });
+    });
+  }
+
+  if (narratorCaptionsToggle) {
+    narratorCaptionsToggle.addEventListener('change', (event) => {
+      applyNarratorSettings({ captionsEnabled: event.target.checked }, { persist: true });
+    });
+  }
+
+  if (reducedMotionToggle) {
+    reducedMotionToggle.addEventListener('change', (event) => {
+      applyNarratorSettings({ reducedMotion: event.target.checked }, { persist: true });
+    });
+  }
+
+  if (themePresetSelect) {
+    themePresetSelect.addEventListener('change', (event) => {
+      applyThemePreset(event.target.value);
+    });
+  }
+
+  if (prefersReducedMotionMedia) {
+    prefersReducedMotionMedia.addEventListener('change', (event) => {
+      if (!reducedMotionPreferenceStored) {
+        applyNarratorSettings({ reducedMotion: event.matches }, { persist: false });
+      }
+    });
   }
 
   async function withButtonLoading(button, loadingText, task) {
@@ -1682,19 +2707,60 @@ document.addEventListener("DOMContentLoaded", async () => {
   let doctorLastHealedTarget = null;
   let doctorLastHealedNight = null;
   let lastWinner = null;
+  let nightMode = false;
+  let dayMode = false;
+  let nightSteps = [];
+  let nightIndex = 0;
+  let nightStepHistory = [];
 
-  function setBloodMoonState(isActive) {
+  function determineSceneMood() {
+    if (bloodMoonActive) {
+      return 'blood-moon';
+    }
+    if (nightMode) {
+      return 'night';
+    }
+    if (dayMode) {
+      return 'day';
+    }
+    return 'village';
+  }
+
+  function refreshSceneMood({ immediate = false } = {}) {
+    const mood = determineSceneMood();
+    setSceneMood(mood, { immediate });
+    const ambientKey = mood === 'blood-moon'
+      ? 'blood-moon'
+      : (mood === 'night' ? 'night' : (mood === 'day' ? 'day' : 'village'));
+    audioManager.playPhaseAmbient(ambientKey).catch(() => {});
+  }
+
+  refreshSceneMood({ immediate: true });
+
+  function setBloodMoonState(isActive, { silent = false } = {}) {
+    const previousState = bloodMoonActive;
     bloodMoonActive = !!isActive;
+
     if (bloodMoonActive) {
       document.body.classList.add('blood-moon-active');
     } else {
       document.body.classList.remove('blood-moon-active');
     }
+
+    refreshSceneMood({ immediate: true });
+
+    if (bloodMoonActive && !previousState && !silent) {
+      if (effectsManager && typeof effectsManager.triggerBloodMoon === 'function') {
+        effectsManager.triggerBloodMoon().catch(() => {});
+      }
+      audioManager.triggerStinger('blood-moon', { caption: '🌕 Blutmond erhebt sich.' });
+    }
+
     updateBloodMoonOdds();
   }
 
   function clearBloodMoonState() {
-    setBloodMoonState(false);
+    setBloodMoonState(false, { silent: true });
   }
 
   function clearPhoenixPulseState() {
@@ -1712,11 +2778,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   const eventModifierHandlers = {
     'blood-moon': {
       apply() {
-        setBloodMoonState(true);
+        setBloodMoonState(true, { silent: true });
         syncBloodMoonUI({ silent: true });
       },
       expire() {
-        setBloodMoonState(false);
+        setBloodMoonState(false, { silent: true });
         syncBloodMoonUI({ silent: true });
       }
     }
@@ -3051,12 +4117,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     Inquisitor: "Der Inquisitor wacht auf. Wähle eine Person zum Befragen."
   };
 
-  let nightMode = false;
-  let dayMode = false;
-  let nightSteps = [];
-  let nightIndex = 0;
-  let nightStepHistory = [];
-  
   // Day phase variables
   let votes = {};
   let accused = [];
@@ -3324,16 +4384,26 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  function playPhoenixPulseAnimation(revivedPlayers = []) {
-    return new Promise((resolve) => {
+  async function playPhoenixPulseAnimation(revivedPlayers = []) {
+    const revivedList = Array.isArray(revivedPlayers) && revivedPlayers.length > 0
+      ? revivedPlayers.join(', ')
+      : '';
+
+    const caption = revivedList
+      ? `🔥 Phoenix Pulse erweckt ${revivedList}.`
+      : '🔥 Phoenix Pulse lodert durch das Dorf.';
+
+    setSceneMood('phoenix-pulse', { immediate: true });
+    audioManager.triggerStinger('phoenix-pulse', { caption });
+
+    const tasks = [];
+
+    const overlayPromise = new Promise((resolve) => {
       if (!phoenixPulseOverlay) {
         resolve();
         return;
       }
 
-      const revivedList = revivedPlayers.length > 0
-        ? revivedPlayers.join(', ')
-        : '';
       if (phoenixPulseMessage) {
         phoenixPulseMessage.textContent = revivedList
           ? `${revivedList} steigen wie ein Phönix aus der Asche empor!`
@@ -3341,14 +4411,28 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
 
       phoenixPulseOverlay.classList.remove('active');
-      void phoenixPulseOverlay.offsetWidth; // force reflow to restart animation
+      void phoenixPulseOverlay.offsetWidth;
       phoenixPulseOverlay.classList.add('active');
 
-      setTimeout(() => {
+      window.setTimeout(() => {
         phoenixPulseOverlay.classList.remove('active');
         resolve();
       }, 3200);
     });
+    tasks.push(overlayPromise);
+
+    if (effectsManager && typeof effectsManager.triggerPhoenixPulse === 'function') {
+      const effectPromise = effectsManager.triggerPhoenixPulse().catch((error) => {
+        console.warn('Phoenix Pulse Effekt konnte nicht abgespielt werden.', error);
+      });
+      tasks.push(effectPromise);
+    }
+
+    try {
+      await Promise.all(tasks);
+    } finally {
+      refreshSceneMood({ immediate: true });
+    }
   }
 
   function handlePlayerDeath(playerName, options = {}) {
@@ -3509,6 +4593,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     nightRoleEl.textContent = role;
     nightRoleEl.setAttribute('data-role', role);
     nightTextEl.textContent = nightTexts[role] || "Wacht auf.";
+
+    const cueCaption = nightTexts[role]
+      ? `🔔 ${nightTexts[role]}`
+      : `🔔 ${role} wacht auf.`;
+    audioManager.playRoleCue(role, { caption: cueCaption });
 
     // Reset night UI
     witchActions.innerHTML = "";
@@ -4466,6 +5555,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   function startDayPhase() {
     dayMode = true;
+    nightMode = false;
+    refreshSceneMood({ immediate: true });
     dayCount++;
     accused = [];
     dayAnnouncements = [];
@@ -4531,7 +5622,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       showNightStep();
     } else {
       // Nacht beendet
-      setBloodMoonState(false);
+      setBloodMoonState(false, { silent: true });
       nightMode = false;
       nightOverlay.style.display = "none";
       assignBtn.style.display = "inline-block";
@@ -5180,6 +6271,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     bodyguardSavedTarget = null;
     updateBodyguardPlayers();
     nightMode = true;
+    dayMode = false;
+    refreshSceneMood({ immediate: true });
     nightIndex = 0;
 
     // Trigger random events
@@ -6134,6 +7227,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       phoenixPulseJustResolved,
       phoenixPulseRevivedPlayers: phoenixPulseRevivedPlayers.slice(),
       firstNightShieldUsed,
+      narratorSettings: serializeNarratorSettings(),
       dayCount: dayCount,
       mayor: mayor,
       accused: accused.slice(),
@@ -6604,7 +7698,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     silencedPlayer = session.silencedPlayer || null;
     healRemaining = session.healRemaining !== undefined ? session.healRemaining : 1;
     poisonRemaining = session.poisonRemaining !== undefined ? session.poisonRemaining : 1;
-    setBloodMoonState(!!session.bloodMoonActive);
+    setBloodMoonState(!!session.bloodMoonActive, { silent: true });
     phoenixPulsePending = !!session.phoenixPulsePending;
     phoenixPulseJustResolved = !!session.phoenixPulseJustResolved;
     phoenixPulseRevivedPlayers = Array.isArray(session.phoenixPulseRevivedPlayers)
@@ -6629,6 +7723,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     nightSteps = session.nightSteps || [];
     nightIndex = session.nightIndex || 0;
     nightCounter = session.nightCounter || 0;
+    if (session.narratorSettings && typeof session.narratorSettings === 'object') {
+      applyNarratorSettings(session.narratorSettings, { persist: true });
+    } else {
+      refreshSceneMood({ immediate: true });
+    }
     initializeMichaelJacksonAccusations(session.michaelJacksonAccusations || {});
     updateBodyguardPlayers();
     doctorPendingTargets = Array.isArray(session.doctorPendingTargets)
@@ -7186,7 +8285,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       jobsAssigned: jobsAssigned.map(jobs => Array.isArray(jobs) ? jobs.slice() : []),
       jobConfig: { bodyguardChance: jobConfig.bodyguardChance, doctorChance: jobConfig.doctorChance },
       firstNightShieldUsed,
-      eventEngineState: getEventEngineSnapshot()
+      eventEngineState: getEventEngineSnapshot(),
+      narratorSettings: serializeNarratorSettings()
     };
   }
 
@@ -7266,7 +8366,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     silencedPlayer = snapshot.silencedPlayer;
     healRemaining = snapshot.healRemaining;
     poisonRemaining = snapshot.poisonRemaining;
-    setBloodMoonState(!!snapshot.bloodMoonActive);
+    setBloodMoonState(!!snapshot.bloodMoonActive, { silent: true });
     phoenixPulsePending = !!snapshot.phoenixPulsePending;
     phoenixPulseJustResolved = !!snapshot.phoenixPulseJustResolved;
     phoenixPulseRevivedPlayers = Array.isArray(snapshot.phoenixPulseRevivedPlayers)
@@ -7298,6 +8398,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     jagerShotUsed = !!snapshot.jagerShotUsed;
     jagerDiedLastNight = snapshot.jagerDiedLastNight || null;
     nightCounter = snapshot.nightCounter || 0;
+    if (snapshot.narratorSettings && typeof snapshot.narratorSettings === 'object') {
+      applyNarratorSettings(snapshot.narratorSettings, { persist: false });
+    } else {
+      refreshSceneMood({ immediate: true });
+    }
     updateBodyguardPlayers();
     doctorPendingTargets = Array.isArray(snapshot.doctorPendingTargets)
       ? snapshot.doctorPendingTargets.slice()
@@ -8367,7 +9472,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         label: 'Blutmond manuell aktiviert',
         detail: 'Gilt für die kommende Nacht.',
         undo: () => {
-          setBloodMoonState(wasActive);
+          setBloodMoonState(wasActive, { silent: true });
           syncBloodMoonUI({ silent: true });
           eventScheduler.removeModifier('blood-moon-manual');
           persistEventEngineState();
@@ -8484,7 +9589,8 @@ document.addEventListener("DOMContentLoaded", async () => {
           jobsAssigned: jobsAssigned.map(jobs => Array.isArray(jobs) ? jobs.slice() : []),
           jobConfig: { bodyguardChance: jobConfig.bodyguardChance, doctorChance: jobConfig.doctorChance },
           eventEngineState: getEventEngineSnapshot(),
-          timeline: buildSessionTimeline()
+          timeline: buildSessionTimeline(),
+          narratorSettings: serializeNarratorSettings()
         };
       },
       setState(partial = {}) {
@@ -8518,7 +9624,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           poisonRemaining = partial.poisonRemaining;
         }
         if ('bloodMoonActive' in partial) {
-          setBloodMoonState(!!partial.bloodMoonActive);
+        setBloodMoonState(!!partial.bloodMoonActive, { silent: true });
         }
         if ('phoenixPulsePending' in partial) {
           phoenixPulsePending = !!partial.phoenixPulsePending;
@@ -8549,6 +9655,9 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
         if ('dayMode' in partial) {
           dayMode = partial.dayMode;
+        }
+        if (partial.narratorSettings && typeof partial.narratorSettings === 'object') {
+          applyNarratorSettings(partial.narratorSettings, { persist: false });
         }
         if (Array.isArray(partial.nightSteps)) {
           nightSteps = partial.nightSteps.slice();
@@ -8653,6 +9762,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             : null;
         }
         updateDoctorPlayers();
+        refreshSceneMood({ immediate: true });
         renderNarratorDashboard();
       },
       renderNarratorDashboard,
