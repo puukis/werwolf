@@ -252,11 +252,12 @@ async function getSetting(key) {
 }
 
 async function setSetting(key, value) {
+  const serializedValue = JSON.stringify(value ?? null);
   await query(
     `INSERT INTO kv_store (key, value, updated_at)
      VALUES ($1, $2, NOW())
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-    [key, value]
+    [key, serializedValue]
   );
 }
 
