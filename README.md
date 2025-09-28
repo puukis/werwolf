@@ -27,6 +27,7 @@ A web-based role-playing game of deception and deduction. This is a digital vers
   - [Recovery & Session Management](#recovery--session-management)
 - [🛠️ Tech Stack](#-tech-stack)
 - [🚀 Getting Started](#-getting-started)
+- [🗃️ Backend & Datenbank](#%EF%B8%8F-backend--datenbank)
 - [🤝 Contributing](#-contributing)
 - [📄 License](#-license)
 
@@ -41,7 +42,7 @@ A web-based role-playing game of deception and deduction. This is a digital vers
 - **Session Management**: Save and load previous game sessions to pick up right where you left off.
 - **Random Events**: An optional "Full Moon" event that gives werewolves an extra kill, adding a layer of unpredictability.
 - **Responsive Design**: Playable on both desktop and mobile devices.
-- **No Server Needed**: A complete client-side application that runs directly in your browser.
+- **Persistenter Speicher**: Alle Spielstände und Einstellungen werden über einen kleinen Express-Server mit PostgreSQL-Backend gespeichert.
 
 ---
 
@@ -125,7 +126,7 @@ The Erzähler tools keep the flow of the evening under control and give you reco
 
 ### Recovery & Session Management
 
-- **Run locally**: Clone the repository, open `index.html` in a browser, and you’re ready to facilitate offline. No server setup is required.
+- **Run locally**: Clone the repository, richte den Backend-Server gemäß [Backend & Datenbank](#%EF%B8%8F-backend--datenbank) ein und öffne `index.html` anschließend über einen lokalen Webserver.
 - **Session saving**: Use the “Spiel speichern” button in the sessions sidebar to store the full state (players, roles, potions, timers). Saved sessions appear in the list for one-click recovery.
 - **Manual backups**: From the setup screen you can store and reload player name lists or role configurations. Each attempt now surfaces a modal so you always know whether the operation succeeded.
 - **Checkpoint workflow**: Before major reveals, consider triggering a manual macro checkpoint (e.g., via the sandbox). If a misclick happens, roll back and continue without breaking immersion.
@@ -142,8 +143,6 @@ The Erzähler tools keep the flow of the evening under control and give you reco
 
 ## 🚀 Getting Started
 
-This is a purely client-side application, so no installation is needed.
-
 1.  Clone the repository:
     ```bash
     git clone https://github.com/puukis/werwolf.git
@@ -152,9 +151,103 @@ This is a purely client-side application, so no installation is needed.
     ```bash
     cd werwolf
     ```
-3.  Open the `index.html` file in your favorite web browser.
+3.  Install the dependencies:
+    ```bash
+    npm install
+    ```
+4.  Starte einen lokalen Webserver deiner Wahl (z. B. über eine IDE oder `npx http-server`) und öffne anschließend `index.html` über `http://localhost:<PORT>`. Für die persistente Speicherung muss der API-Server unter derselben Origin laufen (siehe [Backend & Datenbank](#%EF%B8%8F-backend--datenbank)).
 
-That's it! You're ready to play.
+> 💡 Wenn du die Datei nur per `file://` öffnest, kann der Browser den API-Server nicht erreichen und der Status wird nicht gespeichert.
+
+---
+
+## 🗃️ Backend & Datenbank
+
+Die Speicherung aller Themes, Namenslisten, Rollen-Vorlagen und Spielstände läuft über einen Express-Server mit PostgreSQL 16. Dieses Kapitel erklärt die vollständige Einrichtung.
+
+### Voraussetzungen
+
+- Node.js 18 oder neuer (inkl. `npm`)
+- PostgreSQL 16 (lokal oder als verwalteter Dienst)
+- Zugriff auf die Kommandozeile (`psql` bzw. `createdb`)
+
+### 1. Datenbankbenutzer & Datenbank anlegen
+
+Erstelle zuerst eine dedizierte Datenbank samt Benutzer. Das folgende Beispiel richtet alles lokal über die Standardrolle `postgres` ein:
+
+```bash
+# Als Postgres-Superuser ausführen (z. B. via `sudo -u postgres psql`)
+psql <<'SQL'
+CREATE ROLE werwolf_user WITH LOGIN PASSWORD 'wechselmich';
+CREATE DATABASE werwolf OWNER werwolf_user;
+GRANT ALL PRIVILEGES ON DATABASE werwolf TO werwolf_user;
+SQL
+```
+
+> ⚠️ Ersetze `wechselmich` unbedingt durch ein sicheres Passwort.
+
+### 2. Umgebungsvariablen konfigurieren
+
+Der Server liest seine Verbindungseinstellungen aus den Standard-Postgres-Variablen (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`) oder aus einer kompletten `DATABASE_URL`. Für lokale Installationen genügt beispielsweise eine `.env`-Datei (z. B. via [`direnv`](https://direnv.net/) oder [npm `dotenv-cli`](https://www.npmjs.com/package/dotenv-cli)) mit folgendem Inhalt:
+
+```bash
+PGHOST=localhost
+PGPORT=5432
+PGUSER=werwolf_user
+PGPASSWORD=wechselmich
+PGDATABASE=werwolf
+```
+
+Bei gehosteten Datenbanken kannst du stattdessen eine vollständige URL setzen:
+
+```bash
+export DATABASE_URL="postgres://werwolf_user:wechselmich@db.example.com:5432/werwolf"
+```
+
+Wenn dein Anbieter SSL erzwingt, ergänze `PGSSLMODE=require`, damit `pg` die Verbindung korrekt aufbaut.
+
+### 3. Migrationen ausführen
+
+Nach der Konfiguration einmalig alle Tabellen anlegen:
+
+```bash
+npm run migrate
+```
+
+Das Script legt eine Tabelle `kv_store` (für Einstellungen & Namenslisten) sowie `sessions` (für Spielstände) an und protokolliert ausgeführte Migrationen in `schema_migrations`.
+
+### 4. API-Server starten
+
+Starte den Express-Server im Projektstamm:
+
+```bash
+npm start
+```
+
+Standardmäßig lauscht er auf Port `3001`. Du kannst den Port über die Umgebungsvariable `PORT` ändern.
+
+### 5. Frontend mit der API verbinden
+
+Der Client erwartet die API unter derselben Origin wie die ausgelieferte `index.html` (relative Requests auf `/api`). Für die lokale Entwicklung kannst du z. B. so vorgehen:
+
+1. API starten (`npm start`).
+2. Separaten statischen Webserver für das Frontend starten, der Requests auf `/api` an `http://localhost:3001` weiterleitet (Reverse-Proxy) oder beide Assets über denselben Express-Server ausliefern.
+3. Anschließend `http://localhost:<frontend-port>` aufrufen.
+
+Viele Tools (VS Code *Live Server*, `vite preview`, `serve`, usw.) bieten Proxy-Optionen – konfiguriere `/api` → `http://localhost:3001`.
+
+### 6. Datenpflege & Nutzung
+
+- Themes, gespeicherte Namen und Rollen werden automatisch über die API gelesen/geschrieben.
+- Spielstände (`/api/sessions`) speichern automatisch die letzten 20 Snapshots.
+- Bei Fehlermeldungen prüfe das Server-Log und deine Datenbankverbindung.
+
+> ✨ Du kannst Daten jederzeit direkt per `psql` inspizieren:
+> ```bash
+> psql $PGDATABASE $PGUSER
+> SELECT key, value, updated_at FROM kv_store;
+> SELECT timestamp, created_at FROM sessions;
+> ```
 
 ---
 
