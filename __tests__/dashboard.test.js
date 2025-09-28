@@ -9,6 +9,13 @@ function createBackendMock() {
   let savedRoles = [];
   let theme = null;
   let sessions = [];
+  let loggedIn = true;
+  const defaultUser = {
+    id: 1,
+    email: 'test@narrator.de',
+    displayName: 'Testleitung',
+    isAdmin: true,
+  };
 
   const normalizeTheme = (value) => {
     if (typeof value !== 'string') {
@@ -138,6 +145,27 @@ function createBackendMock() {
         }
       }
 
+      if (pathname === '/api/auth/me' && method === 'GET') {
+        return response(200, { user: loggedIn ? { ...defaultUser } : null });
+      }
+
+      if (pathname === '/api/auth/login' && method === 'POST') {
+        loggedIn = true;
+        return response(200, { user: { ...defaultUser } });
+      }
+
+      if (pathname === '/api/auth/register' && method === 'POST') {
+        loggedIn = true;
+        const displayName = typeof payload?.displayName === 'string' ? payload.displayName : defaultUser.displayName;
+        const email = typeof payload?.email === 'string' ? payload.email : defaultUser.email;
+        return response(201, { user: { ...defaultUser, displayName, email } });
+      }
+
+      if (pathname === '/api/auth/logout' && method === 'POST') {
+        loggedIn = false;
+        return empty();
+      }
+
       return response(404, { error: 'Nicht gefunden' });
     }),
     reset() {
@@ -146,6 +174,7 @@ function createBackendMock() {
       savedRoles = [];
       theme = null;
       sessions = [];
+      loggedIn = true;
     },
     setTheme(value) {
       theme = typeof value === 'string' ? value : null;
@@ -193,6 +222,15 @@ const flushAsync = () => new Promise((resolve) => setTimeout(resolve, 0));
         removeEventListener: jest.fn()
       }));
 
+      window.__WERWOLF_TEST_BOOT__ = {
+        user: {
+          id: 1,
+          email: 'test@narrator.de',
+          displayName: 'Testleitung',
+          isAdmin: true,
+        },
+      };
+
       require('../script.js');
       document.dispatchEvent(new Event('DOMContentLoaded'));
       await flushAsync();
@@ -222,6 +260,7 @@ const flushAsync = () => new Promise((resolve) => setTimeout(resolve, 0));
 
   afterEach(() => {
     jest.clearAllTimers();
+    delete window.__WERWOLF_TEST_BOOT__;
   });
 
   function getDashboardSnapshot() {
