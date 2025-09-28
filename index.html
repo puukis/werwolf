@@ -201,6 +201,23 @@ Carla
                     <input type="range" id="phoenix-pulse-chance" min="0" max="100" step="1" value="5">
                     <span id="phoenix-pulse-chance-display">5%</span>
                 </div>
+                <div class="config-subsection">
+                    <h5>Ereignisdecks</h5>
+                    <div id="event-deck-list" class="event-deck-list"></div>
+                </div>
+                <div class="config-subsection">
+                    <h5>Kampagnen</h5>
+                    <label for="campaign-select">Kampagnen-Preset</label>
+                    <select id="campaign-select"></select>
+                    <div id="campaign-preview" class="campaign-preview">
+                        <h6>Kommende Story-Beats</h6>
+                        <ul id="campaign-preview-list"></ul>
+                    </div>
+                    <div id="event-consequence-preview" class="event-consequence-preview">
+                        <h6>Mögliche Konsequenzen</h6>
+                        <ul id="event-card-preview"></ul>
+                    </div>
+                </div>
             </div>
             <div class="config-section">
                 <h4>Spielinformationen</h4>
@@ -369,6 +386,7 @@ Carla
         </svg>
     </button>
     <button id="show-roles-overview-btn" type="button" class="secondary-btn" style="display: none;">Rollenübersicht</button>
+    <script src="events/definitions.js"></script>
     <script src="script.js"></script>
 </body>
 </html>
