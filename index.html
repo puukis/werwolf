@@ -108,8 +108,17 @@
     </div>
     <main class="container">
         <div class="main-header">
-            <h1>Werwolf</h1>
-            <p class="subtitle">Rollenverteiler für das Werwolf-Spiel</p>
+            <div class="main-header-content">
+                <h1>Werwolf</h1>
+                <p class="subtitle">Rollenverteiler für das Werwolf-Spiel</p>
+                <div id="blood-moon-odds" class="blood-moon-odds"></div>
+                <div id="phoenix-pulse-status" class="phoenix-pulse-status" aria-live="polite">Phoenix Pulse: –</div>
+                <div class="config-action">
+                    <button id="open-config-btn" type="button" class="secondary-btn config-btn">
+                        ⚙️ Konfiguration
+                    </button>
+                </div>
+            </div>
             <div class="user-toolbar">
                 <div id="user-chip" class="user-chip hidden" aria-live="polite" aria-atomic="true">
                     <span class="user-avatar" aria-hidden="true">🎲</span>
@@ -119,13 +128,6 @@
                     </div>
                 </div>
                 <button id="logout-btn" type="button" class="secondary-btn subtle-btn hidden">Abmelden</button>
-            </div>
-            <div id="blood-moon-odds" class="blood-moon-odds"></div>
-            <div id="phoenix-pulse-status" class="phoenix-pulse-status" aria-live="polite">Phoenix Pulse: –</div>
-            <div class="config-action">
-                <button id="open-config-btn" type="button" class="secondary-btn config-btn">
-                    ⚙️ Konfiguration
-                </button>
             </div>
         </div>
 

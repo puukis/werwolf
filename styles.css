@@ -395,12 +395,12 @@ body.auth-locked {
 }
 
 .user-toolbar {
-  width: 100%;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 1rem;
-  margin-top: 1.75rem;
+  margin-top: 0;
+  flex-shrink: 0;
 }
 
 .user-chip {
@@ -505,6 +505,27 @@ body.auth-locked {
   .welcome-hero h2 {
     font-size: 2rem;
   }
+
+  .main-header {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+  }
+
+  .main-header-content {
+    align-items: center;
+    text-align: center;
+  }
+
+  .user-toolbar {
+    width: 100%;
+    justify-content: center;
+    margin-top: 1.5rem;
+  }
+
+  .config-action {
+    justify-content: center;
+  }
 }
 
 @media (max-width: 640px) {
@@ -521,15 +542,30 @@ body.auth-locked {
   }
 
   .user-toolbar {
+    width: 100%;
     justify-content: center;
     flex-direction: column;
     gap: 0.75rem;
+    margin-top: 1.5rem;
   }
 }
 
 .main-header {
-  text-align: center;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 2rem;
+  flex-wrap: wrap;
   margin-bottom: 2.5rem;
+}
+
+.main-header-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  text-align: center;
+  flex: 1 1 260px;
 }
 
 .main-header h1 {
@@ -551,7 +587,7 @@ body.auth-locked {
 }
 
 .config-action {
-  margin-top: 1.5rem;
+  margin-top: 1.25rem;
   display: flex;
   justify-content: center;
 }
