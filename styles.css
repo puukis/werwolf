@@ -1,9 +1,9 @@
 :root {
   /* Light theme (default) */
   --bg-fallback: #132019;
-  --bg-color: linear-gradient(180deg, rgba(20, 32, 25, 0.72) 0%, rgba(16, 26, 21, 0.82) 45%, rgba(10, 18, 13, 0.9) 100%),
-    url("https://images.unsplash.com/photo-1691268079349-1e22a841a6de?q=80&w=2069&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D");
+  --bg-image: url("https://images.unsplash.com/photo-1691268079349-1e22a841a6de?q=80&w=2069&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D");
   --ambient-overlay: radial-gradient(120% 120% at 80% 20%, rgba(102, 153, 123, 0.18) 0%, rgba(102, 153, 123, 0) 70%);
+  --bg-overlay: linear-gradient(210deg, rgba(20, 32, 25, 0.76) 0%, rgba(10, 18, 13, 0.72) 55%, rgba(5, 10, 7, 0.78) 100%);
   --container-bg: rgba(243, 248, 244, 0.72);
   --container-bg-strong: rgba(230, 239, 233, 0.82);
   --text-color: rgba(23, 37, 30, 0.95);
@@ -42,6 +42,12 @@
   --glass-panel-shadow: 0 24px 60px rgba(16, 28, 22, 0.15), 0 12px 28px rgba(52, 168, 83, 0.12);
   --glass-panel-hover-shadow: 0 34px 88px rgba(16, 28, 22, 0.18), 0 18px 40px rgba(52, 168, 83, 0.16);
   --glass-panel-fallback: rgba(238, 245, 240, 0.94);
+  --card-surface-bg: rgba(17, 25, 40, 0.32);
+  --card-surface-strong-bg: rgba(17, 25, 40, 0.42);
+  --card-surface-border: rgba(255, 255, 255, 0.125);
+  --card-surface-shadow: 0 32px 72px rgba(10, 24, 16, 0.26);
+  --card-surface-hover-shadow: 0 44px 96px rgba(10, 24, 16, 0.32);
+  --card-surface-fallback: rgba(230, 239, 234, 0.92);
   --glass-button-bg-start: rgba(34, 197, 94, 0.95);
   --glass-button-bg-end: rgba(16, 185, 129, 0.85);
   --glass-button-hover-start: rgba(22, 163, 74, 0.98);
@@ -62,9 +68,9 @@
 
 [data-theme="dark"] {
   --bg-fallback: #070f09;
-  --bg-color: linear-gradient(200deg, rgba(7, 16, 11, 0.92) 0%, rgba(8, 18, 13, 0.9) 55%, rgba(4, 11, 7, 0.96) 100%),
-    url("https://images.unsplash.com/photo-1691268079349-1e22a841a6de?q=80&w=2069&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D");
+  --bg-image: url("https://images.unsplash.com/photo-1691268079349-1e22a841a6de?q=80&w=2069&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D");
   --ambient-overlay: radial-gradient(120% 120% at 20% 20%, rgba(74, 222, 128, 0.16) 0%, rgba(74, 222, 128, 0) 70%);
+  --bg-overlay: linear-gradient(210deg, rgba(5, 12, 8, 0.82) 0%, rgba(4, 11, 7, 0.82) 55%, rgba(1, 4, 2, 0.86) 100%);
   --container-bg: rgba(13, 24, 17, 0.74);
   --container-bg-strong: rgba(18, 32, 23, 0.78);
   --text-color: rgba(220, 235, 225, 0.96);
@@ -118,6 +124,12 @@
   --glass-secondary-shadow: 0 16px 36px rgba(4, 10, 7, 0.58), 0 10px 24px rgba(34, 197, 94, 0.18);
   --glass-secondary-hover-shadow: 0 24px 46px rgba(4, 10, 7, 0.64), 0 12px 28px rgba(34, 197, 94, 0.22);
   --glass-focus-ring: rgba(74, 222, 128, 0.55);
+  --card-surface-bg: rgba(17, 25, 40, 0.58);
+  --card-surface-strong-bg: rgba(17, 25, 40, 0.7);
+  --card-surface-border: rgba(255, 255, 255, 0.16);
+  --card-surface-shadow: 0 36px 84px rgba(3, 8, 6, 0.55);
+  --card-surface-hover-shadow: 0 48px 112px rgba(3, 8, 6, 0.62);
+  --card-surface-fallback: rgba(21, 36, 28, 0.9);
 }
 
 /* Theme toggle button */
@@ -175,9 +187,14 @@
 
   .welcome-highlights li,
   .auth-card,
-  .card {
-    background: var(--glass-panel-fallback);
+  .card,
+  .container,
+  .welcome-panel,
+  .config-modal-content,
+  .modal-content {
+    background: var(--card-surface-fallback);
     box-shadow: 0 18px 40px var(--shadow-color);
+    border-color: var(--border-strong);
   }
 
   .primary-btn {
@@ -201,12 +218,31 @@
 html {
   min-height: 100%;
   background-color: var(--bg-fallback);
-  background-image: var(--bg-color);
-  background-attachment: fixed;
+  position: relative;
+  transition: background-color 0.4s ease;
+}
+
+html::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: var(--bg-image);
   background-position: center;
   background-repeat: no-repeat;
   background-size: cover;
-  transition: background-color 0.4s ease, background-image 0.6s ease;
+  filter: brightness(0.45) saturate(120%) blur(4px);
+  transform: scale(1.05);
+  pointer-events: none;
+  z-index: -4;
+}
+
+html::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: var(--bg-overlay);
+  pointer-events: none;
+  z-index: -3;
 }
 
 body {
@@ -255,23 +291,16 @@ body::after {
 }
 
 .container {
-  background: var(--container-bg);
-  border-radius: 16px;
-  border: 1px solid var(--border-color);
   max-width: 900px;
   width: 100%;
-  box-shadow: var(--glass-shadow-soft);
   padding: 2.5rem;
-  backdrop-filter: blur(var(--glass-blur-lg)) saturate(125%);
-  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(125%);
-  transition: background-color 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
-}
-
-@supports not ((backdrop-filter: blur(0.5rem))) {
-  .container {
-    background: var(--container-bg-strong);
-    border-color: var(--border-strong);
-  }
+  border-radius: 12px;
+  border: 1px solid var(--card-surface-border);
+  background-color: var(--card-surface-bg);
+  box-shadow: var(--card-surface-shadow);
+  backdrop-filter: blur(5px) saturate(180%);
+  -webkit-backdrop-filter: blur(5px) saturate(180%);
+  transition: background-color 0.35s ease, box-shadow 0.35s ease, border-color 0.35s ease;
 }
 
 body.auth-locked {
@@ -285,8 +314,9 @@ body.auth-locked {
   align-items: center;
   justify-content: center;
   padding: 2rem;
-  background: linear-gradient(120deg, rgba(10, 22, 15, 0.82), rgba(36, 60, 44, 0.76));
-  backdrop-filter: blur(12px);
+  background: rgba(7, 16, 11, 0.72);
+  backdrop-filter: blur(5px) saturate(180%);
+  -webkit-backdrop-filter: blur(5px) saturate(180%);
   z-index: 1200;
   opacity: 0;
   pointer-events: none;
@@ -306,16 +336,12 @@ body.auth-locked {
   max-width: 960px;
   width: 100%;
   padding: 2.5rem;
-  border-radius: 24px;
-  background: rgba(243, 248, 244, 0.92);
-  border: 1px solid rgba(120, 153, 133, 0.28);
-  box-shadow: 0 40px 80px rgba(12, 28, 20, 0.35);
-}
-
-[data-theme="dark"] .welcome-panel {
-  background: rgba(19, 32, 24, 0.92);
-  border-color: rgba(62, 95, 74, 0.38);
-  box-shadow: 0 40px 80px rgba(3, 8, 6, 0.65);
+  border-radius: 12px;
+  background-color: var(--card-surface-bg);
+  border: 1px solid var(--card-surface-border);
+  box-shadow: var(--card-surface-shadow);
+  backdrop-filter: blur(5px) saturate(180%);
+  -webkit-backdrop-filter: blur(5px) saturate(180%);
 }
 
 .welcome-hero {
@@ -359,11 +385,11 @@ body.auth-locked {
   padding: 1rem 1.25rem;
   border-radius: 18px;
   position: relative;
-  background: var(--glass-panel-bg);
-  border: 1px solid var(--glass-panel-border);
-  box-shadow: var(--glass-panel-shadow);
-  backdrop-filter: blur(var(--glass-blur-sm)) saturate(135%);
-  -webkit-backdrop-filter: blur(var(--glass-blur-sm)) saturate(135%);
+  background-color: var(--card-surface-bg);
+  border: 1px solid var(--card-surface-border);
+  box-shadow: var(--card-surface-shadow);
+  backdrop-filter: blur(5px) saturate(180%);
+  -webkit-backdrop-filter: blur(5px) saturate(180%);
   overflow: hidden;
   transform: translateY(0);
   transition: transform 0.35s ease, box-shadow 0.35s ease, border-color 0.35s ease;
@@ -373,12 +399,7 @@ body.auth-locked {
 
 .welcome-highlights li:hover {
   transform: translateY(-4px);
-  box-shadow: var(--glass-panel-hover-shadow);
-}
-
-[data-theme="dark"] .welcome-highlights li {
-  background: var(--glass-panel-strong-bg);
-  border-color: var(--glass-panel-border);
+  box-shadow: var(--card-surface-hover-shadow);
 }
 
 .welcome-icon {
@@ -409,13 +430,13 @@ body.auth-locked {
   flex: 1 1 340px;
   min-width: 320px;
   position: relative;
-  background: var(--glass-panel-bg);
-  border: 1px solid var(--glass-panel-border);
+  background-color: var(--card-surface-bg);
+  border: 1px solid var(--card-surface-border);
   border-radius: 20px;
   padding: 2rem;
-  box-shadow: var(--glass-panel-shadow);
-  backdrop-filter: blur(var(--glass-blur-lg)) saturate(135%);
-  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(135%);
+  box-shadow: var(--card-surface-shadow);
+  backdrop-filter: blur(5px) saturate(180%);
+  -webkit-backdrop-filter: blur(5px) saturate(180%);
   overflow: hidden;
   transform: translateY(0);
   transition: transform 0.35s ease, box-shadow 0.35s ease, border-color 0.35s ease;
@@ -426,12 +447,8 @@ body.auth-locked {
 .auth-card:hover,
 .auth-card:focus-within {
   transform: translateY(-6px);
-  box-shadow: var(--glass-panel-hover-shadow);
-  border-color: var(--glass-panel-border);
-}
-
-[data-theme="dark"] .auth-card {
-  background: var(--glass-panel-strong-bg);
+  box-shadow: var(--card-surface-hover-shadow);
+  border-color: var(--card-surface-border);
 }
 
 :is(.welcome-highlights li, .auth-card, .card, .primary-btn, .secondary-btn)::before {
@@ -982,13 +999,13 @@ body.auth-locked {
   --glass-specular-opacity: 0.32;
   --glass-specular-active-opacity: 0.46;
   position: relative;
-  background: var(--glass-panel-bg);
-  border: 1px solid var(--glass-panel-border);
-  border-radius: 16px;
+  background-color: var(--card-surface-strong-bg);
+  border: 1px solid var(--card-surface-border);
+  border-radius: 12px;
   padding: 1.5rem;
-  box-shadow: var(--glass-panel-shadow);
-  backdrop-filter: blur(var(--glass-blur-sm)) saturate(135%);
-  -webkit-backdrop-filter: blur(var(--glass-blur-sm)) saturate(135%);
+  box-shadow: var(--card-surface-shadow);
+  backdrop-filter: blur(5px) saturate(180%);
+  -webkit-backdrop-filter: blur(5px) saturate(180%);
   overflow: hidden;
   transform: translateY(0);
   transition: transform 0.35s ease, box-shadow 0.35s ease, border-color 0.35s ease;
@@ -999,12 +1016,8 @@ body.auth-locked {
 .card:hover,
 .card:focus-within {
   transform: translateY(-6px);
-  box-shadow: var(--glass-panel-hover-shadow);
-  border-color: var(--glass-panel-border);
-}
-
-[data-theme="dark"] .card {
-  background: var(--glass-panel-strong-bg);
+  box-shadow: var(--card-surface-hover-shadow);
+  border-color: var(--card-surface-border);
 }
 
 .card h2 {
@@ -2013,24 +2026,28 @@ body.night-active main.container {
 .modal {
   display: none;
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0, 0, 0, 0.5); /* More translucent */
+  inset: 0;
+  padding: 2rem;
+  background: rgba(7, 16, 11, 0.72);
+  backdrop-filter: blur(5px) saturate(160%);
+  -webkit-backdrop-filter: blur(5px) saturate(160%);
   z-index: 1000;
   justify-content: center;
   align-items: center;
 }
 
 .modal-content {
-  background-color: var(--container-bg);
+  background-color: var(--card-surface-bg);
+  border: 1px solid var(--card-surface-border);
   padding: 2rem;
-  border-radius: 8px;
+  border-radius: 12px;
   max-width: 500px;
   width: 90%;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--card-surface-shadow);
+  backdrop-filter: blur(5px) saturate(180%);
+  -webkit-backdrop-filter: blur(5px) saturate(180%);
   text-align: center;
+  transition: background-color 0.35s ease, box-shadow 0.35s ease, border-color 0.35s ease;
 }
 
 .modal h3 {
@@ -2053,9 +2070,10 @@ body.night-active main.container {
 
 /* Seer Vision Styles */
 #seerVisionModal .modal-content {
-  background: rgba(17, 17, 17, 0.8);
-  backdrop-filter: blur(4px);
-  border: 1px solid rgba(139, 92, 246, 0.3);
+  background-color: rgba(17, 25, 40, 0.72);
+  backdrop-filter: blur(5px) saturate(180%);
+  -webkit-backdrop-filter: blur(5px) saturate(180%);
+  border: 1px solid rgba(139, 92, 246, 0.38);
   box-shadow: 0 0 30px rgba(0, 0, 0, 0.5), inset 0 0 20px rgba(139, 92, 246, 0.2);
   color: #fff;
 }
@@ -3254,9 +3272,10 @@ body.phoenix-pulse-charged .container::before {
 }
 
 .modal.blood-moon-popup .modal-content {
-  background: rgba(17, 17, 17, 0.8);
-  backdrop-filter: blur(4px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background-color: rgba(17, 25, 40, 0.72);
+  backdrop-filter: blur(5px) saturate(180%);
+  -webkit-backdrop-filter: blur(5px) saturate(180%);
+  border: 1px solid rgba(255, 115, 115, 0.24);
   box-shadow: 0 0 30px rgba(0, 0, 0, 0.5), inset 0 0 20px rgba(255, 0, 0, 0.2);
   color: #fff;
 }
@@ -3468,14 +3487,11 @@ body.phoenix-pulse-charged .container::before {
 
 #roles-overview-modal .modal-content {
     max-width: 700px;
-    background-color: rgba(45, 45, 45, 0.85);
-    backdrop-filter: blur(5px);
-    border: 1px solid var(--border-color);
-    box-shadow: 0 4px 12px var(--shadow-color);
-}
-
-[data-theme="light"] #roles-overview-modal .modal-content {
-    background-color: rgba(255, 255, 255, 0.85);
+    background-color: var(--card-surface-bg);
+    border: 1px solid var(--card-surface-border);
+    box-shadow: var(--card-surface-shadow);
+    backdrop-filter: blur(5px) saturate(180%);
+    -webkit-backdrop-filter: blur(5px) saturate(180%);
 }
 
 #roles-overview-modal h3 {
