@@ -751,6 +751,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   const sessionsList = document.getElementById('sessions-list');
   const sessionsToggle = document.getElementById('sessions-toggle');
 
+  const replaySessionSelect = document.getElementById('replay-session-select');
+  const replayScrubber = document.getElementById('replay-scrubber');
+  const replayActionLabel = document.getElementById('replay-action-label');
+  const replayApplyBtn = document.getElementById('replay-apply-btn');
+  const replayActionList = document.getElementById('replay-action-list');
+
+  const analyticsSummaryEl = document.getElementById('analytics-summary');
+  const analyticsWinratesEl = document.getElementById('analytics-winrates');
+  const analyticsMetaEl = document.getElementById('analytics-meta');
+
+  let replayTimeline = null;
+  let replayPointer = -1;
+  let isLoadingReplay = false;
+
   if (sessionsToggle) {
     sessionsToggle.addEventListener('click', () => {
       sessionsSidebar.classList.toggle('show');
@@ -1480,10 +1494,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   updateBloodMoonOdds();
-
-  // Load existing sessions on startup
-  await loadSessions();
-  await loadAnalytics();
 
   // Confirmation Modal Elements
   const confirmationModal = document.getElementById('confirmation-modal');
@@ -6857,19 +6867,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   const macroDescriptionEl = document.getElementById('admin-macro-description');
   const defaultMacroDescription = macroDescriptionEl ? macroDescriptionEl.textContent : '';
 
-  const replaySessionSelect = document.getElementById('replay-session-select');
-  const replayScrubber = document.getElementById('replay-scrubber');
-  const replayActionLabel = document.getElementById('replay-action-label');
-  const replayApplyBtn = document.getElementById('replay-apply-btn');
-  const replayActionList = document.getElementById('replay-action-list');
-
-  const analyticsSummaryEl = document.getElementById('analytics-summary');
-  const analyticsWinratesEl = document.getElementById('analytics-winrates');
-  const analyticsMetaEl = document.getElementById('analytics-meta');
-
-  let replayTimeline = null;
-  let replayPointer = -1;
-  let isLoadingReplay = false;
+  await loadSessions();
+  await loadAnalytics();
 
   const narratorDashboard = document.getElementById('narrator-dashboard');
   const dashboardPhaseEl = document.getElementById('dashboard-phase');
