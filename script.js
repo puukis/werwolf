@@ -760,6 +760,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   const analyticsSummaryEl = document.getElementById('analytics-summary');
   const analyticsWinratesEl = document.getElementById('analytics-winrates');
   const analyticsMetaEl = document.getElementById('analytics-meta');
+  const analyticsHighlightsEl = document.getElementById('analytics-highlights');
+  const analyticsPlayerTableBody = document.getElementById('analytics-player-table-body');
 
   let replayTimeline = null;
   let replayPointer = -1;
@@ -6657,6 +6659,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     const summary = data?.summary || {};
+    const playerAnalytics = data?.players || {};
     const sessionCount = Number.isFinite(summary.sessionCount) ? summary.sessionCount : Number(summary.sessions) || 0;
     const averageLengthMs = Number.isFinite(summary.averageGameLengthMs)
       ? summary.averageGameLengthMs
@@ -6676,7 +6679,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       summaryParts.push(`Ø Aktionen: ${averageActions.toFixed(1)}`);
     }
     if (Number.isFinite(averageLengthMs)) {
-      summaryParts.push(`Ø Spieldauer: ${formatMillisecondsToSeconds(averageLengthMs)}s`);
+      summaryParts.push(`Ø Spieldauer: ${formatMillisecondsToSeconds(averageLengthMs)}`);
     }
     analyticsSummaryEl.textContent = summaryParts.join(' • ');
 
@@ -6691,14 +6694,18 @@ document.addEventListener("DOMContentLoaded", async () => {
       } else {
         winRates.forEach(entry => {
           const item = document.createElement('li');
-          const winner = entry.winner || 'Unbekannt';
+          const winnerName = entry.winner || 'Unbekannt';
           const rateValue = Number.isFinite(entry.rate) ? entry.rate : Number(entry.percentage) / 100;
-          const percentage = Number.isFinite(rateValue) ? Math.round(rateValue * 100) : null;
-          const count = Number.isFinite(entry.count) ? entry.count : Number(entry.total) || 0;
-          const parts = [`<strong>${winner}</strong>`];
-          parts.push(percentage !== null ? `${percentage}%` : '–');
-          parts.push(`(${count})`);
-          item.innerHTML = parts.join(' ');
+          const countValueRaw = Number.isFinite(entry.count) ? entry.count : Number(entry.total) || 0;
+          const countValue = Number.isFinite(countValueRaw) ? countValueRaw : 0;
+          const winnerEl = document.createElement('strong');
+          winnerEl.textContent = winnerName;
+          item.appendChild(winnerEl);
+
+          const detailSpan = document.createElement('span');
+          detailSpan.textContent = `${formatPercentage(rateValue, { defaultText: '–', fractionDigits: 0 })} (${countValue.toLocaleString('de-DE')})`;
+          item.appendChild(detailSpan);
+
           analyticsWinratesEl.appendChild(item);
         });
       }
@@ -6712,6 +6719,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       const averageDays = Number.isFinite(meta.averageDayCount)
         ? meta.averageDayCount
         : Number(meta.average_day_count);
+      const trackedSessions = Number.isFinite(playerAnalytics.trackedSessions)
+        ? playerAnalytics.trackedSessions
+        : Number(playerAnalytics.sessionCount);
+      const distinctPlayers = Number.isFinite(playerAnalytics.totalCount)
+        ? playerAnalytics.totalCount
+        : Number(playerAnalytics.distinctPlayers);
       const metaParts = [];
       if (Number.isFinite(averageNights)) {
         metaParts.push(`Ø Nächte: ${averageNights.toFixed(1)}`);
@@ -6719,7 +6732,179 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (Number.isFinite(averageDays)) {
         metaParts.push(`Ø Tage: ${averageDays.toFixed(1)}`);
       }
+      if (Number.isFinite(trackedSessions) && trackedSessions > 0) {
+        metaParts.push(`Analysierte Sessions: ${trackedSessions.toLocaleString('de-DE')}`);
+      }
+      if (Number.isFinite(distinctPlayers) && distinctPlayers > 0) {
+        metaParts.push(`Spieler:innen: ${distinctPlayers.toLocaleString('de-DE')}`);
+      }
       analyticsMetaEl.textContent = metaParts.join(' • ');
+    }
+
+    if (analyticsHighlightsEl) {
+      analyticsHighlightsEl.innerHTML = '';
+      const formatNumber = (value) => (Number.isFinite(value) ? value.toLocaleString('de-DE') : null);
+      const highlightConfigs = [
+        {
+          key: 'topWinners',
+          title: 'Top Sieger:innen',
+          description: 'Meiste Siege insgesamt',
+          items: Array.isArray(playerAnalytics.topWinners) ? playerAnalytics.topWinners : [],
+          format(entry) {
+            const wins = formatNumber(entry.wins);
+            const games = formatNumber(entry.games);
+            const parts = [];
+            if (wins !== null) {
+              parts.push(`${wins} ${entry.wins === 1 ? 'Sieg' : 'Siege'}`);
+            }
+            if (games !== null) {
+              parts.push(`${games} Spiele`);
+            }
+            const winRateText = formatPercentage(entry.winRate, { defaultText: '–', fractionDigits: 0 });
+            if (winRateText !== '–') {
+              parts.push(winRateText);
+            }
+            return parts.join(' • ') || 'Keine Daten';
+          }
+        },
+        {
+          key: 'mostDeaths',
+          title: 'Meist gestorben',
+          description: 'Häufigste Opfer des Spiels',
+          items: Array.isArray(playerAnalytics.mostDeaths) ? playerAnalytics.mostDeaths : [],
+          format(entry) {
+            const deaths = formatNumber(entry.deaths);
+            const games = formatNumber(entry.games);
+            const parts = [];
+            if (deaths !== null) {
+              parts.push(`${deaths} ${entry.deaths === 1 ? 'Tod' : 'Tode'}`);
+            }
+            if (games !== null) {
+              parts.push(`${games} Spiele`);
+            }
+            const deathRateText = formatPercentage(entry.deathRate, { defaultText: '–', fractionDigits: 0 });
+            if (deathRateText !== '–') {
+              parts.push(deathRateText);
+            }
+            return parts.join(' • ') || 'Keine Daten';
+          }
+        },
+        {
+          key: 'bestSurvivors',
+          title: 'Überlebenskünstler:innen',
+          description: 'Höchste Überlebensquote (mind. 2 Spiele)',
+          items: Array.isArray(playerAnalytics.bestSurvivors) ? playerAnalytics.bestSurvivors : [],
+          format(entry) {
+            const survivalCount = Number.isFinite(entry.survivals) ? entry.survivals : null;
+            const survivals = survivalCount !== null ? formatNumber(entry.survivals) : null;
+            const games = formatNumber(entry.games);
+            const parts = [];
+            if (survivalCount !== null && survivals !== null) {
+              parts.push(`${survivals}× überlebt`);
+            }
+            if (games !== null) {
+              parts.push(`${games} Spiele`);
+            }
+            const survivalRateText = formatPercentage(entry.survivalRate, { defaultText: '–', fractionDigits: 0 });
+            if (survivalRateText !== '–') {
+              parts.push(survivalRateText);
+            }
+            return parts.join(' • ') || 'Keine Daten';
+          }
+        }
+      ];
+
+      highlightConfigs.forEach(config => {
+        const card = document.createElement('div');
+        card.className = 'analytics-card card';
+        const titleEl = document.createElement('h6');
+        titleEl.textContent = config.title;
+        card.appendChild(titleEl);
+        if (config.description) {
+          const descEl = document.createElement('p');
+          descEl.textContent = config.description;
+          card.appendChild(descEl);
+        }
+        const list = document.createElement('ul');
+        if (!config.items || config.items.length === 0) {
+          const emptyItem = document.createElement('li');
+          emptyItem.textContent = 'Noch keine Daten vorhanden.';
+          list.appendChild(emptyItem);
+        } else {
+          config.items.forEach(entry => {
+            const item = document.createElement('li');
+            const nameEl = document.createElement('strong');
+            nameEl.textContent = entry.name || 'Unbekannt';
+            item.appendChild(nameEl);
+            const detailEl = document.createElement('span');
+            detailEl.textContent = config.format(entry);
+            item.appendChild(detailEl);
+            list.appendChild(item);
+          });
+        }
+        card.appendChild(list);
+        analyticsHighlightsEl.appendChild(card);
+      });
+    }
+
+    if (analyticsPlayerTableBody) {
+      analyticsPlayerTableBody.innerHTML = '';
+      const stats = Array.isArray(playerAnalytics.stats) ? playerAnalytics.stats : [];
+      const formatCount = (value) => (Number.isFinite(value) ? value.toLocaleString('de-DE') : '–');
+      if (stats.length === 0) {
+        const row = document.createElement('tr');
+        row.className = 'empty';
+        const cell = document.createElement('td');
+        cell.colSpan = 7;
+        cell.textContent = 'Noch keine Spielerstatistiken verfügbar.';
+        row.appendChild(cell);
+        analyticsPlayerTableBody.appendChild(row);
+      } else {
+        stats.forEach(stat => {
+          const row = document.createElement('tr');
+          const favoriteRole = stat.favoriteRole && typeof stat.favoriteRole.role === 'string'
+            ? stat.favoriteRole.role
+            : null;
+          const favoriteCount = stat.favoriteRole && Number.isFinite(stat.favoriteRole.count)
+            ? stat.favoriteRole.count
+            : null;
+          const favoriteRoleLabel = favoriteRole && favoriteCount !== null
+            ? `${favoriteRole} (${favoriteCount.toLocaleString('de-DE')}×)`
+            : '–';
+          const columns = [
+            stat.name || 'Unbekannt',
+            formatCount(stat.games),
+            formatCount(stat.wins),
+            formatPercentage(stat.winRate, { defaultText: '–', fractionDigits: 0 }),
+            formatCount(stat.deaths),
+            formatPercentage(stat.survivalRate, { defaultText: '–', fractionDigits: 0 }),
+            favoriteRoleLabel
+          ];
+          columns.forEach((value, index) => {
+            const cell = document.createElement('td');
+            cell.textContent = value;
+            if (index === 6 && Array.isArray(stat.topRoles) && stat.topRoles.length > 0) {
+              const tooltipEntries = stat.topRoles
+                .map(roleEntry => {
+                  if (!roleEntry || typeof roleEntry.role !== 'string') {
+                    return null;
+                  }
+                  const count = Number.isFinite(roleEntry.count) ? roleEntry.count : null;
+                  if (count === null) {
+                    return roleEntry.role;
+                  }
+                  return `${roleEntry.role} (${count.toLocaleString('de-DE')}×)`;
+                })
+                .filter(Boolean);
+              if (tooltipEntries.length > 0) {
+                cell.title = tooltipEntries.join(', ');
+              }
+            }
+            row.appendChild(cell);
+          });
+          analyticsPlayerTableBody.appendChild(row);
+        });
+      }
     }
   }
 
@@ -7609,6 +7794,17 @@ document.addEventListener("DOMContentLoaded", async () => {
       return `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)}s`;
     }
     return `${Math.max(0, Math.round(ms))}ms`;
+  }
+
+  function formatPercentage(value, { defaultText = '–', fractionDigits = 0 } = {}) {
+    if (!Number.isFinite(value)) {
+      return defaultText;
+    }
+    const percentage = value * 100;
+    if (!Number.isFinite(percentage)) {
+      return defaultText;
+    }
+    return `${percentage.toFixed(fractionDigits)}%`;
   }
 
   function renderNarratorDashboard() {

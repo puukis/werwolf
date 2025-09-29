@@ -647,6 +647,131 @@ app.delete('/api/sessions/:timestamp', async (req, res) => {
   }
 });
 
+const VILLAGE_ROLES = new Set([
+  'Dorfbewohner',
+  'Seer',
+  'Jäger',
+  'Hexe',
+  'Stumme Jule',
+  'Inquisitor',
+  'Sündenbock',
+  'Geschwister',
+  'Geist',
+  'Michael Jackson',
+  'Friedenstifter',
+]);
+
+const WERWOLF_ROLES = new Set(['Werwolf', 'Verfluchte']);
+
+function normalizePlayerName(name) {
+  if (typeof name !== 'string') {
+    return null;
+  }
+  const normalized = name.replace(/\s+/g, ' ').trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function getTeamForRole(roleName) {
+  if (typeof roleName !== 'string') {
+    return 'special';
+  }
+  if (WERWOLF_ROLES.has(roleName)) {
+    return 'werwolf';
+  }
+  if (VILLAGE_ROLES.has(roleName)) {
+    return 'village';
+  }
+  return 'special';
+}
+
+function deriveWinningInfoFromSession(session) {
+  const winner = session?.metadata?.winner;
+  if (!winner || typeof winner.title !== 'string') {
+    return { faction: null, winners: [] };
+  }
+
+  const normalizedTitle = winner.title.trim().toLowerCase();
+  const players = Array.isArray(session?.players) ? session.players : [];
+  const roles = Array.isArray(session?.rolesAssigned) ? session.rolesAssigned : [];
+  const lovers = Array.isArray(session?.lovers) ? session.lovers : [];
+  const winners = new Set();
+  let faction = null;
+
+  const addWinner = (name) => {
+    const normalized = normalizePlayerName(name);
+    if (normalized) {
+      winners.add(normalized);
+    }
+  };
+
+  switch (normalizedTitle) {
+    case 'werwölfe gewinnen!':
+      faction = 'werwolf';
+      players.forEach((playerName, index) => {
+        if (getTeamForRole(roles[index]) === 'werwolf') {
+          addWinner(playerName);
+        }
+      });
+      break;
+    case 'dorfbewohner gewinnen!':
+      faction = 'village';
+      players.forEach((playerName, index) => {
+        if (getTeamForRole(roles[index]) !== 'werwolf') {
+          addWinner(playerName);
+        }
+      });
+      break;
+    case 'die liebenden gewinnen!':
+      faction = 'lovers';
+      lovers.forEach((pair) => {
+        if (Array.isArray(pair)) {
+          pair.forEach(addWinner);
+        }
+      });
+      break;
+    case 'der henker gewinnt!':
+      faction = 'henker';
+      roles.forEach((roleName, index) => {
+        if (roleName === 'Henker') {
+          addWinner(players[index]);
+        }
+      });
+      if (winners.size === 0 && typeof winner.message === 'string') {
+        const match = winner.message.match(/^([^!]+?) hat sein Ziel erreicht/i);
+        if (match && match[1]) {
+          addWinner(match[1]);
+        }
+      }
+      break;
+    case 'der friedenstifter gewinnt!':
+      faction = 'friedenstifter';
+      roles.forEach((roleName, index) => {
+        if (roleName === 'Friedenstifter') {
+          addWinner(players[index]);
+        }
+      });
+      break;
+    default:
+      break;
+  }
+
+  return { faction, winners: Array.from(winners) };
+}
+
+function ensurePlayerAggregate(map, name) {
+  if (!map.has(name)) {
+    map.set(name, {
+      name,
+      games: 0,
+      wins: 0,
+      deaths: 0,
+      roles: new Map(),
+      lastPlayedAt: 0,
+    });
+  }
+  return map.get(name);
+}
+
 app.get('/api/analytics', async (req, res) => {
   try {
     const summaryResult = await query(
@@ -682,6 +807,148 @@ app.get('/api/analytics', async (req, res) => {
     );
     const metaRow = metaResult.rows[0] || {};
 
+    const sessionResult = await query(
+      `SELECT timestamp, data
+         FROM sessions
+        ORDER BY timestamp DESC`
+    );
+
+    const playerAggregates = new Map();
+
+    sessionResult.rows.forEach((row) => {
+      const sessionData = row?.data || {};
+      const players = Array.isArray(sessionData.players) ? sessionData.players : [];
+      if (players.length === 0) {
+        return;
+      }
+
+      const roles = Array.isArray(sessionData.rolesAssigned) ? sessionData.rolesAssigned : [];
+      const deadPlayers = Array.isArray(sessionData.deadPlayers) ? sessionData.deadPlayers : [];
+      const deadSet = new Set(deadPlayers
+        .map((name) => normalizePlayerName(name))
+        .filter(Boolean));
+      const winningInfo = deriveWinningInfoFromSession(sessionData);
+      const winnerSet = new Set(Array.isArray(winningInfo.winners) ? winningInfo.winners : []);
+      const timestamp = Number(sessionData.timestamp);
+
+      players.forEach((playerName, index) => {
+        const normalizedName = normalizePlayerName(playerName);
+        if (!normalizedName) {
+          return;
+        }
+        const aggregate = ensurePlayerAggregate(playerAggregates, normalizedName);
+        aggregate.games += 1;
+        if (Number.isFinite(timestamp)) {
+          aggregate.lastPlayedAt = Math.max(aggregate.lastPlayedAt || 0, timestamp);
+        }
+
+        const roleName = roles[index] || null;
+        if (roleName) {
+          aggregate.roles.set(roleName, (aggregate.roles.get(roleName) || 0) + 1);
+        }
+
+        if (winnerSet.has(normalizedName)) {
+          aggregate.wins += 1;
+        }
+
+        if (deadSet.has(normalizedName)) {
+          aggregate.deaths += 1;
+        }
+      });
+    });
+
+    const stats = Array.from(playerAggregates.values()).map((aggregate) => {
+      const survivals = Math.max(0, aggregate.games - aggregate.deaths);
+      const winRate = aggregate.games > 0 ? aggregate.wins / aggregate.games : null;
+      const survivalRate = aggregate.games > 0 ? survivals / aggregate.games : null;
+      const deathRate = aggregate.games > 0 ? aggregate.deaths / aggregate.games : null;
+      const roleEntries = Array.from(aggregate.roles.entries())
+        .map(([role, count]) => ({ role, count }))
+        .sort((a, b) => {
+          if (b.count === a.count) {
+            return a.role.localeCompare(b.role, 'de');
+          }
+          return b.count - a.count;
+        });
+
+      return {
+        name: aggregate.name,
+        games: aggregate.games,
+        wins: aggregate.wins,
+        deaths: aggregate.deaths,
+        survivals,
+        winRate,
+        survivalRate,
+        deathRate,
+        favoriteRole: roleEntries[0] || null,
+        topRoles: roleEntries.slice(0, 5),
+        lastPlayedAt: aggregate.lastPlayedAt || null,
+      };
+    });
+
+    const compareByWin = (a, b) => {
+      if (b.wins === a.wins) {
+        const rateA = Number.isFinite(a.winRate) ? a.winRate : -1;
+        const rateB = Number.isFinite(b.winRate) ? b.winRate : -1;
+        if (rateB === rateA) {
+          if (b.games === a.games) {
+            return a.name.localeCompare(b.name, 'de');
+          }
+          return b.games - a.games;
+        }
+        return rateB - rateA;
+      }
+      return b.wins - a.wins;
+    };
+
+    const statsSorted = stats
+      .slice()
+      .sort(compareByWin);
+
+    const topWinners = stats
+      .filter((stat) => stat.wins > 0)
+      .sort(compareByWin)
+      .slice(0, 5)
+      .map(({ name, wins, games, winRate }) => ({ name, wins, games, winRate }));
+
+    const mostDeaths = stats
+      .filter((stat) => stat.deaths > 0)
+      .sort((a, b) => {
+        if (b.deaths === a.deaths) {
+          const rateA = Number.isFinite(a.deathRate) ? a.deathRate : -1;
+          const rateB = Number.isFinite(b.deathRate) ? b.deathRate : -1;
+          if (rateB === rateA) {
+            if (b.games === a.games) {
+              return a.name.localeCompare(b.name, 'de');
+            }
+            return b.games - a.games;
+          }
+          return rateB - rateA;
+        }
+        return b.deaths - a.deaths;
+      })
+      .slice(0, 5)
+      .map(({ name, deaths, games, deathRate }) => ({ name, deaths, games, deathRate }));
+
+    const bestSurvivors = stats
+      .filter((stat) => stat.games >= 2)
+      .sort((a, b) => {
+        const rateA = Number.isFinite(a.survivalRate) ? a.survivalRate : -1;
+        const rateB = Number.isFinite(b.survivalRate) ? b.survivalRate : -1;
+        if (rateB === rateA) {
+          if (b.survivals === a.survivals) {
+            if (b.games === a.games) {
+              return a.name.localeCompare(b.name, 'de');
+            }
+            return b.games - a.games;
+          }
+          return b.survivals - a.survivals;
+        }
+        return rateB - rateA;
+      })
+      .slice(0, 5)
+      .map(({ name, survivals, games, survivalRate }) => ({ name, survivals, games, survivalRate }));
+
     res.json({
       summary: {
         sessionCount: Number(summaryRow.session_count || 0),
@@ -693,6 +960,14 @@ app.get('/api/analytics', async (req, res) => {
       meta: {
         averageDayCount: metaRow.average_day_count !== null ? Number(metaRow.average_day_count) : null,
         averageNightCount: metaRow.average_night_count !== null ? Number(metaRow.average_night_count) : null,
+      },
+      players: {
+        totalCount: stats.length,
+        trackedSessions: sessionResult.rowCount,
+        topWinners,
+        mostDeaths,
+        bestSurvivors,
+        stats: statsSorted,
       },
     });
   } catch (error) {
