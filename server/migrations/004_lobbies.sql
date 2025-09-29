@@ -65,8 +65,31 @@ CREATE INDEX IF NOT EXISTS lobby_members_role_idx
 
 ALTER TABLE kv_store DROP CONSTRAINT IF EXISTS kv_store_pkey;
 ALTER TABLE kv_store
-  ADD COLUMN IF NOT EXISTS owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  ADD COLUMN IF NOT EXISTS lobby_id INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE;
+  ADD COLUMN IF NOT EXISTS owner_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS lobby_id INTEGER REFERENCES lobbies(id) ON DELETE CASCADE;
+
+ALTER TABLE sessions
+  ADD COLUMN IF NOT EXISTS owner_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS lobby_id INTEGER REFERENCES lobbies(id) ON DELETE CASCADE;
+
+ALTER TABLE session_timelines DROP CONSTRAINT IF EXISTS session_timelines_pkey;
+ALTER TABLE session_timelines
+  ADD COLUMN IF NOT EXISTS owner_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS lobby_id INTEGER REFERENCES lobbies(id) ON DELETE CASCADE;
+
+ALTER TABLE session_metrics DROP CONSTRAINT IF EXISTS session_metrics_pkey;
+ALTER TABLE session_metrics
+  ADD COLUMN IF NOT EXISTS owner_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS lobby_id INTEGER REFERENCES lobbies(id) ON DELETE CASCADE;
+
+DELETE FROM kv_store WHERE owner_id IS NULL OR lobby_id IS NULL;
+DELETE FROM sessions WHERE owner_id IS NULL OR lobby_id IS NULL;
+DELETE FROM session_timelines WHERE owner_id IS NULL OR lobby_id IS NULL;
+DELETE FROM session_metrics WHERE owner_id IS NULL OR lobby_id IS NULL;
+
+ALTER TABLE kv_store
+  ALTER COLUMN owner_id SET NOT NULL,
+  ALTER COLUMN lobby_id SET NOT NULL;
 ALTER TABLE kv_store
   ADD CONSTRAINT kv_store_pkey PRIMARY KEY (lobby_id, key);
 CREATE INDEX IF NOT EXISTS kv_store_owner_idx
@@ -75,8 +98,8 @@ CREATE INDEX IF NOT EXISTS kv_store_lobby_idx
   ON kv_store (lobby_id);
 
 ALTER TABLE sessions
-  ADD COLUMN IF NOT EXISTS owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  ADD COLUMN IF NOT EXISTS lobby_id INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE;
+  ALTER COLUMN owner_id SET NOT NULL,
+  ALTER COLUMN lobby_id SET NOT NULL;
 CREATE INDEX IF NOT EXISTS sessions_owner_idx
   ON sessions (owner_id);
 CREATE INDEX IF NOT EXISTS sessions_lobby_idx
@@ -85,19 +108,17 @@ DROP INDEX IF EXISTS sessions_timestamp_idx;
 CREATE UNIQUE INDEX IF NOT EXISTS sessions_lobby_timestamp_unique_idx
   ON sessions (lobby_id, timestamp);
 
-ALTER TABLE session_timelines DROP CONSTRAINT IF EXISTS session_timelines_pkey;
 ALTER TABLE session_timelines
-  ADD COLUMN IF NOT EXISTS owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  ADD COLUMN IF NOT EXISTS lobby_id INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE;
+  ALTER COLUMN owner_id SET NOT NULL,
+  ALTER COLUMN lobby_id SET NOT NULL;
 ALTER TABLE session_timelines
   ADD CONSTRAINT session_timelines_pkey PRIMARY KEY (lobby_id, session_timestamp);
 CREATE INDEX IF NOT EXISTS session_timelines_owner_idx
   ON session_timelines (owner_id);
 
-ALTER TABLE session_metrics DROP CONSTRAINT IF EXISTS session_metrics_pkey;
 ALTER TABLE session_metrics
-  ADD COLUMN IF NOT EXISTS owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  ADD COLUMN IF NOT EXISTS lobby_id INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE;
+  ALTER COLUMN owner_id SET NOT NULL,
+  ALTER COLUMN lobby_id SET NOT NULL;
 ALTER TABLE session_metrics
   ADD CONSTRAINT session_metrics_pkey PRIMARY KEY (lobby_id, session_timestamp);
 CREATE INDEX IF NOT EXISTS session_metrics_owner_idx
