@@ -5,6 +5,9 @@ const path = require('path');
 const runMigrations = require('./migrate');
 const { query } = require('./db');
 
+const localizedAssetsRoot = path.join(__dirname, '..', 'assets', 'localized');
+const localeCatalogRoot = path.join(__dirname, '..', 'locales');
+
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 app.use(cookieParserMiddleware);
@@ -52,8 +55,6 @@ let defaultRoleSchemaCache = null;
 const LOBBY_HEADER = 'x-werwolf-lobby';
 const LOBBY_JOIN_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const SUPPORTED_LOCALES = new Set(['de', 'en']);
-const localizedAssetsRoot = path.join(__dirname, '..', 'assets', 'localized');
-const localeCatalogRoot = path.join(__dirname, '..', 'locales');
 
 class HttpError extends Error {
   constructor(status, message) {
