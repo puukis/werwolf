@@ -137,6 +137,29 @@
             </div>
         </div>
 
+        <section id="lobby-toolbar" class="lobby-toolbar hidden" aria-label="Lobby-Verwaltung">
+            <div class="lobby-select-group">
+                <label for="lobby-select">Aktive Lobby</label>
+                <div class="lobby-select-row">
+                    <select id="lobby-select" aria-label="Aktive Lobby">
+                        <option value="">Lobbys werden geladen …</option>
+                    </select>
+                    <span id="lobby-role-badge" class="lobby-role-badge hidden">Persönlich</span>
+                </div>
+            </div>
+            <div class="lobby-action-group">
+                <button id="create-lobby-btn" type="button" class="secondary-btn small-btn">Neue Lobby</button>
+                <button id="join-lobby-btn" type="button" class="secondary-btn small-btn">Beitreten</button>
+                <button id="share-lobby-btn" type="button" class="secondary-btn small-btn">Code anzeigen</button>
+                <button id="manage-lobby-btn" type="button" class="secondary-btn small-btn">Team verwalten</button>
+                <button id="leave-lobby-btn" type="button" class="danger-btn small-btn hidden">Lobby verlassen</button>
+            </div>
+            <div class="lobby-clone-group">
+                <button id="clone-names-btn" type="button" class="secondary-btn small-btn">Namen klonen</button>
+                <button id="clone-roles-btn" type="button" class="secondary-btn small-btn">Rollen klonen</button>
+            </div>
+        </section>
+
         <div class="setup-container">
             <section class="input-section card">
                 <h2><span class="icon">👥</span>Spieler</h2>

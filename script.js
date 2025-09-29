@@ -1,11 +1,56 @@
 /* Rollen Geber – Client-side JS */
 
 let authManager = null;
+let lobbyManager = null;
 
 const apiClient = (() => {
   const baseUrl = '/api';
   const storageCache = new Map();
   const inflightReads = new Map();
+  let activeLobby = null;
+
+  function getScopeKey(lobby = activeLobby) {
+    if (lobby && typeof lobby.id === 'number') {
+      return `lobby:${lobby.id}`;
+    }
+    return 'personal';
+  }
+
+  function getScopedMap(container, scopeKey) {
+    if (!container.has(scopeKey)) {
+      container.set(scopeKey, new Map());
+    }
+    return container.get(scopeKey);
+  }
+
+  function cacheValue(key, value, lobby = activeLobby) {
+    const scopeKey = getScopeKey(lobby);
+    const cache = getScopedMap(storageCache, scopeKey);
+    cache.set(key, value ?? null);
+  }
+
+  function getCachedValue(key, lobby = activeLobby) {
+    const scopeKey = getScopeKey(lobby);
+    const cache = storageCache.get(scopeKey);
+    return cache?.get(key);
+  }
+
+  function clearCaches() {
+    storageCache.clear();
+    inflightReads.clear();
+  }
+
+  function setActiveLobby(lobby) {
+    if (lobby && typeof lobby.id === 'number') {
+      activeLobby = { ...lobby };
+    } else {
+      activeLobby = null;
+    }
+  }
+
+  function getActiveLobby() {
+    return activeLobby ? { ...activeLobby } : null;
+  }
 
   async function request(path, options = {}) {
     const method = (options.method || 'GET').toUpperCase();
@@ -17,6 +62,10 @@ const apiClient = (() => {
       if (!headers['Content-Type'] && method !== 'GET' && method !== 'HEAD') {
         headers['Content-Type'] = 'application/json';
       }
+    }
+
+    if (activeLobby && typeof activeLobby.id === 'number') {
+      headers['X-Werwolf-Lobby'] = String(activeLobby.id);
     }
 
     config.credentials = 'include';
@@ -84,21 +133,15 @@ const apiClient = (() => {
     return null;
   }
 
-  function cacheValue(key, value) {
-    storageCache.set(key, value ?? null);
-  }
-
-  function clearCaches() {
-    storageCache.clear();
-    inflightReads.clear();
-  }
-
-  async function getStorageItem(key) {
-    if (storageCache.has(key)) {
-      return storageCache.get(key);
+  async function getStorageItem(key, lobby = activeLobby) {
+    const scopeKey = getScopeKey(lobby);
+    const cache = getScopedMap(storageCache, scopeKey);
+    if (cache.has(key)) {
+      return cache.get(key);
     }
-    if (inflightReads.has(key)) {
-      return inflightReads.get(key);
+    const inflightScope = getScopedMap(inflightReads, scopeKey);
+    if (inflightScope.has(key)) {
+      return inflightScope.get(key);
     }
 
     const promise = request(`/storage/${encodeURIComponent(key)}`)
@@ -106,25 +149,26 @@ const apiClient = (() => {
         const value = data && Object.prototype.hasOwnProperty.call(data, 'value')
           ? data.value
           : null;
-        cacheValue(key, value);
-        inflightReads.delete(key);
+        cacheValue(key, value, lobby);
+        inflightScope.delete(key);
         return value;
       })
       .catch((error) => {
-        inflightReads.delete(key);
+        inflightScope.delete(key);
         throw error;
       });
 
-    inflightReads.set(key, promise);
+    inflightScope.set(key, promise);
     return promise;
   }
 
-  function getCachedStorageItem(key) {
-    return storageCache.has(key) ? storageCache.get(key) : null;
+  function getCachedStorageItem(key, lobby = activeLobby) {
+    const value = getCachedValue(key, lobby);
+    return value === undefined ? null : value;
   }
 
-  async function setStorageItem(key, value) {
-    cacheValue(key, value);
+  async function setStorageItem(key, value, lobby = activeLobby) {
+    cacheValue(key, value, lobby);
     await request(`/storage/${encodeURIComponent(key)}`, {
       method: 'PUT',
       body: JSON.stringify({ value }),
@@ -132,8 +176,12 @@ const apiClient = (() => {
     return value;
   }
 
-  async function removeStorageItem(key) {
-    storageCache.delete(key);
+  async function removeStorageItem(key, lobby = activeLobby) {
+    const scopeKey = getScopeKey(lobby);
+    const cache = storageCache.get(scopeKey);
+    cache?.delete(key);
+    const inflightScope = inflightReads.get(scopeKey);
+    inflightScope?.delete(key);
     await request(`/storage/${encodeURIComponent(key)}`, { method: 'DELETE' });
   }
 
@@ -143,6 +191,22 @@ const apiClient = (() => {
         getStorageItem(key).catch(() => null)
       )
     );
+  }
+
+  async function withLobby(lobbyLike, callback) {
+    const previousLobby = activeLobby;
+    if (typeof lobbyLike === 'number') {
+      activeLobby = { id: lobbyLike };
+    } else if (lobbyLike && typeof lobbyLike === 'object') {
+      activeLobby = { ...lobbyLike };
+    } else {
+      activeLobby = null;
+    }
+    try {
+      return await callback();
+    } finally {
+      activeLobby = previousLobby;
+    }
   }
 
   return {
@@ -188,7 +252,7 @@ const apiClient = (() => {
     rolePresets: {
       async get() {
         const data = await request('/role-presets');
-        const roles = Array.isArray(data?.roles) ? data.roles : [];
+        const roles = Array.isArray(data?.roles) ? data.roles : [];;
         cacheValue('werwolfSavedRoles', roles);
         return roles;
       },
@@ -229,10 +293,14 @@ const apiClient = (() => {
           source: data?.source || 'custom',
         };
       },
-      async reset() {
+      async remove() {
         await request('/roles-config', { method: 'DELETE' });
-        return null;
       },
+    },
+    storageScopes: {
+      withLobby,
+      setActiveLobby,
+      getActiveLobby,
     },
     sessions: {
       async list() {
@@ -285,6 +353,68 @@ const apiClient = (() => {
       },
       async logout() {
         await request('/auth/logout', { method: 'POST' });
+      },
+    },
+    lobby: {
+      setActive(lobby) {
+        setActiveLobby(lobby);
+      },
+      getActive: getActiveLobby,
+      withLobby,
+      async list() {
+        const data = await request('/lobbies');
+        return Array.isArray(data?.lobbies) ? data.lobbies : [];
+      },
+      async create({ name }) {
+        const data = await request('/lobbies', {
+          method: 'POST',
+          body: JSON.stringify({ name }),
+        });
+        return data || {};
+      },
+      async join(code) {
+        const payload = typeof code === 'object' ? code : { code };
+        const data = await request('/lobbies/join', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        return data || {};
+      },
+      async update(lobbyId, payload) {
+        const data = await request(`/lobbies/${encodeURIComponent(lobbyId)}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload || {}),
+        });
+        return data || {};
+      },
+      async rotateCode(lobbyId) {
+        const data = await request(`/lobbies/${encodeURIComponent(lobbyId)}/rotate-code`, {
+          method: 'POST',
+          body: JSON.stringify({ rotate: true }),
+        });
+        return data || {};
+      },
+      async remove(lobbyId, { deleteLobby: destroy = false } = {}) {
+        const options = destroy ? { method: 'DELETE', body: JSON.stringify({ delete: true }) } : { method: 'DELETE' };
+        if (options.body) {
+          options.headers = { 'Content-Type': 'application/json' };
+        }
+        const data = await request(`/lobbies/${encodeURIComponent(lobbyId)}`, options);
+        return data || {};
+      },
+      async members(lobbyId) {
+        return withLobby(lobbyId, () => request(`/lobbies/${encodeURIComponent(lobbyId)}/members`));
+      },
+      async updateMember(lobbyId, memberId, role) {
+        return request(`/lobbies/${encodeURIComponent(lobbyId)}/members/${encodeURIComponent(memberId)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ role }),
+        });
+      },
+      async removeMember(lobbyId, memberId) {
+        return request(`/lobbies/${encodeURIComponent(lobbyId)}/members/${encodeURIComponent(memberId)}`, {
+          method: 'DELETE',
+        });
       },
     },
   };
@@ -483,6 +613,10 @@ function createAuthManager() {
     const shouldRefreshCaches = refreshCaches || previousId !== nextId;
     if (shouldRefreshCaches) {
       apiClient.clearCaches();
+    }
+
+    if (lobbyManager && typeof lobbyManager.handleUserChange === 'function') {
+      lobbyManager.handleUserChange(currentUser, { refreshCaches: shouldRefreshCaches });
     }
 
     updateUserChip();
@@ -741,6 +875,72 @@ async function initTheme() {
 
 document.addEventListener("DOMContentLoaded", async () => {
   authManager = createAuthManager();
+  lobbyManager = createLobbyManager();
+
+  const storageKeysToPrefetch = [
+    'werwolfEventConfig',
+    'werwolfJobConfig',
+    'werwolfBloodMoonConfig',
+    'werwolfPhoenixPulseConfig',
+    'werwolfEventEngineState',
+    'eventsEnabled',
+    'revealDeadRoles',
+    'bloodMoonPityTimer',
+    'werwolfSavedNames',
+    'werwolfSavedRoles',
+    'werwolfLastUsed'
+  ];
+
+  let latestLobbySnapshot = null;
+  let canEditActiveLobby = false;
+  let lobbyUiInitialized = false;
+  let pendingSessionReload = false;
+  const READ_ONLY_HINT = 'Du hast nur Leserechte in dieser Lobby.';
+
+  function updateReadOnlyClass() {
+    const shouldMarkReadOnly = Boolean(latestLobbySnapshot && !canEditActiveLobby);
+    document.body.classList.toggle('lobby-readonly', shouldMarkReadOnly);
+  }
+
+  function updateWriteControlsState() {
+    if (!lobbyUiInitialized) {
+      return;
+    }
+    if (typeof applyLobbyWriteState === 'function') {
+      applyLobbyWriteState(canEditActiveLobby);
+    }
+  }
+
+  async function syncLobbyContext(lobby) {
+    latestLobbySnapshot = lobby ? { ...lobby } : null;
+    canEditActiveLobby = Boolean(lobbyManager?.canWriteActiveLobby?.() ?? lobbyManager?.canEditActiveLobby?.());
+    updateReadOnlyClass();
+
+    if (latestLobbySnapshot) {
+      try {
+        await apiClient.storage.prefetch(storageKeysToPrefetch);
+      } catch (error) {
+        console.error('Persistente Werte konnten nicht geladen werden.', error);
+      }
+      if (lobbyUiInitialized) {
+        loadSessions();
+        pendingSessionReload = false;
+      } else {
+        pendingSessionReload = true;
+      }
+    } else if (lobbyUiInitialized && sessionsList) {
+      sessionsList.innerHTML = '<li>Keine Lobby ausgewählt.</li>';
+      updateReplaySessionOptions([]);
+      pendingSessionReload = false;
+    }
+
+    updateWriteControlsState();
+  }
+
+  lobbyManager.onChange((lobby) => {
+    syncLobbyContext(lobby);
+  });
+
   await authManager.bootstrap();
 
   try {
@@ -757,24 +957,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     playersInput.value = '';
   }
 
-  const storageKeysToPrefetch = [
-    'werwolfEventConfig',
-    'werwolfJobConfig',
-    'werwolfBloodMoonConfig',
-    'werwolfPhoenixPulseConfig',
-    'werwolfEventEngineState',
-    'eventsEnabled',
-    'revealDeadRoles',
-    'bloodMoonPityTimer',
-    'werwolfSavedNames',
-    'werwolfSavedRoles',
-    'werwolfLastUsed'
-  ];
-
   try {
-    await apiClient.storage.prefetch(storageKeysToPrefetch);
+    await lobbyManager.initialize();
   } catch (error) {
-    console.error('Persistente Werte konnten nicht geladen werden.', error);
+    console.error('Lobbys konnten nicht initialisiert werden.', error);
   }
 
   await initTheme();
@@ -1317,6 +1503,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   const saveGameBtn = document.getElementById('save-game-btn');
   if (saveGameBtn) {
     saveGameBtn.addEventListener('click', async () => {
+      if (!canEditActiveLobby) {
+        showInfoMessage({
+          title: 'Schreibgeschützt',
+          text: READ_ONLY_HINT,
+          confirmText: 'Okay',
+        });
+        return;
+      }
       await withButtonLoading(saveGameBtn, 'Speichere …', async () => {
         try {
           const session = await saveSession();
@@ -1470,6 +1664,602 @@ document.addEventListener("DOMContentLoaded", async () => {
       return '';
     }
     return String(value).replace(/[&<>"'`]/g, (char) => HTML_ESCAPE_LOOKUP[char] || char);
+  }
+
+  function createLobbyManager() {
+    const toolbar = document.getElementById('lobby-toolbar');
+    const lobbySelect = document.getElementById('lobby-select');
+    const createLobbyBtn = document.getElementById('create-lobby-btn');
+    const joinLobbyBtn = document.getElementById('join-lobby-btn');
+    const shareLobbyBtn = document.getElementById('share-lobby-btn');
+    const manageLobbyBtn = document.getElementById('manage-lobby-btn');
+    const leaveLobbyBtn = document.getElementById('leave-lobby-btn');
+    const roleBadge = document.getElementById('lobby-role-badge');
+    const cloneNamesBtn = document.getElementById('clone-names-btn');
+    const cloneRolesBtn = document.getElementById('clone-roles-btn');
+
+    let lobbies = [];
+    let activeLobbyState = null;
+    const changeListeners = new Set();
+
+    function cloneLobby(lobby) {
+      return lobby ? { ...lobby } : null;
+    }
+
+    function canWrite(lobby = activeLobbyState) {
+      if (!lobby) {
+        return false;
+      }
+      return lobby.isPersonal || lobby.isOwner || lobby.isAdmin;
+    }
+
+    function updateRoleBadge() {
+      if (!roleBadge) {
+        return;
+      }
+      if (!activeLobbyState) {
+        roleBadge.textContent = '';
+        roleBadge.classList.add('hidden');
+        return;
+      }
+      let label = '';
+      if (activeLobbyState.isPersonal) {
+        label = 'Persönlich';
+      } else if (activeLobbyState.isOwner) {
+        label = 'Besitzer:in';
+      } else if (activeLobbyState.isAdmin) {
+        label = 'Admin-Team';
+      } else {
+        label = 'Mitglied';
+      }
+      roleBadge.textContent = label;
+      roleBadge.dataset.variant = activeLobbyState.role || (activeLobbyState.isPersonal ? 'personal' : 'member');
+      roleBadge.classList.toggle('read-only', !canWrite());
+      roleBadge.classList.remove('hidden');
+    }
+
+    function updateSelectOptions() {
+      if (!lobbySelect) {
+        return;
+      }
+      lobbySelect.innerHTML = '';
+      lobbies.forEach((lobby) => {
+        const option = document.createElement('option');
+        option.value = String(lobby.id);
+        let suffix = '';
+        if (lobby.isPersonal) {
+          suffix = ' (persönlich)';
+        } else if (lobby.isOwner) {
+          suffix = ' (Besitz)';
+        } else if (lobby.isAdmin) {
+          suffix = ' (Admin)';
+        }
+        option.textContent = `${lobby.name}${suffix}`;
+        lobbySelect.appendChild(option);
+      });
+      if (activeLobbyState) {
+        lobbySelect.value = String(activeLobbyState.id);
+      }
+    }
+
+    function notifyChange() {
+      const snapshot = cloneLobby(activeLobbyState);
+      changeListeners.forEach((listener) => {
+        try {
+          listener(snapshot);
+        } catch (error) {
+          console.error('Lobby-Listener fehlgeschlagen', error);
+        }
+      });
+    }
+
+    function updateToolbarVisibility() {
+      if (toolbar) {
+        toolbar.classList.toggle('hidden', lobbies.length === 0);
+      }
+      if (shareLobbyBtn) {
+        shareLobbyBtn.disabled = !activeLobbyState || !activeLobbyState.joinCode;
+        shareLobbyBtn.classList.toggle('hidden', !activeLobbyState || (!activeLobbyState.joinCode && !canWrite()));
+      }
+      if (manageLobbyBtn) {
+        manageLobbyBtn.disabled = !canWrite();
+        manageLobbyBtn.classList.toggle('hidden', !activeLobbyState || (!canWrite() && !activeLobbyState.isOwner));
+      }
+      if (createLobbyBtn) {
+        createLobbyBtn.disabled = !authManager?.getUser();
+      }
+      if (joinLobbyBtn) {
+        joinLobbyBtn.disabled = !authManager?.getUser();
+      }
+      if (cloneNamesBtn) {
+        const canClone = activeLobbyState && lobbies.length > 1 && canWrite();
+        cloneNamesBtn.disabled = !canClone;
+        cloneNamesBtn.title = canClone ? '' : 'Nur mit Schreibrechten möglich.';
+      }
+      if (cloneRolesBtn) {
+        const canClone = activeLobbyState && lobbies.length > 1 && canWrite();
+        cloneRolesBtn.disabled = !canClone;
+        cloneRolesBtn.title = canClone ? '' : 'Nur mit Schreibrechten möglich.';
+      }
+      if (leaveLobbyBtn) {
+        const canLeave = Boolean(activeLobbyState && !activeLobbyState.isPersonal);
+        leaveLobbyBtn.classList.toggle('hidden', !canLeave);
+        leaveLobbyBtn.disabled = !canLeave;
+        if (canLeave) {
+          leaveLobbyBtn.textContent = activeLobbyState.isOwner ? 'Lobby löschen' : 'Lobby verlassen';
+        }
+      }
+    }
+
+    function setActiveLobbyState(lobby, { emitEvent = true } = {}) {
+      activeLobbyState = cloneLobby(lobby);
+      apiClient.storageScopes.setActiveLobby(activeLobbyState);
+      updateSelectOptions();
+      updateRoleBadge();
+      updateToolbarVisibility();
+      if (emitEvent) {
+        notifyChange();
+      }
+    }
+
+    async function refreshLobbies({ preserveActive = true } = {}) {
+      let nextLobby = null;
+      try {
+        const data = await apiClient.lobby.list();
+        lobbies = Array.isArray(data) ? data : [];
+        if (preserveActive && activeLobbyState) {
+          nextLobby = lobbies.find((entry) => entry.id === activeLobbyState.id) || null;
+        }
+      } catch (error) {
+        console.error('Lobbys konnten nicht geladen werden.', error);
+        lobbies = [];
+        nextLobby = null;
+      }
+
+      if (!nextLobby) {
+        nextLobby = lobbies.find((entry) => entry.isPersonal) || lobbies[0] || null;
+      }
+
+      setActiveLobbyState(nextLobby, { emitEvent: true });
+      return cloneLobby(activeLobbyState);
+    }
+
+    function showLobbyPrompt({ title, label, placeholder = '', defaultValue = '', validate, onInvalid, confirmText = 'Speichern' }) {
+      return new Promise((resolve) => {
+        let lastValue = defaultValue || '';
+        const inputId = `lobby-input-${Math.random().toString(36).slice(2, 8)}`;
+
+        const openPrompt = () => {
+          showConfirmation({
+            title,
+            html: `<div class="modal-field"><label for="${inputId}">${label}</label><input id="${inputId}" type="text" class="modal-input" placeholder="${placeholder}" /></div>`,
+            confirmText,
+            cancelText: 'Abbrechen',
+            focus: 'confirm',
+            onConfirm: () => {
+              const inputEl = document.getElementById(inputId);
+              const value = inputEl ? inputEl.value.trim() : '';
+              lastValue = value;
+              if (validate && !validate(value)) {
+                if (typeof onInvalid === 'function') {
+                  onInvalid(value);
+                }
+                setTimeout(openPrompt, 0);
+                return;
+              }
+              resolve(value);
+            },
+            onCancel: () => resolve(null),
+          });
+
+          requestAnimationFrame(() => {
+            const inputEl = document.getElementById(inputId);
+            if (inputEl) {
+              inputEl.value = lastValue;
+              inputEl.focus();
+              inputEl.select();
+            }
+          });
+        };
+
+        openPrompt();
+      });
+    }
+
+    function buildMembersHtml(members, canManage) {
+      if (!Array.isArray(members) || members.length === 0) {
+        return '<p class="empty-hint">Noch keine weiteren Teammitglieder.</p>';
+      }
+      return `
+        <ul class="lobby-members-list">
+          ${members.map((member) => {
+            const actions = [];
+            if (canManage && !member.isOwner) {
+              if (member.isAdmin) {
+                actions.push(`<button data-action="demote" data-member="${member.userId}" class="secondary-btn small-btn">Zu Mitglied</button>`);
+              } else {
+                actions.push(`<button data-action="promote" data-member="${member.userId}" class="secondary-btn small-btn">Zu Admin</button>`);
+              }
+              actions.push(`<button data-action="remove" data-member="${member.userId}" class="danger-btn small-btn">Entfernen</button>`);
+            }
+            const badge = member.isOwner ? 'Besitz' : (member.isAdmin ? 'Admin' : 'Mitglied');
+            return `
+              <li class="lobby-member">
+                <div class="member-info">
+                  <span class="member-name">${escapeHtml(member.displayName || member.email || 'Nutzer')}</span>
+                  <span class="member-role" data-role="${member.isOwner ? 'owner' : member.isAdmin ? 'admin' : 'member'}">${badge}</span>
+                </div>
+                ${actions.length ? `<div class="member-actions">${actions.join('')}</div>` : ''}
+              </li>
+            `;
+          }).join('')}
+        </ul>
+      `;
+    }
+
+    function openManageMembers() {
+      if (!activeLobbyState) {
+        return;
+      }
+      const lobbyId = activeLobbyState.id;
+      const modalId = `lobby-members-${lobbyId}`;
+
+      const render = async () => {
+        let result = null;
+        try {
+          result = await apiClient.lobby.members(lobbyId);
+        } catch (error) {
+          console.error('Mitglieder konnten nicht geladen werden.', error);
+          showInfoMessage({
+            title: 'Fehler beim Laden',
+            text: 'Die Mitgliederliste konnte nicht geladen werden.',
+            confirmText: 'Okay',
+          });
+          return;
+        }
+
+        const members = Array.isArray(result?.members) ? result.members : [];
+        const canManage = canWrite() && activeLobbyState?.isOwner;
+        showConfirmation({
+          title: `Team ${activeLobbyState.name}`,
+          html: `<div id="${modalId}" class="lobby-members-manager">${buildMembersHtml(members, canManage)}</div>`,
+          confirmText: 'Schließen',
+          showCancel: false,
+          modalClass: 'lobby-modal',
+          onConfirm: () => {},
+        });
+
+        requestAnimationFrame(() => {
+          const container = document.getElementById(modalId);
+          if (!container) {
+            return;
+          }
+          container.addEventListener('click', async (event) => {
+            const button = event.target.closest('button[data-member]');
+            if (!button) {
+              return;
+            }
+            const memberId = Number(button.dataset.member);
+            const action = button.dataset.action;
+            try {
+              if (action === 'promote') {
+                await apiClient.lobby.updateMember(lobbyId, memberId, 'admin');
+              } else if (action === 'demote') {
+                await apiClient.lobby.updateMember(lobbyId, memberId, 'member');
+              } else if (action === 'remove') {
+                await apiClient.lobby.removeMember(lobbyId, memberId);
+              }
+              await render();
+            } catch (error) {
+              console.error('Mitgliedsänderung fehlgeschlagen.', error);
+              showInfoMessage({
+                title: 'Aktion fehlgeschlagen',
+                text: 'Die Änderung konnte nicht durchgeführt werden.',
+                confirmText: 'Okay',
+              });
+            }
+          }, { once: true });
+        });
+      };
+
+      render();
+    }
+
+    async function promptForSourceLobby({ title, excludeActive = true } = {}) {
+      const choices = lobbies.filter((entry) => !excludeActive || !activeLobbyState || entry.id !== activeLobbyState.id);
+      if (choices.length === 0) {
+        showInfoMessage({
+          title: 'Keine weiteren Lobbys',
+          text: 'Es sind keine weiteren Lobbys verfügbar.',
+          confirmText: 'Okay',
+        });
+        return null;
+      }
+      const selectId = `lobby-source-${Math.random().toString(36).slice(2, 8)}`;
+      return new Promise((resolve) => {
+        showConfirmation({
+          title,
+          html: `<div class="modal-field"><label for="${selectId}">Quelle auswählen</label><select id="${selectId}" class="modal-select">${choices.map((entry) => `<option value="${entry.id}">${escapeHtml(entry.name)}${entry.isPersonal ? ' (persönlich)' : ''}</option>`).join('')}</select></div>`,
+          confirmText: 'Übernehmen',
+          cancelText: 'Abbrechen',
+          focus: 'confirm',
+          onConfirm: () => {
+            const selectEl = document.getElementById(selectId);
+            const value = selectEl ? Number(selectEl.value) : NaN;
+            resolve(Number.isFinite(value) ? value : null);
+          },
+          onCancel: () => resolve(null),
+        });
+        requestAnimationFrame(() => {
+          document.getElementById(selectId)?.focus();
+        });
+      });
+    }
+
+    async function clonePresetsFromLobby(sourceLobbyId, { copyNames = false, copyRoles = false } = {}) {
+      if (!canWrite()) {
+        showInfoMessage({
+          title: 'Nur Leserechte',
+          text: 'In dieser Lobby kannst du keine Daten verändern.',
+          confirmText: 'Okay',
+        });
+        return;
+      }
+      if (!activeLobbyState || !Number.isInteger(sourceLobbyId) || sourceLobbyId === activeLobbyState.id) {
+        return;
+      }
+
+      const tasks = [];
+      if (copyNames) {
+        tasks.push((async () => {
+          const names = await apiClient.lobby.withLobby(sourceLobbyId, () => apiClient.savedNames.get());
+          await apiClient.lobby.withLobby(activeLobbyState, () => apiClient.savedNames.set(Array.isArray(names) ? names : []));
+        })());
+      }
+      if (copyRoles) {
+        tasks.push((async () => {
+          const roles = await apiClient.lobby.withLobby(sourceLobbyId, () => apiClient.rolePresets.get());
+          await apiClient.lobby.withLobby(activeLobbyState, () => apiClient.rolePresets.set(Array.isArray(roles) ? roles : []));
+        })());
+      }
+
+      try {
+        await Promise.all(tasks);
+        if (copyNames && cloneNamesBtn) {
+          cloneNamesBtn.classList.add('success');
+          setTimeout(() => cloneNamesBtn.classList.remove('success'), 1200);
+        }
+        if (copyRoles && cloneRolesBtn) {
+          cloneRolesBtn.classList.add('success');
+          setTimeout(() => cloneRolesBtn.classList.remove('success'), 1200);
+        }
+      } catch (error) {
+        console.error('Voreinstellungen konnten nicht kopiert werden.', error);
+        showInfoMessage({
+          title: 'Kopieren fehlgeschlagen',
+          text: 'Die ausgewählten Daten konnten nicht kopiert werden.',
+          confirmText: 'Okay',
+        });
+      }
+    }
+
+    async function handleCreateLobby() {
+      const name = await showLobbyPrompt({
+        title: 'Neue Lobby anlegen',
+        label: 'Lobbynamen eingeben',
+        placeholder: 'z. B. Sommerlager',
+        defaultValue: '',
+        validate: (value) => value.trim().length >= 2,
+        onInvalid: () => showInfoMessage({ title: 'Ungültiger Name', text: 'Der Name muss mindestens zwei Zeichen haben.', confirmText: 'Okay' }),
+      });
+      if (!name) {
+        return;
+      }
+      await withButtonLoading(createLobbyBtn, 'Erstelle …', async () => {
+        try {
+          const response = await apiClient.lobby.create({ name });
+          if (Array.isArray(response?.lobbies)) {
+            lobbies = response.lobbies;
+          }
+          if (response?.lobby) {
+            setActiveLobbyState(response.lobby, { emitEvent: true });
+          } else {
+            await refreshLobbies({ preserveActive: false });
+          }
+          showInfoMessage({
+            title: 'Lobby erstellt',
+            text: 'Die Lobby wurde erfolgreich erstellt.',
+            confirmText: 'Okay',
+          });
+        } catch (error) {
+          console.error('Lobby konnte nicht erstellt werden.', error);
+          showInfoMessage({
+            title: 'Erstellung fehlgeschlagen',
+            text: 'Die Lobby konnte nicht erstellt werden.',
+            confirmText: 'Okay',
+          });
+        }
+      });
+    }
+
+    async function handleJoinLobby() {
+      const code = await showLobbyPrompt({
+        title: 'Lobby beitreten',
+        label: 'Beitrittscode eingeben',
+        placeholder: 'CODE123',
+        validate: (value) => value.length >= 4,
+        onInvalid: () => showInfoMessage({ title: 'Ungültiger Code', text: 'Bitte gib einen gültigen Beitrittscode ein.', confirmText: 'Okay' }),
+        confirmText: 'Beitreten',
+      });
+      if (!code) {
+        return;
+      }
+      await withButtonLoading(joinLobbyBtn, 'Tritt bei …', async () => {
+        try {
+          const response = await apiClient.lobby.join({ code });
+          if (Array.isArray(response?.lobbies)) {
+            lobbies = response.lobbies;
+          }
+          if (response?.lobby) {
+            setActiveLobbyState(response.lobby, { emitEvent: true });
+          } else {
+            await refreshLobbies({ preserveActive: false });
+          }
+          showInfoMessage({
+            title: 'Beitritt erfolgreich',
+            text: 'Du bist der Lobby beigetreten.',
+            confirmText: 'Okay',
+          });
+        } catch (error) {
+          console.error('Lobby konnte nicht beigetreten werden.', error);
+          showInfoMessage({
+            title: 'Beitritt fehlgeschlagen',
+            text: 'Der Beitrittscode wurde nicht akzeptiert.',
+            confirmText: 'Okay',
+          });
+        }
+      });
+    }
+
+    function handleShareLobby() {
+      if (!activeLobbyState || !activeLobbyState.joinCode) {
+        showInfoMessage({
+          title: 'Kein Beitrittscode',
+          text: 'Für diese Lobby steht kein Beitrittscode zur Verfügung.',
+          confirmText: 'Okay',
+        });
+        return;
+      }
+      showInfoMessage({
+        title: 'Beitrittscode',
+        html: `<p class="join-code">${escapeHtml(activeLobbyState.joinCode)}</p><p class="join-hint">Teile diesen Code mit deinem Team, um gemeinsam an Sessions und Voreinstellungen zu arbeiten.</p>`,
+        confirmText: 'Verstanden',
+      });
+    }
+
+    async function handleDeleteOrLeaveLobby() {
+      if (!activeLobbyState) {
+        return;
+      }
+      if (activeLobbyState.isPersonal) {
+        showInfoMessage({
+          title: 'Nicht möglich',
+          text: 'Die persönliche Lobby kann nicht verlassen werden.',
+          confirmText: 'Okay',
+        });
+        return;
+      }
+
+      const isOwner = activeLobbyState.isOwner;
+      const confirmTitle = isOwner ? 'Lobby löschen?' : 'Lobby verlassen?';
+      const confirmText = isOwner
+        ? 'Willst du diese Lobby wirklich dauerhaft löschen?'
+        : 'Willst du diese Lobby wirklich verlassen?';
+
+      showConfirmation({
+        title: confirmTitle,
+        text: confirmText,
+        confirmText: isOwner ? 'Löschen' : 'Verlassen',
+        cancelText: 'Abbrechen',
+        modalClass: 'danger',
+        onConfirm: async () => {
+          if (isOwner) {
+            await apiClient.lobby.remove(activeLobbyState.id, { deleteLobby: true });
+          } else {
+            await apiClient.lobby.remove(activeLobbyState.id);
+          }
+          await refreshLobbies({ preserveActive: false });
+        },
+      });
+    }
+
+    function bindEventHandlers() {
+      if (lobbySelect) {
+        lobbySelect.addEventListener('change', () => {
+          const selectedId = Number(lobbySelect.value);
+          const next = lobbies.find((entry) => entry.id === selectedId);
+          if (next) {
+            setActiveLobbyState(next, { emitEvent: true });
+          }
+        });
+      }
+      if (createLobbyBtn) {
+        createLobbyBtn.addEventListener('click', handleCreateLobby);
+      }
+      if (joinLobbyBtn) {
+        joinLobbyBtn.addEventListener('click', handleJoinLobby);
+      }
+      if (shareLobbyBtn) {
+        shareLobbyBtn.addEventListener('click', handleShareLobby);
+      }
+      if (manageLobbyBtn) {
+        manageLobbyBtn.addEventListener('click', openManageMembers);
+      }
+      if (cloneNamesBtn) {
+        cloneNamesBtn.addEventListener('click', async () => {
+          const sourceId = await promptForSourceLobby({ title: 'Namen kopieren' });
+          if (Number.isInteger(sourceId)) {
+            await clonePresetsFromLobby(sourceId, { copyNames: true });
+          }
+        });
+      }
+      if (cloneRolesBtn) {
+        cloneRolesBtn.addEventListener('click', async () => {
+          const sourceId = await promptForSourceLobby({ title: 'Rollenvoreinstellungen kopieren' });
+          if (Number.isInteger(sourceId)) {
+            await clonePresetsFromLobby(sourceId, { copyRoles: true });
+          }
+        });
+      }
+      const deleteBtn = document.getElementById('leave-lobby-btn');
+      if (deleteBtn) {
+        deleteBtn.addEventListener('click', handleDeleteOrLeaveLobby);
+      }
+    }
+
+    bindEventHandlers();
+
+    return {
+      async initialize() {
+        return refreshLobbies({ preserveActive: true });
+      },
+      async refresh() {
+        return refreshLobbies({ preserveActive: true });
+      },
+      getActiveLobby() {
+        return cloneLobby(activeLobbyState);
+      },
+      canEditActiveLobby() {
+        return canWrite();
+      },
+      onChange(listener) {
+        if (typeof listener === 'function') {
+          changeListeners.add(listener);
+          listener(cloneLobby(activeLobbyState));
+        }
+        return () => changeListeners.delete(listener);
+      },
+      handleUserChange(user, { refreshCaches = false } = {}) {
+        if (!user) {
+          lobbies = [];
+          setActiveLobbyState(null, { emitEvent: true });
+          return;
+        }
+        refreshLobbies({ preserveActive: !refreshCaches });
+      },
+      async cloneFrom(sourceLobbyId, options) {
+        await clonePresetsFromLobby(sourceLobbyId, options);
+      },
+      setActiveLobbyById(lobbyId) {
+        const target = lobbies.find((entry) => entry.id === lobbyId);
+        if (target) {
+          setActiveLobbyState(target, { emitEvent: true });
+        }
+      },
+      canWriteActiveLobby() {
+        return canWrite();
+      },
+    };
   }
 
   const eventDeckMetadata = Array.isArray(window.WERWOLF_EVENT_DECKS)
@@ -6344,6 +7134,62 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   let isLoadingLastUsed = false;
 
+  function applyLobbyWriteState(canWrite) {
+    const hint = canWrite ? '' : READ_ONLY_HINT;
+
+    const writableControls = [
+      saveNamesBtn,
+      saveRolesBtn,
+      saveGameBtn,
+      roleEditorSaveBtn,
+      roleEditorResetBtn,
+      roleEditorAddRoleBtn,
+      roleEditorAddJobBtn,
+      roleEditorAddNightStepBtn,
+    ];
+
+    writableControls.forEach((control) => {
+      if (!control) {
+        return;
+      }
+      control.disabled = !canWrite;
+      if ('title' in control) {
+        control.title = hint;
+      }
+      control.classList.toggle('read-only', !canWrite);
+    });
+
+    const writableInputs = [
+      eventsEnabledCheckbox,
+      bloodMoonEnabledCheckbox,
+      firstNightShieldCheckbox,
+      phoenixPulseEnabledCheckbox,
+      revealDeadRolesCheckbox,
+      bloodMoonChanceInput,
+      phoenixPulseChanceInput,
+      bodyguardJobChanceInput,
+      doctorJobChanceInput,
+    ];
+
+    writableInputs.forEach((input) => {
+      if (!input) {
+        return;
+      }
+      input.disabled = !canWrite;
+      if ('title' in input) {
+        input.title = hint;
+      }
+      input.classList.toggle('read-only', !canWrite);
+    });
+  }
+
+  lobbyUiInitialized = true;
+  updateWriteControlsState();
+  if (pendingSessionReload) {
+    loadSessions();
+    pendingSessionReload = false;
+  }
+
   function refreshRoleInputsFromSchema({ preserveExisting = false } = {}) {
     const previousSnapshot = preserveExisting ? getRoleLayoutSnapshot() : null;
     const knownRoles = new Set([
@@ -7482,6 +8328,14 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Save names to backend
   saveNamesBtn.addEventListener("click", async () => {
+    if (!canEditActiveLobby) {
+      showInfoMessage({
+        title: 'Schreibgeschützt',
+        text: READ_ONLY_HINT,
+        confirmText: 'Okay',
+      });
+      return;
+    }
     const names = playersTextarea.value
       .split(/\n|\r/)
       .map((n) => n.trim())
@@ -7545,6 +8399,14 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Save roles to backend
   saveRolesBtn.addEventListener("click", async () => {
+    if (!canEditActiveLobby) {
+      showInfoMessage({
+        title: 'Schreibgeschützt',
+        text: READ_ONLY_HINT,
+        confirmText: 'Okay',
+      });
+      return;
+    }
     const roleRows = [
         ...rolesContainerVillage.querySelectorAll(".role-row"),
         ...rolesContainerWerwolf.querySelectorAll(".role-row"),
@@ -8457,6 +9319,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Session Management
   async function saveSession() {
+    if (!canEditActiveLobby) {
+      throw new Error(READ_ONLY_HINT);
+    }
     const roleCounts = rolesAssigned.reduce((acc, role) => {
       acc[role] = (acc[role] || 0) + 1;
       return acc;
@@ -8558,6 +9423,11 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   async function loadSessions() {
     sessionsList.innerHTML = '';
+    if (!latestLobbySnapshot) {
+      sessionsList.innerHTML = '<li>Keine Lobby ausgewählt.</li>';
+      updateReplaySessionOptions([]);
+      return [];
+    }
     let sessions = [];
     try {
       sessions = await apiClient.sessions.list();
@@ -8574,6 +9444,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     sessionsList.innerHTML = '';
+    const canManageSessions = canEditActiveLobby;
 
     sessions.forEach(session => {
       const li = document.createElement('li');
@@ -8583,7 +9454,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       li.innerHTML = `
         <div class="session-date">${date}</div>
         <div class="session-players">${playerNames}</div>
-        <button class="delete-session-btn" data-timestamp="${session.timestamp}">&times;</button>
+        ${canManageSessions ? `<button class="delete-session-btn" data-timestamp="${session.timestamp}">&times;</button>` : ''}
       `;
 
       li.addEventListener('click', (e) => {
@@ -8598,17 +9469,18 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     updateReplaySessionOptions(sessions);
 
-    // Add delete functionality
-    document.querySelectorAll('.delete-session-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const timestamp = Number(e.target.dataset.timestamp);
-        if (!Number.isFinite(timestamp)) {
-          return;
-        }
-        deleteSession(timestamp);
+    if (canManageSessions) {
+      document.querySelectorAll('.delete-session-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const timestamp = Number(e.target.dataset.timestamp);
+          if (!Number.isFinite(timestamp)) {
+            return;
+          }
+          deleteSession(timestamp);
+        });
       });
-    });
+    }
 
     return sessions;
   }
@@ -8864,6 +9736,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   async function deleteSession(timestamp) {
+    if (!canEditActiveLobby) {
+      showInfoMessage({
+        title: 'Schreibgeschützt',
+        text: READ_ONLY_HINT,
+        confirmText: 'Okay',
+      });
+      return;
+    }
     try {
       await apiClient.sessions.remove(timestamp);
       await loadSessions();

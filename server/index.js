@@ -24,6 +24,395 @@ const ROLE_SCHEMA_KEY = 'werwolfRoleSchema';
 const defaultRoleSchemaPath = path.join(__dirname, '..', 'data', 'roles.json');
 let defaultRoleSchemaCache = null;
 
+const LOBBY_HEADER = 'x-werwolf-lobby';
+const LOBBY_JOIN_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
+function handleApiError(res, error, fallbackMessage) {
+  if (error instanceof HttpError || typeof error?.status === 'number') {
+    const status = error.status || 500;
+    const message = error.message || fallbackMessage || 'Unbekannter Fehler.';
+    if (status >= 500) {
+      console.error(message, error);
+    }
+    return res.status(status).json({ error: message });
+  }
+  if (fallbackMessage) {
+    console.error(fallbackMessage, error);
+  } else {
+    console.error('API-Fehler', error);
+  }
+  return res.status(500).json({ error: fallbackMessage || 'Unbekannter Fehler.' });
+}
+
+function generateJoinCode(length = 8) {
+  if (length <= 0) {
+    length = 8;
+  }
+  const randomBytes = crypto.randomBytes(length);
+  let code = '';
+  for (let index = 0; index < length; index += 1) {
+    const value = randomBytes[index];
+    code += LOBBY_JOIN_CODE_ALPHABET[value % LOBBY_JOIN_CODE_ALPHABET.length];
+  }
+  return code;
+}
+
+function formatLobbyRow(row, { includeJoinCode = false } = {}) {
+  if (!row) {
+    return null;
+  }
+  const lobby = {
+    id: row.id,
+    name: row.name,
+    ownerId: row.owner_id,
+    isPersonal: row.is_personal,
+    role: row.role,
+    isOwner: row.role === 'owner',
+    isAdmin: row.role === 'owner' || row.role === 'admin',
+  };
+  if (includeJoinCode && typeof row.join_code === 'string') {
+    lobby.joinCode = row.join_code;
+  }
+  if (row.created_at) {
+    lobby.createdAt = row.created_at;
+  }
+  if (row.updated_at) {
+    lobby.updatedAt = row.updated_at;
+  }
+  return lobby;
+}
+
+async function ensureLobbyMembership(ownerId, lobbyId) {
+  const result = await query(
+    `SELECT l.id, l.name, l.owner_id, l.join_code, l.is_personal, l.created_at, l.updated_at, m.role
+       FROM lobby_members m
+       JOIN lobbies l ON l.id = m.lobby_id
+      WHERE m.user_id = $1 AND l.id = $2
+      LIMIT 1`,
+    [ownerId, lobbyId]
+  );
+  if (result.rowCount === 0) {
+    return null;
+  }
+  const includeJoinCode = result.rows[0].owner_id === ownerId || result.rows[0].role === 'admin';
+  return formatLobbyRow(result.rows[0], { includeJoinCode });
+}
+
+async function createLobbyRecord(ownerId, name, { isPersonal = false } = {}) {
+  const trimmed = typeof name === 'string' ? name.trim() : '';
+  if (!trimmed) {
+    throw new HttpError(400, 'Name der Lobby fehlt.');
+  }
+
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const joinCode = generateJoinCode();
+    try {
+      const insertResult = await query(
+        `INSERT INTO lobbies (owner_id, name, join_code, is_personal)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id, name, owner_id, join_code, is_personal, created_at, updated_at`,
+        [ownerId, trimmed, joinCode, isPersonal]
+      );
+
+      const lobby = insertResult.rows[0];
+
+      await query(
+        `INSERT INTO lobby_members (lobby_id, user_id, role)
+         VALUES ($1, $2, 'owner')
+         ON CONFLICT (lobby_id, user_id)
+         DO UPDATE SET role = EXCLUDED.role, updated_at = NOW()`,
+        [lobby.id, ownerId]
+      );
+
+      return formatLobbyRow({ ...lobby, role: 'owner' }, { includeJoinCode: true });
+    } catch (error) {
+      if (error?.code === '23505') {
+        // join code conflict – retry with a new code
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new HttpError(500, 'Lobby konnte nicht erstellt werden.');
+}
+
+async function ensurePersonalLobby(ownerId) {
+  const result = await query(
+    `SELECT l.id, l.name, l.owner_id, l.join_code, l.is_personal, l.created_at, l.updated_at, m.role
+       FROM lobby_members m
+       JOIN lobbies l ON l.id = m.lobby_id
+      WHERE m.user_id = $1 AND l.is_personal = TRUE
+      LIMIT 1`,
+    [ownerId]
+  );
+
+  if (result.rowCount > 0) {
+    return formatLobbyRow(result.rows[0], { includeJoinCode: true });
+  }
+
+  return createLobbyRecord(ownerId, 'Eigene Sammlung', { isPersonal: true });
+}
+
+async function listUserLobbies(ownerId) {
+  await ensurePersonalLobby(ownerId);
+  const result = await query(
+    `SELECT l.id, l.name, l.owner_id, l.join_code, l.is_personal, l.created_at, l.updated_at, m.role
+       FROM lobby_members m
+       JOIN lobbies l ON l.id = m.lobby_id
+      WHERE m.user_id = $1
+      ORDER BY l.is_personal DESC, LOWER(l.name) ASC`,
+    [ownerId]
+  );
+  return result.rows.map((row) => {
+    const includeJoinCode = row.owner_id === ownerId || row.role === 'admin';
+    return formatLobbyRow(row, { includeJoinCode });
+  });
+}
+
+function hasLobbyWriteAccess(lobby) {
+  if (!lobby) {
+    return false;
+  }
+  if (lobby.isPersonal) {
+    return true;
+  }
+  return lobby.role === 'owner' || lobby.role === 'admin';
+}
+
+async function joinLobbyByCode(userId, joinCodeRaw) {
+  const joinCode = typeof joinCodeRaw === 'string' ? joinCodeRaw.replace(/\s+/g, '').toUpperCase() : '';
+  if (!joinCode || joinCode.length < 4) {
+    throw new HttpError(400, 'Bitte gib einen gültigen Beitrittscode ein.');
+  }
+
+  const lobbyResult = await query(
+    `SELECT id, owner_id, name, join_code, is_personal, created_at, updated_at
+       FROM lobbies
+      WHERE UPPER(join_code) = $1
+      LIMIT 1`,
+    [joinCode]
+  );
+
+  if (lobbyResult.rowCount === 0) {
+    throw new HttpError(404, 'Keine Lobby mit diesem Code gefunden.');
+  }
+
+  const lobby = lobbyResult.rows[0];
+  if (lobby.is_personal && lobby.owner_id !== userId) {
+    throw new HttpError(403, 'Private Lobbys können nicht beigetreten werden.');
+  }
+
+  const membershipResult = await query(
+    `INSERT INTO lobby_members (lobby_id, user_id, role)
+     VALUES ($1, $2, 'member')
+     ON CONFLICT (lobby_id, user_id)
+     DO UPDATE SET updated_at = NOW()
+     RETURNING role`,
+    [lobby.id, userId]
+  );
+
+  return formatLobbyRow({ ...lobby, role: membershipResult.rows[0].role }, { includeJoinCode: false });
+}
+
+async function updateLobbyName(userId, lobbyId, name) {
+  const membership = await ensureLobbyMembership(userId, lobbyId);
+  if (!membership) {
+    throw new HttpError(404, 'Lobby wurde nicht gefunden.');
+  }
+  if (!membership.isOwner && !membership.isPersonal) {
+    throw new HttpError(403, 'Nur Besitzer:innen dürfen den Namen ändern.');
+  }
+
+  const trimmed = typeof name === 'string' ? name.trim() : '';
+  if (!trimmed) {
+    throw new HttpError(400, 'Bitte gib einen gültigen Namen ein.');
+  }
+
+  await query('UPDATE lobbies SET name = $1, updated_at = NOW() WHERE id = $2', [trimmed, lobbyId]);
+  return ensureLobbyMembership(userId, lobbyId);
+}
+
+async function rotateLobbyJoinCode(userId, lobbyId) {
+  const membership = await ensureLobbyMembership(userId, lobbyId);
+  if (!membership) {
+    throw new HttpError(404, 'Lobby wurde nicht gefunden.');
+  }
+  if (!membership.isOwner) {
+    throw new HttpError(403, 'Nur Besitzer:innen können den Beitrittscode erneuern.');
+  }
+
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const joinCode = generateJoinCode();
+    try {
+      await query('UPDATE lobbies SET join_code = $1, updated_at = NOW() WHERE id = $2', [joinCode, lobbyId]);
+      return ensureLobbyMembership(userId, lobbyId);
+    } catch (error) {
+      if (error?.code === '23505') {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new HttpError(500, 'Der Beitrittscode konnte nicht erneuert werden.');
+}
+
+async function listLobbyMembers(userId, lobbyId) {
+  const membership = await ensureLobbyMembership(userId, lobbyId);
+  if (!membership) {
+    throw new HttpError(404, 'Lobby wurde nicht gefunden.');
+  }
+  if (!hasLobbyWriteAccess(membership)) {
+    throw new HttpError(403, 'Keine Berechtigung, Mitglieder zu verwalten.');
+  }
+
+  const result = await query(
+    `SELECT m.user_id, m.role, u.display_name, u.email
+       FROM lobby_members m
+       JOIN users u ON u.id = m.user_id
+      WHERE m.lobby_id = $1
+      ORDER BY m.role DESC, LOWER(u.display_name) ASC`,
+    [lobbyId]
+  );
+  return {
+    lobby: membership,
+    members: result.rows.map((row) => ({
+      userId: row.user_id,
+      role: row.role,
+      displayName: row.display_name,
+      email: row.email,
+      isOwner: row.role === 'owner',
+      isAdmin: row.role === 'owner' || row.role === 'admin',
+    })),
+  };
+}
+
+async function updateLobbyMemberRole(requestorId, lobbyId, memberId, nextRole) {
+  const normalizedRole = typeof nextRole === 'string' ? nextRole.trim().toLowerCase() : '';
+  const allowedRoles = new Set(['admin', 'member']);
+  if (!allowedRoles.has(normalizedRole)) {
+    throw new HttpError(400, 'Ungültige Rolle.');
+  }
+
+  const membership = await ensureLobbyMembership(requestorId, lobbyId);
+  if (!membership || !membership.isOwner) {
+    throw new HttpError(403, 'Nur Besitzer:innen können Rollen vergeben.');
+  }
+  if (requestorId === memberId) {
+    throw new HttpError(400, 'Die eigene Rolle kann nicht angepasst werden.');
+  }
+
+  const target = await query(
+    `SELECT role FROM lobby_members WHERE lobby_id = $1 AND user_id = $2`,
+    [lobbyId, memberId]
+  );
+  if (target.rowCount === 0) {
+    throw new HttpError(404, 'Mitglied wurde nicht gefunden.');
+  }
+  if (target.rows[0].role === 'owner') {
+    throw new HttpError(400, 'Die Besitzer:in-Rolle kann nicht verändert werden.');
+  }
+
+  await query(
+    `UPDATE lobby_members SET role = $1, updated_at = NOW()
+      WHERE lobby_id = $2 AND user_id = $3`,
+    [normalizedRole, lobbyId, memberId]
+  );
+
+  return listLobbyMembers(requestorId, lobbyId);
+}
+
+async function removeLobbyMember(requestorId, lobbyId, memberId) {
+  const membership = await ensureLobbyMembership(requestorId, lobbyId);
+  if (!membership) {
+    throw new HttpError(404, 'Lobby wurde nicht gefunden.');
+  }
+
+  if (memberId === requestorId) {
+    const personalCheck = membership.isPersonal;
+    if (personalCheck) {
+      throw new HttpError(400, 'Die persönliche Lobby kann nicht verlassen werden.');
+    }
+    await query('DELETE FROM lobby_members WHERE lobby_id = $1 AND user_id = $2', [lobbyId, memberId]);
+    return;
+  }
+
+  if (!membership.isOwner) {
+    throw new HttpError(403, 'Nur Besitzer:innen können andere entfernen.');
+  }
+
+  const target = await query(
+    `SELECT role, user_id FROM lobby_members WHERE lobby_id = $1 AND user_id = $2`,
+    [lobbyId, memberId]
+  );
+
+  if (target.rowCount === 0) {
+    throw new HttpError(404, 'Mitglied wurde nicht gefunden.');
+  }
+  if (target.rows[0].role === 'owner') {
+    throw new HttpError(400, 'Die Besitzer:in kann nicht entfernt werden.');
+  }
+
+  await query('DELETE FROM lobby_members WHERE lobby_id = $1 AND user_id = $2', [lobbyId, memberId]);
+}
+
+async function deleteLobby(requestorId, lobbyId) {
+  const membership = await ensureLobbyMembership(requestorId, lobbyId);
+  if (!membership) {
+    throw new HttpError(404, 'Lobby wurde nicht gefunden.');
+  }
+  if (!membership.isOwner) {
+    throw new HttpError(403, 'Nur Besitzer:innen können die Lobby löschen.');
+  }
+  if (membership.isPersonal) {
+    throw new HttpError(400, 'Die persönliche Lobby kann nicht gelöscht werden.');
+  }
+
+  await query('DELETE FROM lobbies WHERE id = $1', [lobbyId]);
+  return listUserLobbies(requestorId);
+}
+
+async function resolveLobbyContext(req, { requireWriteAccess = false } = {}) {
+  const userId = req.user?.id;
+  if (!userId) {
+    throw new HttpError(401, 'Bitte melde dich an.');
+  }
+
+  const rawHeader = req.headers?.[LOBBY_HEADER] || req.headers?.[LOBBY_HEADER.toUpperCase()] || '';
+  let lobby;
+
+  if (rawHeader && rawHeader.toLowerCase() !== 'personal') {
+    const parsed = Number(rawHeader);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      throw new HttpError(400, 'Ungültige Lobby-Auswahl.');
+    }
+    lobby = await ensureLobbyMembership(userId, parsed);
+    if (!lobby) {
+      throw new HttpError(404, 'Lobby wurde nicht gefunden oder Zugriff verweigert.');
+    }
+  } else {
+    lobby = await ensurePersonalLobby(userId);
+  }
+
+  if (requireWriteAccess && !hasLobbyWriteAccess(lobby)) {
+    throw new HttpError(403, 'Keine Schreibrechte für diese Lobby.');
+  }
+
+  return {
+    ownerId: userId,
+    lobbyId: lobby.id,
+    lobby,
+  };
+}
+
 function parseCookies(headerValue) {
   if (!headerValue || typeof headerValue !== 'string') {
     return {};
@@ -249,26 +638,46 @@ function normalizeTheme(theme) {
   return null;
 }
 
-async function getSetting(key) {
-  const result = await query('SELECT value FROM kv_store WHERE key = $1', [key]);
+async function getSetting(context, key) {
+  if (!context || !Number.isInteger(context.lobbyId)) {
+    throw new HttpError(400, 'Ungültiger Kontext für gespeicherte Werte.');
+  }
+  const result = await query(
+    `SELECT value FROM kv_store WHERE lobby_id = $1 AND key = $2 LIMIT 1`,
+    [context.lobbyId, key]
+  );
   if (result.rowCount === 0) {
     return null;
   }
   return result.rows[0].value;
 }
 
-async function setSetting(key, value) {
+async function setSetting(context, key, value) {
+  if (!context || !Number.isInteger(context.lobbyId) || !Number.isInteger(context.ownerId)) {
+    throw new HttpError(400, 'Ungültiger Kontext für gespeicherte Werte.');
+  }
   const serializedValue = JSON.stringify(value ?? null);
+  const updated = await query(
+    `UPDATE kv_store
+        SET value = $4, updated_at = NOW(), owner_id = $1
+      WHERE lobby_id = $2 AND key = $3`,
+    [context.ownerId, context.lobbyId, key, serializedValue]
+  );
+  if (updated.rowCount > 0) {
+    return;
+  }
   await query(
-    `INSERT INTO kv_store (key, value, updated_at)
-     VALUES ($1, $2, NOW())
-     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-    [key, serializedValue]
+    `INSERT INTO kv_store (owner_id, lobby_id, key, value, updated_at)
+     VALUES ($1, $2, $3, $4, NOW())`,
+    [context.ownerId, context.lobbyId, key, serializedValue]
   );
 }
 
-async function removeSetting(key) {
-  await query('DELETE FROM kv_store WHERE key = $1', [key]);
+async function removeSetting(context, key) {
+  if (!context || !Number.isInteger(context.lobbyId)) {
+    throw new HttpError(400, 'Ungültiger Kontext für gespeicherte Werte.');
+  }
+  await query('DELETE FROM kv_store WHERE lobby_id = $1 AND key = $2', [context.lobbyId, key]);
 }
 
 function cloneJson(value) {
@@ -437,16 +846,16 @@ async function loadDefaultRoleSchema() {
   }
 }
 
-async function getStoredRoleSchema() {
-  const value = await getSetting(ROLE_SCHEMA_KEY);
+async function getStoredRoleSchema(context) {
+  const value = await getSetting(context, ROLE_SCHEMA_KEY);
   if (!value) {
     return null;
   }
   return normalizeRoleSchema(value);
 }
 
-async function getEffectiveRoleSchema() {
-  const stored = await getStoredRoleSchema();
+async function getEffectiveRoleSchema(context) {
+  const stored = await getStoredRoleSchema(context);
   if (stored) {
     return { config: stored, source: 'custom' };
   }
@@ -454,10 +863,10 @@ async function getEffectiveRoleSchema() {
   return { config: fallback, source: 'default' };
 }
 
-async function saveRoleSchema(schema) {
+async function saveRoleSchema(context, schema) {
   const normalized = normalizeRoleSchema(schema);
   normalized.updatedAt = new Date().toISOString();
-  await setSetting(ROLE_SCHEMA_KEY, normalized);
+  await setSetting(context, ROLE_SCHEMA_KEY, normalized);
   return cloneJson(normalized);
 }
 
@@ -507,6 +916,8 @@ app.post('/api/auth/login', async (req, res) => {
     if (!passwordValid) {
       return res.status(400).json({ error: 'E-Mail oder Passwort ist falsch.' });
     }
+
+    await ensurePersonalLobby(userRow.id);
 
     const { token, expiresAt } = await createSession(userRow.id);
     setSessionCookie(res, token, expiresAt);
@@ -570,6 +981,8 @@ app.post('/api/auth/register', async (req, res) => {
     );
 
     const userRow = insertResult.rows[0];
+    await ensurePersonalLobby(userRow.id);
+
     const { token, expiresAt } = await createSession(userRow.id);
     setSessionCookie(res, token, expiresAt);
 
@@ -582,60 +995,203 @@ app.post('/api/auth/register', async (req, res) => {
 
 app.use('/api', requireAuthForApi);
 
+app.get('/api/lobbies', async (req, res) => {
+  try {
+    const lobbies = await listUserLobbies(req.user.id);
+    res.json({ lobbies });
+  } catch (error) {
+    handleApiError(res, error, 'Lobbys konnten nicht geladen werden.');
+  }
+});
+
+app.post('/api/lobbies', async (req, res) => {
+  try {
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    const lobby = await createLobbyRecord(req.user.id, name || 'Neue Lobby', { isPersonal: false });
+    const lobbies = await listUserLobbies(req.user.id);
+    res.status(201).json({ lobby, lobbies });
+  } catch (error) {
+    handleApiError(res, error, 'Lobby konnte nicht erstellt werden.');
+  }
+});
+
+app.post('/api/lobbies/join', async (req, res) => {
+  try {
+    const code = req.body?.code || req.body?.joinCode || req.body?.token;
+    const lobby = await joinLobbyByCode(req.user.id, code);
+    const lobbies = await listUserLobbies(req.user.id);
+    res.json({ lobby, lobbies });
+  } catch (error) {
+    handleApiError(res, error, 'Lobby konnte nicht beigetreten werden.');
+  }
+});
+
+function parseLobbyId(param) {
+  const lobbyId = Number(param);
+  if (!Number.isInteger(lobbyId) || lobbyId <= 0) {
+    throw new HttpError(400, 'Ungültige Lobby-ID.');
+  }
+  return lobbyId;
+}
+
+app.patch('/api/lobbies/:lobbyId', async (req, res) => {
+  try {
+    const lobbyId = parseLobbyId(req.params.lobbyId);
+    let lobby = null;
+    if (typeof req.body?.name === 'string') {
+      lobby = await updateLobbyName(req.user.id, lobbyId, req.body.name);
+    }
+    if (req.body?.rotateJoinCode) {
+      lobby = await rotateLobbyJoinCode(req.user.id, lobbyId);
+    }
+    if (!lobby) {
+      lobby = await ensureLobbyMembership(req.user.id, lobbyId);
+      if (!lobby) {
+        throw new HttpError(404, 'Lobby wurde nicht gefunden.');
+      }
+    }
+    res.json({ lobby });
+  } catch (error) {
+    handleApiError(res, error, 'Lobby konnte nicht aktualisiert werden.');
+  }
+});
+
+app.post('/api/lobbies/:lobbyId/rotate-code', async (req, res) => {
+  try {
+    const lobbyId = parseLobbyId(req.params.lobbyId);
+    const lobby = await rotateLobbyJoinCode(req.user.id, lobbyId);
+    res.json({ lobby });
+  } catch (error) {
+    handleApiError(res, error, 'Beitrittscode konnte nicht erneuert werden.');
+  }
+});
+
+app.delete('/api/lobbies/:lobbyId', async (req, res) => {
+  try {
+    const lobbyId = parseLobbyId(req.params.lobbyId);
+    const membership = await ensureLobbyMembership(req.user.id, lobbyId);
+    if (!membership) {
+      throw new HttpError(404, 'Lobby wurde nicht gefunden.');
+    }
+    const deleteRequested = req.body?.delete === true || req.query?.delete === 'true';
+    if (membership.isOwner && !membership.isPersonal && deleteRequested) {
+      const lobbies = await deleteLobby(req.user.id, lobbyId);
+      res.json({ lobbies });
+      return;
+    }
+
+    await removeLobbyMember(req.user.id, lobbyId, req.user.id);
+    const lobbies = await listUserLobbies(req.user.id);
+    res.json({ lobbies });
+  } catch (error) {
+    handleApiError(res, error, 'Lobby konnte nicht verlassen werden.');
+  }
+});
+
+app.get('/api/lobbies/:lobbyId/members', async (req, res) => {
+  try {
+    const lobbyId = parseLobbyId(req.params.lobbyId);
+    const result = await listLobbyMembers(req.user.id, lobbyId);
+    res.json(result);
+  } catch (error) {
+    handleApiError(res, error, 'Mitglieder konnten nicht geladen werden.');
+  }
+});
+
+app.patch('/api/lobbies/:lobbyId/members/:memberId', async (req, res) => {
+  try {
+    const lobbyId = parseLobbyId(req.params.lobbyId);
+    const memberId = Number(req.params.memberId);
+    if (!Number.isInteger(memberId) || memberId <= 0) {
+      throw new HttpError(400, 'Ungültige Benutzer-ID.');
+    }
+    const result = await updateLobbyMemberRole(req.user.id, lobbyId, memberId, req.body?.role);
+    res.json(result);
+  } catch (error) {
+    handleApiError(res, error, 'Mitglied konnte nicht aktualisiert werden.');
+  }
+});
+
+app.delete('/api/lobbies/:lobbyId/members/:memberId', async (req, res) => {
+  try {
+    const lobbyId = parseLobbyId(req.params.lobbyId);
+    const memberId = Number(req.params.memberId);
+    if (!Number.isInteger(memberId) || memberId <= 0) {
+      throw new HttpError(400, 'Ungültige Benutzer-ID.');
+    }
+    await removeLobbyMember(req.user.id, lobbyId, memberId);
+    if (memberId === req.user.id) {
+      const lobbies = await listUserLobbies(req.user.id);
+      res.json({ lobbies });
+    } else {
+      const result = await listLobbyMembers(req.user.id, lobbyId);
+      res.json(result);
+    }
+  } catch (error) {
+    handleApiError(res, error, 'Mitglied konnte nicht entfernt werden.');
+  }
+});
+
 app.get('/api/theme', async (req, res) => {
   try {
-    const value = await getSetting('theme');
+    const context = await resolveLobbyContext(req);
+    const value = await getSetting(context, 'theme');
     res.json({ theme: typeof value === 'string' ? value : null });
   } catch (error) {
-    res.status(500).json({ error: 'Theme konnte nicht geladen werden.' });
+    handleApiError(res, error, 'Theme konnte nicht geladen werden.');
   }
 });
 
 app.put('/api/theme', async (req, res) => {
   try {
+    const context = await resolveLobbyContext(req, { requireWriteAccess: true });
     const theme = normalizeTheme(req.body?.theme);
     if (!theme) {
-      return res.status(400).json({ error: 'Ungültiges Theme.' });
+      throw new HttpError(400, 'Ungültiges Theme.');
     }
-    await setSetting('theme', theme);
+    await setSetting(context, 'theme', theme);
     res.json({ theme });
   } catch (error) {
-    res.status(500).json({ error: 'Theme konnte nicht gespeichert werden.' });
+    handleApiError(res, error, 'Theme konnte nicht gespeichert werden.');
   }
 });
 
 app.get('/api/saved-names', async (req, res) => {
   try {
-    const value = await getSetting('werwolfSavedNames');
+    const context = await resolveLobbyContext(req);
+    const value = await getSetting(context, 'werwolfSavedNames');
     res.json({ names: Array.isArray(value) ? value : [] });
   } catch (error) {
-    res.status(500).json({ error: 'Gespeicherte Namen konnten nicht geladen werden.' });
+    handleApiError(res, error, 'Gespeicherte Namen konnten nicht geladen werden.');
   }
 });
 
 app.put('/api/saved-names', async (req, res) => {
   try {
+    const context = await resolveLobbyContext(req, { requireWriteAccess: true });
     const names = Array.isArray(req.body?.names)
       ? req.body.names.filter((name) => typeof name === 'string' && name.trim().length > 0)
       : [];
-    await setSetting('werwolfSavedNames', names);
+    await setSetting(context, 'werwolfSavedNames', names);
     res.json({ names });
   } catch (error) {
-    res.status(500).json({ error: 'Gespeicherte Namen konnten nicht abgelegt werden.' });
+    handleApiError(res, error, 'Gespeicherte Namen konnten nicht abgelegt werden.');
   }
 });
 
 app.get('/api/role-presets', async (req, res) => {
   try {
-    const value = await getSetting('werwolfSavedRoles');
+    const context = await resolveLobbyContext(req);
+    const value = await getSetting(context, 'werwolfSavedRoles');
     res.json({ roles: Array.isArray(value) ? value : [] });
   } catch (error) {
-    res.status(500).json({ error: 'Gespeicherte Rollen konnten nicht geladen werden.' });
+    handleApiError(res, error, 'Gespeicherte Rollen konnten nicht geladen werden.');
   }
 });
 
 app.put('/api/role-presets', async (req, res) => {
   try {
+    const context = await resolveLobbyContext(req, { requireWriteAccess: true });
     const roles = Array.isArray(req.body?.roles)
       ? req.body.roles
           .filter((role) => role && typeof role.name === 'string' && role.name.trim().length > 0)
@@ -644,126 +1200,140 @@ app.put('/api/role-presets', async (req, res) => {
             quantity: Number.isFinite(role.quantity) ? Math.max(0, Math.round(role.quantity)) : 0,
           }))
       : [];
-    await setSetting('werwolfSavedRoles', roles);
+    await setSetting(context, 'werwolfSavedRoles', roles);
     res.json({ roles });
   } catch (error) {
-    res.status(500).json({ error: 'Gespeicherte Rollen konnten nicht abgelegt werden.' });
+    handleApiError(res, error, 'Gespeicherte Rollen konnten nicht abgelegt werden.');
   }
 });
 
 app.get('/api/roles-config', async (req, res) => {
   try {
-    const { config, source } = await getEffectiveRoleSchema();
+    const context = await resolveLobbyContext(req);
+    const { config, source } = await getEffectiveRoleSchema(context);
     res.json({ config, source });
   } catch (error) {
-    console.error('Rollenkonfiguration konnte nicht geladen werden:', error);
-    res.status(500).json({ error: 'Rollenkonfiguration konnte nicht geladen werden.' });
+    handleApiError(res, error, 'Rollenkonfiguration konnte nicht geladen werden.');
   }
 });
 
-async function handleRolesConfigUpdate(req, res, { statusOnCreate = 200 } = {}) {
+async function handleRolesConfigUpdate(req, res, context, { statusOnCreate = 200 } = {}) {
   try {
     const payload = req.body && typeof req.body === 'object'
       ? (req.body.config ?? req.body)
       : null;
     if (!payload || typeof payload !== 'object') {
-      return res.status(400).json({ error: 'Ungültige Rollenkonfiguration.' });
+      throw new HttpError(400, 'Ungültige Rollenkonfiguration.');
     }
-    const saved = await saveRoleSchema(payload);
+    const saved = await saveRoleSchema(context, payload);
     res.status(statusOnCreate).json({ config: saved, source: 'custom' });
   } catch (error) {
-    console.error('Rollenkonfiguration konnte nicht gespeichert werden:', error);
-    res.status(500).json({ error: 'Rollenkonfiguration konnte nicht gespeichert werden.' });
+    handleApiError(res, error, 'Rollenkonfiguration konnte nicht gespeichert werden.');
   }
   return null;
 }
 
 app.post('/api/roles-config', async (req, res) => {
-  await handleRolesConfigUpdate(req, res, { statusOnCreate: 201 });
+  try {
+    const context = await resolveLobbyContext(req, { requireWriteAccess: true });
+    await handleRolesConfigUpdate(req, res, context, { statusOnCreate: 201 });
+  } catch (error) {
+    handleApiError(res, error, 'Rollenkonfiguration konnte nicht gespeichert werden.');
+  }
 });
 
 app.put('/api/roles-config', async (req, res) => {
-  await handleRolesConfigUpdate(req, res, { statusOnCreate: 200 });
+  try {
+    const context = await resolveLobbyContext(req, { requireWriteAccess: true });
+    await handleRolesConfigUpdate(req, res, context, { statusOnCreate: 200 });
+  } catch (error) {
+    handleApiError(res, error, 'Rollenkonfiguration konnte nicht gespeichert werden.');
+  }
 });
 
 app.delete('/api/roles-config', async (req, res) => {
   try {
-    await removeSetting(ROLE_SCHEMA_KEY);
+    const context = await resolveLobbyContext(req, { requireWriteAccess: true });
+    await removeSetting(context, ROLE_SCHEMA_KEY);
     res.status(204).end();
   } catch (error) {
-    console.error('Rollenkonfiguration konnte nicht zurückgesetzt werden:', error);
-    res.status(500).json({ error: 'Rollenkonfiguration konnte nicht zurückgesetzt werden.' });
+    handleApiError(res, error, 'Rollenkonfiguration konnte nicht zurückgesetzt werden.');
   }
 });
 
 app.get('/api/storage/:key', async (req, res) => {
   try {
+    const context = await resolveLobbyContext(req);
     const key = req.params.key;
-    const value = await getSetting(key);
+    const value = await getSetting(context, key);
     res.json({ key, value: value ?? null });
   } catch (error) {
-    res.status(500).json({ error: 'Persistenter Wert konnte nicht geladen werden.' });
+    handleApiError(res, error, 'Persistenter Wert konnte nicht geladen werden.');
   }
 });
 
 app.put('/api/storage/:key', async (req, res) => {
   try {
+    const context = await resolveLobbyContext(req, { requireWriteAccess: true });
     const key = req.params.key;
     const { value = null } = req.body || {};
-    await setSetting(key, value);
+    await setSetting(context, key, value);
     res.json({ key, value });
   } catch (error) {
-    res.status(500).json({ error: 'Persistenter Wert konnte nicht gespeichert werden.' });
+    handleApiError(res, error, 'Persistenter Wert konnte nicht gespeichert werden.');
   }
 });
 
 app.delete('/api/storage/:key', async (req, res) => {
   try {
+    const context = await resolveLobbyContext(req, { requireWriteAccess: true });
     const key = req.params.key;
-    await removeSetting(key);
+    await removeSetting(context, key);
     res.status(204).end();
   } catch (error) {
-    res.status(500).json({ error: 'Persistenter Wert konnte nicht entfernt werden.' });
+    handleApiError(res, error, 'Persistenter Wert konnte nicht entfernt werden.');
   }
 });
 
-async function listSessions() {
+async function listSessions(context) {
   const result = await query(
     `SELECT timestamp, data
        FROM sessions
+      WHERE lobby_id = $1
       ORDER BY timestamp DESC
-      LIMIT 20`
+      LIMIT 20`,
+    [context.lobbyId]
   );
   return result.rows.map((row) => ({ ...row.data, timestamp: Number(row.timestamp) }));
 }
 
-async function upsertSession(session) {
+async function upsertSession(context, session) {
   await query(
-    `INSERT INTO sessions (timestamp, data, created_at)
-     VALUES ($1, $2, NOW())
-     ON CONFLICT (timestamp)
-     DO UPDATE SET data = EXCLUDED.data`,
-    [session.timestamp, session]
+    `INSERT INTO sessions (timestamp, data, created_at, owner_id, lobby_id)
+     VALUES ($1, $2, NOW(), $3, $4)
+     ON CONFLICT (lobby_id, timestamp)
+     DO UPDATE SET data = EXCLUDED.data, owner_id = EXCLUDED.owner_id, updated_at = NOW()`,
+    [session.timestamp, session, context.ownerId, context.lobbyId]
   );
 
-  await pruneSessionStorage(20);
+  await pruneSessionStorage(context, 20);
 }
 
-async function upsertSessionTimeline(session) {
+async function upsertSessionTimeline(context, session) {
   if (!session?.timeline || typeof session.timeline !== 'object') {
     return;
   }
 
   await query(
-    `INSERT INTO session_timelines (session_timestamp, timeline, created_at)
-     VALUES ($1, $2, NOW())
-     ON CONFLICT (session_timestamp)
-     DO UPDATE SET timeline = EXCLUDED.timeline, updated_at = NOW()`,
-    [session.timestamp, session.timeline]
+    `INSERT INTO session_timelines (session_timestamp, timeline, created_at, owner_id, lobby_id)
+     VALUES ($1, $2, NOW(), $3, $4)
+     ON CONFLICT (lobby_id, session_timestamp)
+     DO UPDATE SET timeline = EXCLUDED.timeline, owner_id = EXCLUDED.owner_id, updated_at = NOW()`,
+    [session.timestamp, session.timeline, context.ownerId, context.lobbyId]
   );
 }
 
-async function upsertSessionMetrics(session) {
+async function upsertSessionMetrics(context, session) {
   const metadata = session?.metadata || {};
   const timeline = session?.timeline || {};
   const actions = Array.isArray(timeline.actions) ? timeline.actions : [];
@@ -784,110 +1354,116 @@ async function upsertSessionMetrics(session) {
   }
 
   await query(
-    `INSERT INTO session_metrics (session_timestamp, winner, player_count, action_count, checkpoint_count, game_length_ms, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, NOW())
-     ON CONFLICT (session_timestamp)
+    `INSERT INTO session_metrics (session_timestamp, winner, player_count, action_count, checkpoint_count, game_length_ms, created_at, owner_id, lobby_id)
+     VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, $8)
+     ON CONFLICT (lobby_id, session_timestamp)
      DO UPDATE SET winner = EXCLUDED.winner,
                    player_count = EXCLUDED.player_count,
                    action_count = EXCLUDED.action_count,
                    checkpoint_count = EXCLUDED.checkpoint_count,
                    game_length_ms = EXCLUDED.game_length_ms,
+                   owner_id = EXCLUDED.owner_id,
                    updated_at = NOW()`,
-    [session.timestamp, winnerTitle, playerCount, actionCount, checkpointCount, gameLengthMs]
+    [session.timestamp, winnerTitle, playerCount, actionCount, checkpointCount, gameLengthMs, context.ownerId, context.lobbyId]
   );
 }
 
-async function pruneSessionStorage(limit = 20) {
+async function pruneSessionStorage(context, limit = 20) {
   await query(
     `DELETE FROM sessions
-      WHERE timestamp NOT IN (
-        SELECT timestamp FROM sessions ORDER BY timestamp DESC LIMIT $1
+      WHERE lobby_id = $1
+        AND timestamp NOT IN (
+        SELECT timestamp FROM sessions WHERE lobby_id = $1 ORDER BY timestamp DESC LIMIT $2
       )`,
-    [limit]
+    [context.lobbyId, limit]
   );
 
   await query(
     `DELETE FROM session_timelines
-      WHERE session_timestamp NOT IN (
-        SELECT timestamp FROM sessions ORDER BY timestamp DESC LIMIT $1
+      WHERE lobby_id = $1
+        AND session_timestamp NOT IN (
+        SELECT timestamp FROM sessions WHERE lobby_id = $1 ORDER BY timestamp DESC LIMIT $2
       )`,
-    [limit]
+    [context.lobbyId, limit]
   );
 
   await query(
     `DELETE FROM session_metrics
-      WHERE session_timestamp NOT IN (
-        SELECT timestamp FROM sessions ORDER BY timestamp DESC LIMIT $1
+      WHERE lobby_id = $1
+        AND session_timestamp NOT IN (
+        SELECT timestamp FROM sessions WHERE lobby_id = $1 ORDER BY timestamp DESC LIMIT $2
       )`,
-    [limit]
+    [context.lobbyId, limit]
   );
 }
 
 app.get('/api/sessions', async (req, res) => {
   try {
-    const sessions = await listSessions();
+    const context = await resolveLobbyContext(req);
+    const sessions = await listSessions(context);
     res.json({ sessions });
   } catch (error) {
-    res.status(500).json({ error: 'Sessions konnten nicht geladen werden.' });
+    handleApiError(res, error, 'Sessions konnten nicht geladen werden.');
   }
 });
 
 app.post('/api/sessions', async (req, res) => {
   try {
+    const context = await resolveLobbyContext(req, { requireWriteAccess: true });
     const session = req.body?.session;
     if (!session || typeof session !== 'object') {
-      return res.status(400).json({ error: 'Ungültige Session.' });
+      throw new HttpError(400, 'Ungültige Session.');
     }
     const timestamp = Number(session.timestamp || Date.now());
     const normalized = { ...session, timestamp };
-    await upsertSession(normalized);
-    await upsertSessionTimeline(normalized);
-    await upsertSessionMetrics(normalized);
-    const sessions = await listSessions();
+    await upsertSession(context, normalized);
+    await upsertSessionTimeline(context, normalized);
+    await upsertSessionMetrics(context, normalized);
+    const sessions = await listSessions(context);
     res.status(201).json({ session: normalized, sessions });
   } catch (error) {
-    res.status(500).json({ error: 'Session konnte nicht gespeichert werden.' });
+    handleApiError(res, error, 'Session konnte nicht gespeichert werden.');
   }
 });
 
 app.get('/api/sessions/:timestamp/timeline', async (req, res) => {
   try {
+    const context = await resolveLobbyContext(req);
     const timestamp = Number(req.params.timestamp);
     if (!Number.isFinite(timestamp)) {
-      return res.status(400).json({ error: 'Ungültiger Zeitstempel.' });
+      throw new HttpError(400, 'Ungültiger Zeitstempel.');
     }
     const result = await query(
       `SELECT timeline
          FROM session_timelines
-        WHERE session_timestamp = $1
+        WHERE lobby_id = $1 AND session_timestamp = $2
         LIMIT 1`,
-      [timestamp]
+      [context.lobbyId, timestamp]
     );
     if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Keine Timeline für diese Session gefunden.' });
     }
     return res.json({ timeline: result.rows[0].timeline });
   } catch (error) {
-    console.error('Timeline konnte nicht geladen werden:', error);
-    return res.status(500).json({ error: 'Timeline konnte nicht geladen werden.' });
+    handleApiError(res, error, 'Timeline konnte nicht geladen werden.');
   }
 });
 
 app.delete('/api/sessions/:timestamp', async (req, res) => {
   try {
+    const context = await resolveLobbyContext(req, { requireWriteAccess: true });
     const timestamp = Number(req.params.timestamp);
     if (!Number.isFinite(timestamp)) {
-      return res.status(400).json({ error: 'Ungültiger Zeitstempel.' });
+      throw new HttpError(400, 'Ungültiger Zeitstempel.');
     }
-    await query('DELETE FROM sessions WHERE timestamp = $1', [timestamp]);
-    await query('DELETE FROM session_timelines WHERE session_timestamp = $1', [timestamp]);
-    await query('DELETE FROM session_metrics WHERE session_timestamp = $1', [timestamp]);
+    await query('DELETE FROM sessions WHERE lobby_id = $1 AND timestamp = $2', [context.lobbyId, timestamp]);
+    await query('DELETE FROM session_timelines WHERE lobby_id = $1 AND session_timestamp = $2', [context.lobbyId, timestamp]);
+    await query('DELETE FROM session_metrics WHERE lobby_id = $1 AND session_timestamp = $2', [context.lobbyId, timestamp]);
     res.status(204).end();
   } catch (error) {
-    res.status(500).json({ error: 'Session konnte nicht gelöscht werden.' });
+    handleApiError(res, error, 'Session konnte nicht gelöscht werden.');
   }
 });
-
 const VILLAGE_ROLES = new Set([
   'Dorfbewohner',
   'Seer',

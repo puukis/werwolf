@@ -10,6 +10,10 @@ function createBackendMock() {
   let theme = null;
   let sessions = [];
   let loggedIn = true;
+  let storedRoleSchema = null;
+  let lobbies = [];
+  let lobbyCounter = 2;
+  const lobbyMembers = new Map();
   const defaultUser = {
     id: 1,
     email: 'test@narrator.de',
@@ -32,6 +36,34 @@ function createBackendMock() {
       return body;
     },
   });
+
+  const cloneLobby = (lobby) => ({ ...lobby });
+
+  const resetLobbies = () => {
+    lobbies = [
+      {
+        id: 1,
+        name: 'Persönliche Lobby',
+        isPersonal: true,
+        isOwner: true,
+        isAdmin: true,
+        joinCode: 'TEAM001',
+      },
+    ];
+    lobbyMembers.clear();
+    lobbyMembers.set(1, [
+      {
+        userId: defaultUser.id,
+        displayName: defaultUser.displayName,
+        email: defaultUser.email,
+        isOwner: true,
+        isAdmin: true,
+      },
+    ]);
+    lobbyCounter = 2;
+  };
+
+  resetLobbies();
 
   const empty = () => ({
     ok: true,
@@ -166,6 +198,83 @@ function createBackendMock() {
         return empty();
       }
 
+      if (pathname === '/api/roles-config') {
+        if (method === 'GET') {
+          return response(200, { config: storedRoleSchema ? { ...storedRoleSchema } : null, source: storedRoleSchema ? 'custom' : 'default' });
+        }
+        if (method === 'PUT' || method === 'POST') {
+          const next = payload && typeof payload === 'object' ? payload.config ?? payload : null;
+          storedRoleSchema = next ? { ...next } : null;
+          const status = method === 'POST' ? 201 : 200;
+          return response(status, { config: storedRoleSchema ? { ...storedRoleSchema } : null, source: storedRoleSchema ? 'custom' : 'default' });
+        }
+        if (method === 'DELETE') {
+          storedRoleSchema = null;
+          return empty();
+        }
+      }
+
+      if (pathname === '/api/analytics' && method === 'GET') {
+        return response(200, {
+          summary: { sessionCount: sessions.length },
+          winrates: [],
+          highlights: [],
+          meta: {},
+        });
+      }
+
+      if (pathname === '/api/lobbies') {
+        if (method === 'GET') {
+          return response(200, { lobbies: lobbies.map(cloneLobby) });
+        }
+        if (method === 'POST') {
+          const name = typeof payload?.name === 'string' && payload.name.trim().length > 0
+            ? payload.name.trim()
+            : `Lobby ${lobbyCounter}`;
+          const newLobby = {
+            id: lobbyCounter++,
+            name,
+            isPersonal: false,
+            isOwner: true,
+            isAdmin: true,
+            joinCode: `TEAM${String(Math.random()).slice(2, 6).toUpperCase()}`,
+          };
+          lobbies.push(newLobby);
+          lobbyMembers.set(newLobby.id, [
+            {
+              userId: defaultUser.id,
+              displayName: defaultUser.displayName,
+              email: defaultUser.email,
+              isOwner: true,
+              isAdmin: true,
+            },
+          ]);
+          return response(201, { lobby: cloneLobby(newLobby), lobbies: lobbies.map(cloneLobby) });
+        }
+      }
+
+      if (pathname === '/api/lobbies/join' && method === 'POST') {
+        return response(200, { lobby: lobbies[0] ? cloneLobby(lobbies[0]) : null, lobbies: lobbies.map(cloneLobby) });
+      }
+
+      const membersMatch = pathname.match(/^\/api\/lobbies\/(\d+)\/members$/);
+      if (membersMatch && method === 'GET') {
+        const lobbyId = Number(membersMatch[1]);
+        const members = lobbyMembers.get(lobbyId) || [];
+        return response(200, { members: members.map((member) => ({ ...member })) });
+      }
+
+      const lobbyMatch = pathname.match(/^\/api\/lobbies\/(\d+)$/);
+      if (lobbyMatch && method === 'DELETE') {
+        const lobbyId = Number(lobbyMatch[1]);
+        if (lobbyId === 1) {
+          return response(400, { error: 'Persönliche Lobby kann nicht verlassen werden.' });
+        }
+        lobbies = lobbies.filter((entry) => entry.id !== lobbyId);
+        lobbyMembers.delete(lobbyId);
+        return empty();
+      }
+
       return response(404, { error: 'Nicht gefunden' });
     }),
     reset() {
@@ -175,6 +284,8 @@ function createBackendMock() {
       theme = null;
       sessions = [];
       loggedIn = true;
+      storedRoleSchema = null;
+      resetLobbies();
     },
     setTheme(value) {
       theme = typeof value === 'string' ? value : null;

@@ -15,6 +15,9 @@ function createBackendMock() {
   let sessions = [];
   let loggedIn = true;
   let storedRoleSchema = null;
+  let lobbies = [];
+  let lobbyCounter = 2;
+  const lobbyMembers = new Map();
   const defaultUser = {
     id: 1,
     email: 'test@narrator.de',
@@ -23,6 +26,33 @@ function createBackendMock() {
   };
 
   const clone = (value) => (value === null || value === undefined ? null : JSON.parse(JSON.stringify(value)));
+  const lobbyClone = (lobby) => ({ ...lobby });
+
+  const resetLobbies = () => {
+    lobbies = [
+      {
+        id: 1,
+        name: 'Persönliche Lobby',
+        isPersonal: true,
+        isOwner: true,
+        isAdmin: true,
+        joinCode: 'TEAM001',
+      },
+    ];
+    lobbyMembers.clear();
+    lobbyMembers.set(1, [
+      {
+        userId: defaultUser.id,
+        displayName: defaultUser.displayName,
+        email: defaultUser.email,
+        isOwner: true,
+        isAdmin: true,
+      },
+    ]);
+    lobbyCounter = 2;
+  };
+
+  resetLobbies();
 
   const normalizeTheme = (value) => {
     if (typeof value !== 'string') {
@@ -193,6 +223,67 @@ function createBackendMock() {
         return empty();
       }
 
+      if (pathname === '/api/analytics' && method === 'GET') {
+        return response(200, {
+          summary: { sessionCount: sessions.length, players: savedNames.length },
+          winrates: [],
+          highlights: [],
+          meta: {},
+        });
+      }
+
+      if (pathname === '/api/lobbies') {
+        if (method === 'GET') {
+          return response(200, { lobbies: lobbies.map(lobbyClone) });
+        }
+        if (method === 'POST') {
+          const name = typeof payload?.name === 'string' && payload.name.trim().length > 0
+            ? payload.name.trim()
+            : `Lobby ${lobbyCounter}`;
+          const newLobby = {
+            id: lobbyCounter++,
+            name,
+            isPersonal: false,
+            isOwner: true,
+            isAdmin: true,
+            joinCode: `TEAM${String(Math.random()).slice(2, 6).toUpperCase()}`,
+          };
+          lobbies.push(newLobby);
+          lobbyMembers.set(newLobby.id, [
+            {
+              userId: defaultUser.id,
+              displayName: defaultUser.displayName,
+              email: defaultUser.email,
+              isOwner: true,
+              isAdmin: true,
+            },
+          ]);
+          return response(201, { lobby: lobbyClone(newLobby), lobbies: lobbies.map(lobbyClone) });
+        }
+      }
+
+      if (pathname === '/api/lobbies/join' && method === 'POST') {
+        return response(200, { lobby: lobbies[0] ? lobbyClone(lobbies[0]) : null, lobbies: lobbies.map(lobbyClone) });
+      }
+
+      const membersMatch = pathname.match(/^\/api\/lobbies\/(\d+)\/members$/);
+      if (membersMatch && method === 'GET') {
+        const lobbyId = Number(membersMatch[1]);
+        const members = lobbyMembers.get(lobbyId) || [];
+        return response(200, { members: members.map((member) => ({ ...member })) });
+      }
+
+      const lobbyMatch = pathname.match(/^\/api\/lobbies\/(\d+)$/);
+      if (lobbyMatch && method === 'DELETE') {
+        const lobbyId = Number(lobbyMatch[1]);
+        if (lobbyId === 1) {
+          return response(400, { error: 'Persönliche Lobby kann nicht verlassen werden.' });
+        }
+        lobbies = lobbies.filter((entry) => entry.id !== lobbyId);
+        lobbyMembers.delete(lobbyId);
+        return empty();
+      }
+
       return response(404, { error: 'Nicht gefunden' });
     }),
     reset() {
@@ -203,6 +294,7 @@ function createBackendMock() {
       sessions = [];
       loggedIn = true;
       storedRoleSchema = null;
+      resetLobbies();
     },
     setTheme(value) {
       theme = typeof value === 'string' ? value : null;
