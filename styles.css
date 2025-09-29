@@ -971,6 +971,86 @@ body.auth-locked {
   flex-shrink: 0;
 }
 
+.lobby-switcher {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem 0.85rem;
+  background: var(--result-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 0.9rem;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+  min-width: 15rem;
+}
+
+.lobby-switcher.hidden {
+  display: none;
+}
+
+.lobby-switcher-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-light);
+}
+
+.lobby-switcher-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.lobby-switcher select {
+  flex: 1;
+  border-radius: 0.75rem;
+  border: 1px solid var(--border-color);
+  background: var(--card-bg);
+  color: var(--text-color);
+  padding: 0.4rem 0.6rem;
+  font-size: 0.9rem;
+  appearance: none;
+}
+
+.lobby-switcher-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.lobby-switcher button {
+  font-size: 0.78rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 0.75rem;
+  white-space: nowrap;
+}
+
+.lobby-switcher button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.lobby-switcher .danger-btn {
+  color: #dc2626;
+  border-color: rgba(220, 38, 38, 0.35);
+}
+
+[data-theme="dark"] .lobby-switcher {
+  background: rgba(46, 52, 74, 0.95);
+  border-color: rgba(100, 116, 139, 0.45);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="dark"] .lobby-switcher select {
+  background: rgba(30, 41, 59, 0.85);
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+[data-theme="dark"] .lobby-switcher .danger-btn {
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
 .user-chip {
   display: flex;
   align-items: center;

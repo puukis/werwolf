@@ -126,6 +126,20 @@
                 </div>
             </div>
             <div class="user-toolbar">
+                <div id="lobby-switcher" class="lobby-switcher hidden" aria-live="polite">
+                    <label for="lobby-select" class="lobby-switcher-label">Lobby</label>
+                    <div class="lobby-switcher-row">
+                        <select id="lobby-select" aria-label="Aktive Lobby"></select>
+                        <button id="share-lobby-btn" type="button" class="secondary-btn small-btn" title="Beitrittscode teilen">Teilen</button>
+                    </div>
+                    <div class="lobby-switcher-actions">
+                        <button id="create-lobby-btn" type="button" class="secondary-btn subtle-btn small-btn">Neu</button>
+                        <button id="join-lobby-btn" type="button" class="secondary-btn subtle-btn small-btn">Beitreten</button>
+                        <button id="clone-presets-btn" type="button" class="secondary-btn subtle-btn small-btn">Presets klonen</button>
+                        <button id="leave-lobby-btn" type="button" class="secondary-btn subtle-btn small-btn">Verlassen</button>
+                        <button id="delete-lobby-btn" type="button" class="secondary-btn subtle-btn small-btn danger-btn">Löschen</button>
+                    </div>
+                </div>
                 <div id="user-chip" class="user-chip hidden" aria-live="polite" aria-atomic="true">
                     <span class="user-avatar" aria-hidden="true">🎲</span>
                     <div class="user-info">

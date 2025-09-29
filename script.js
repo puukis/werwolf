@@ -1,25 +1,67 @@
 /* Rollen Geber – Client-side JS */
 
 let authManager = null;
+let lobbyManager = null;
 
 const apiClient = (() => {
   const baseUrl = '/api';
-  const storageCache = new Map();
+  let activeLobbyId = null;
+  const storageCaches = new Map();
   const inflightReads = new Map();
 
-  async function request(path, options = {}) {
-    const method = (options.method || 'GET').toUpperCase();
-    const headers = { ...(options.headers || {}) };
-    const config = { method, headers };
+  function getScopeKey(lobbyId) {
+    return Number.isInteger(lobbyId) ? `lobby:${lobbyId}` : 'owner';
+  }
 
-    if (options.body !== undefined) {
-      config.body = options.body;
+  function getScopedMap(map, lobbyId) {
+    const scopeKey = getScopeKey(lobbyId);
+    if (!map.has(scopeKey)) {
+      map.set(scopeKey, new Map());
+    }
+    return map.get(scopeKey);
+  }
+
+  function resolveLobbyId(value, { required = false } = {}) {
+    if (value === undefined || value === null || value === '') {
+      if (required) {
+        throw new Error('Es ist keine Lobby ausgewählt.');
+      }
+      return null;
+    }
+    const parsed = Math.trunc(Number(value));
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      if (required) {
+        throw new Error('Es ist keine gültige Lobby ausgewählt.');
+      }
+      return null;
+    }
+    return parsed;
+  }
+
+  function scopeKeyFromOption(value) {
+    return getScopeKey(resolveLobbyId(value, { required: false }));
+  }
+
+  async function request(path, options = {}) {
+    const { lobbyId: scopedLobbyId, requireLobby = false, ...fetchOptions } = options;
+    const method = (fetchOptions.method || 'GET').toUpperCase();
+    const headers = { ...(fetchOptions.headers || {}) };
+    const config = { ...fetchOptions, method, headers, credentials: 'include' };
+
+    if (fetchOptions.body !== undefined) {
+      config.body = fetchOptions.body;
       if (!headers['Content-Type'] && method !== 'GET' && method !== 'HEAD') {
         headers['Content-Type'] = 'application/json';
       }
     }
 
-    config.credentials = 'include';
+    const lobbyId = scopedLobbyId ?? activeLobbyId;
+    if (requireLobby || scopedLobbyId !== undefined) {
+      const resolvedLobbyId = resolveLobbyId(lobbyId, { required: requireLobby });
+      if (resolvedLobbyId !== null) {
+        headers['x-werwolf-lobby'] = String(resolvedLobbyId);
+      }
+    }
 
     let response;
     try {
@@ -84,70 +126,100 @@ const apiClient = (() => {
     return null;
   }
 
-  function cacheValue(key, value) {
-    storageCache.set(key, value ?? null);
+  function cacheValue(key, value, lobbyId = null) {
+    getScopedMap(storageCaches, lobbyId).set(key, value ?? null);
   }
 
-  function clearCaches() {
-    storageCache.clear();
+  function getCachedValue(key, lobbyId = null) {
+    const cache = getScopedMap(storageCaches, lobbyId);
+    return cache.has(key) ? cache.get(key) : null;
+  }
+
+  function clearCaches(options = {}) {
+    if (Object.prototype.hasOwnProperty.call(options, 'lobbyId')) {
+      const scopeKey = scopeKeyFromOption(options.lobbyId);
+      storageCaches.delete(scopeKey);
+      inflightReads.delete(scopeKey);
+      return;
+    }
+    storageCaches.clear();
     inflightReads.clear();
   }
 
-  async function getStorageItem(key) {
-    if (storageCache.has(key)) {
-      return storageCache.get(key);
+  async function getStorageItem(key, options = {}) {
+    const lobbyId = resolveLobbyId(options.lobbyId ?? activeLobbyId, { required: true });
+    const cache = getScopedMap(storageCaches, lobbyId);
+    if (cache.has(key)) {
+      return cache.get(key);
     }
-    if (inflightReads.has(key)) {
-      return inflightReads.get(key);
+    const inflightMap = getScopedMap(inflightReads, lobbyId);
+    if (inflightMap.has(key)) {
+      return inflightMap.get(key);
     }
 
-    const promise = request(`/storage/${encodeURIComponent(key)}`)
+    const promise = request(`/storage/${encodeURIComponent(key)}`, {
+      lobbyId,
+      requireLobby: true,
+    })
       .then((data) => {
-        const value = data && Object.prototype.hasOwnProperty.call(data, 'value')
-          ? data.value
-          : null;
-        cacheValue(key, value);
-        inflightReads.delete(key);
+        const value = data && Object.prototype.hasOwnProperty.call(data, 'value') ? data.value : null;
+        cacheValue(key, value, lobbyId);
+        inflightMap.delete(key);
         return value;
       })
       .catch((error) => {
-        inflightReads.delete(key);
+        inflightMap.delete(key);
         throw error;
       });
 
-    inflightReads.set(key, promise);
+    inflightMap.set(key, promise);
     return promise;
   }
 
-  function getCachedStorageItem(key) {
-    return storageCache.has(key) ? storageCache.get(key) : null;
+  function getCachedStorageItem(key, options = {}) {
+    const lobbyId = resolveLobbyId(options.lobbyId ?? activeLobbyId, { required: false });
+    return getCachedValue(key, lobbyId);
   }
 
-  async function setStorageItem(key, value) {
-    cacheValue(key, value);
+  async function setStorageItem(key, value, options = {}) {
+    const lobbyId = resolveLobbyId(options.lobbyId ?? activeLobbyId, { required: true });
+    cacheValue(key, value, lobbyId);
     await request(`/storage/${encodeURIComponent(key)}`, {
       method: 'PUT',
       body: JSON.stringify({ value }),
+      lobbyId,
+      requireLobby: true,
     });
     return value;
   }
 
-  async function removeStorageItem(key) {
-    storageCache.delete(key);
-    await request(`/storage/${encodeURIComponent(key)}`, { method: 'DELETE' });
+  async function removeStorageItem(key, options = {}) {
+    const lobbyId = resolveLobbyId(options.lobbyId ?? activeLobbyId, { required: true });
+    const cache = getScopedMap(storageCaches, lobbyId);
+    cache.delete(key);
+    await request(`/storage/${encodeURIComponent(key)}`, {
+      method: 'DELETE',
+      lobbyId,
+      requireLobby: true,
+    });
   }
 
-  async function prefetchStorage(keys) {
+  async function prefetchStorage(keys, options = {}) {
+    const lobbyId = resolveLobbyId(options.lobbyId ?? activeLobbyId, { required: true });
     await Promise.all(
-      keys.map((key) =>
-        getStorageItem(key).catch(() => null)
-      )
+      keys.map((key) => getStorageItem(key, { lobbyId }).catch(() => null))
     );
   }
 
   return {
     request,
     clearCaches,
+    setActiveLobby(lobbyId) {
+      activeLobbyId = resolveLobbyId(lobbyId, { required: false });
+    },
+    getActiveLobby() {
+      return activeLobbyId;
+    },
     storage: {
       getItem: getStorageItem,
       getCachedItem: getCachedStorageItem,
@@ -158,76 +230,100 @@ const apiClient = (() => {
     theme: {
       async get() {
         const data = await request('/theme');
-        return typeof data?.theme === 'string' ? data.theme : null;
+        const theme = typeof data?.theme === 'string' ? data.theme : null;
+        if (theme !== null) {
+          cacheValue('theme', theme, null);
+        }
+        return theme;
       },
       async set(theme) {
         await request('/theme', {
           method: 'PUT',
           body: JSON.stringify({ theme }),
         });
-        cacheValue('theme', theme);
+        cacheValue('theme', theme, null);
         return theme;
       },
     },
     savedNames: {
-      async get() {
-        const data = await request('/saved-names');
+      async get(options = {}) {
+        const lobbyId = resolveLobbyId(options.lobbyId ?? activeLobbyId, { required: true });
+        const data = await request('/saved-names', { lobbyId, requireLobby: true });
         const names = Array.isArray(data?.names) ? data.names : [];
-        cacheValue('werwolfSavedNames', names);
+        cacheValue('werwolfSavedNames', names, lobbyId);
         return names;
       },
-      async set(names) {
+      async set(names, options = {}) {
+        const lobbyId = resolveLobbyId(options.lobbyId ?? activeLobbyId, { required: true });
         await request('/saved-names', {
           method: 'PUT',
           body: JSON.stringify({ names }),
+          lobbyId,
+          requireLobby: true,
         });
-        cacheValue('werwolfSavedNames', names);
+        cacheValue('werwolfSavedNames', names, lobbyId);
         return names;
       },
     },
     rolePresets: {
-      async get() {
-        const data = await request('/role-presets');
+      async get(options = {}) {
+        const lobbyId = resolveLobbyId(options.lobbyId ?? activeLobbyId, { required: true });
+        const data = await request('/role-presets', { lobbyId, requireLobby: true });
         const roles = Array.isArray(data?.roles) ? data.roles : [];
-        cacheValue('werwolfSavedRoles', roles);
+        cacheValue('werwolfSavedRoles', roles, lobbyId);
         return roles;
       },
-      async set(roles) {
+      async set(roles, options = {}) {
+        const lobbyId = resolveLobbyId(options.lobbyId ?? activeLobbyId, { required: true });
         await request('/role-presets', {
           method: 'PUT',
           body: JSON.stringify({ roles }),
+          lobbyId,
+          requireLobby: true,
         });
-        cacheValue('werwolfSavedRoles', roles);
+        cacheValue('werwolfSavedRoles', roles, lobbyId);
         return roles;
       },
     },
     sessions: {
-      async list() {
-        const data = await request('/sessions');
+      async list(options = {}) {
+        const lobbyId = resolveLobbyId(options.lobbyId ?? activeLobbyId, { required: true });
+        const data = await request('/sessions', { lobbyId, requireLobby: true });
         return Array.isArray(data?.sessions) ? data.sessions : [];
       },
-      async create(session) {
+      async create(session, options = {}) {
+        const lobbyId = resolveLobbyId(options.lobbyId ?? activeLobbyId, { required: true });
         return request('/sessions', {
           method: 'POST',
           body: JSON.stringify({ session }),
+          lobbyId,
+          requireLobby: true,
         });
       },
-      async remove(timestamp) {
+      async remove(timestamp, options = {}) {
+        const lobbyId = resolveLobbyId(options.lobbyId ?? activeLobbyId, { required: true });
         await request(`/sessions/${encodeURIComponent(timestamp)}`, {
           method: 'DELETE',
+          lobbyId,
+          requireLobby: true,
         });
       },
-      async timeline(timestamp) {
+      async timeline(timestamp, options = {}) {
         if (!Number.isFinite(Number(timestamp))) {
           return null;
         }
-        const data = await request(`/sessions/${encodeURIComponent(timestamp)}/timeline`);
+        const lobbyId = resolveLobbyId(options.lobbyId ?? activeLobbyId, { required: true });
+        const data = await request(`/sessions/${encodeURIComponent(timestamp)}/timeline`, {
+          lobbyId,
+          requireLobby: true,
+        });
         return data?.timeline ?? null;
       },
     },
     analytics: {
-      async get() {
-        const data = await request('/analytics');
+      async get(options = {}) {
+        const lobbyId = resolveLobbyId(options.lobbyId ?? activeLobbyId, { required: true });
+        const data = await request('/analytics', { lobbyId, requireLobby: true });
         return data || {};
       },
     },
@@ -252,6 +348,46 @@ const apiClient = (() => {
       },
       async logout() {
         await request('/auth/logout', { method: 'POST' });
+      },
+    },
+    lobbies: {
+      async list() {
+        const data = await request('/lobbies');
+        return Array.isArray(data?.lobbies) ? data.lobbies : [];
+      },
+      async create(name) {
+        const payload = typeof name === 'string' && name.trim().length > 0 ? { name: name.trim() } : {};
+        const data = await request('/lobbies', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        return data?.lobby ?? null;
+      },
+      async join(joinCode) {
+        const data = await request('/lobbies/join', {
+          method: 'POST',
+          body: JSON.stringify({ joinCode }),
+        });
+        return data?.lobby ?? null;
+      },
+      async update(id, payload) {
+        const data = await request(`/lobbies/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload || {}),
+        });
+        return data?.lobby ?? null;
+      },
+      async rotateCode(id) {
+        const data = await request(`/lobbies/${encodeURIComponent(id)}/join-code`, {
+          method: 'POST',
+        });
+        return data?.joinCode ?? null;
+      },
+      async remove(id) {
+        await request(`/lobbies/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      },
+      async leave(id) {
+        await request(`/lobbies/${encodeURIComponent(id)}/members/me`, { method: 'DELETE' });
       },
     },
   };
@@ -450,6 +586,14 @@ function createAuthManager() {
     const shouldRefreshCaches = refreshCaches || previousId !== nextId;
     if (shouldRefreshCaches) {
       apiClient.clearCaches();
+    }
+
+    if (lobbyManager && typeof lobbyManager.onUserChange === 'function') {
+      try {
+        lobbyManager.onUserChange(currentUser);
+      } catch (error) {
+        console.error('Lobby-Manager konnte Benutzerwechsel nicht verarbeiten:', error);
+      }
     }
 
     updateUserChip();
@@ -708,6 +852,7 @@ async function initTheme() {
 
 document.addEventListener("DOMContentLoaded", async () => {
   authManager = createAuthManager();
+  lobbyManager = createLobbyManager();
   await authManager.bootstrap();
 
   try {
@@ -738,13 +883,22 @@ document.addEventListener("DOMContentLoaded", async () => {
     'werwolfLastUsed'
   ];
 
-  try {
-    await apiClient.storage.prefetch(storageKeysToPrefetch);
-  } catch (error) {
-    console.error('Persistente Werte konnten nicht geladen werden.', error);
-  }
-
   await initTheme();
+
+  let initialLobbyState = null;
+  let initialLobbyPrefetched = false;
+
+  try {
+    const snapshot = await lobbyManager.ensureReady();
+    initialLobbyState = snapshot;
+    const initialLobbyId = Number.isFinite(snapshot?.activeLobbyId) ? snapshot.activeLobbyId : null;
+    if (initialLobbyId) {
+      await apiClient.storage.prefetch(storageKeysToPrefetch, { lobbyId: initialLobbyId });
+      initialLobbyPrefetched = true;
+    }
+  } catch (error) {
+    console.error('Lobbys konnten nicht geladen werden.', error);
+  }
 
   // Sidebar elements and toggle
   const sessionsSidebar = document.getElementById('sessions-sidebar');
@@ -762,6 +916,24 @@ document.addEventListener("DOMContentLoaded", async () => {
   const analyticsMetaEl = document.getElementById('analytics-meta');
   const analyticsHighlightsEl = document.getElementById('analytics-highlights');
   const analyticsPlayerTableBody = document.getElementById('analytics-player-table-body');
+
+  const dashboardPhaseEl = document.getElementById('dashboard-phase');
+  const dashboardTeamCountsEl = document.getElementById('dashboard-team-counts');
+  const dashboardRoleCountsEl = document.getElementById('dashboard-role-counts');
+  const dashboardMayorEl = document.getElementById('dashboard-mayor');
+  const dashboardSpotlightEl = document.getElementById('dashboard-spotlights');
+  const dashboardSilencedEl = document.getElementById('dashboard-silenced');
+  const dashboardEventsEl = document.getElementById('dashboard-events');
+
+  const pauseTimersBtn = document.getElementById('admin-pause-timers-btn');
+  const skipStepBtn = document.getElementById('admin-skip-step-btn');
+  const stepBackBtn = document.getElementById('admin-step-back-btn');
+  const rollbackCheckpointBtn = document.getElementById('admin-rollback-checkpoint-btn');
+  const defaultStepBackText = stepBackBtn ? stepBackBtn.textContent : 'Zum vorherigen Schritt';
+
+  const sandboxSelect = document.getElementById('sandbox-elimination-select');
+  const sandboxSimulateBtn = document.getElementById('sandbox-simulate-btn');
+  const sandboxResultEl = document.getElementById('sandbox-result');
 
   let replayTimeline = null;
   let replayPointer = -1;
@@ -882,7 +1054,28 @@ document.addEventListener("DOMContentLoaded", async () => {
     return apiClient.storage.getCachedItem(key);
   }
 
-  function persistValue(key, value) {
+  function canEditActiveLobby() {
+    return !lobbyManager || lobbyManager.isActiveLobbyAdmin();
+  }
+
+  function ensureLobbyWriteAccess(actionDescription = 'diese Aktion auszuführen', { silent = false } = {}) {
+    if (canEditActiveLobby()) {
+      return true;
+    }
+    if (!silent) {
+      showInfoMessage({
+        title: 'Keine Berechtigung',
+        text: `Du brauchst Admin-Rechte, um ${actionDescription}.`,
+        confirmText: 'Verstanden',
+      });
+    }
+    return false;
+  }
+
+  function persistValue(key, value, { silent = false } = {}) {
+    if (!ensureLobbyWriteAccess('Einstellungen zu speichern', { silent })) {
+      return;
+    }
     apiClient.storage.setItem(key, value).catch((error) => {
       console.error(`Speichern des Schlüssels "${key}" fehlgeschlagen.`, error);
     });
@@ -1596,6 +1789,564 @@ document.addEventListener("DOMContentLoaded", async () => {
       focus,
       onConfirm: () => {}
     });
+  }
+
+  function createLobbyManager() {
+    const lobbySwitcher = document.getElementById('lobby-switcher');
+    const lobbySelect = document.getElementById('lobby-select');
+    const createLobbyBtn = document.getElementById('create-lobby-btn');
+    const joinLobbyBtn = document.getElementById('join-lobby-btn');
+    const shareLobbyBtn = document.getElementById('share-lobby-btn');
+    const deleteLobbyBtn = document.getElementById('delete-lobby-btn');
+    const leaveLobbyBtn = document.getElementById('leave-lobby-btn');
+    const clonePresetsBtn = document.getElementById('clone-presets-btn');
+
+    let lobbies = [];
+    let ready = false;
+    let loading = false;
+    let lastError = null;
+    const waiters = [];
+    const changeListeners = new Set();
+
+    const isAdminRole = (role) => role === 'owner' || role === 'admin';
+
+    function getActiveLobbyId() {
+      return apiClient.getActiveLobby();
+    }
+
+    function findLobbyById(id) {
+      return lobbies.find((lobby) => Number(lobby.id) === Number(id)) || null;
+    }
+
+    function getActiveLobby() {
+      const id = getActiveLobbyId();
+      return Number.isFinite(id) ? findLobbyById(id) : null;
+    }
+
+    function getState() {
+      return {
+        lobbies: lobbies.slice(),
+        activeLobbyId: getActiveLobbyId(),
+        activeLobby: getActiveLobby(),
+        ready,
+        error: lastError,
+      };
+    }
+
+    function notifyChange() {
+      const snapshot = getState();
+      changeListeners.forEach((handler) => {
+        try {
+          handler(snapshot);
+        } catch (error) {
+          console.error('Lobby-Listener fehlgeschlagen:', error);
+        }
+      });
+    }
+
+    function resolveWaiters() {
+      if (!ready) {
+        return;
+      }
+      while (waiters.length > 0) {
+        const resolve = waiters.shift();
+        try {
+          resolve(getState());
+        } catch (error) {
+          console.error('Lobby-Warteschlange fehlgeschlagen:', error);
+        }
+      }
+    }
+
+    function updateSelectOptions() {
+      if (!lobbySelect) {
+        return;
+      }
+      const activeId = getActiveLobbyId();
+      lobbySelect.innerHTML = '';
+      lobbies.forEach((lobby) => {
+        const option = document.createElement('option');
+        option.value = lobby.id;
+        const roleLabel = lobby.role === 'owner' ? 'Eigentümer:in' : lobby.role === 'admin' ? 'Admin' : 'Mitglied';
+        option.textContent = `${lobby.name} (${roleLabel})`;
+        if (Number(lobby.id) === Number(activeId)) {
+          option.selected = true;
+        }
+        lobbySelect.appendChild(option);
+      });
+
+      if (lobbies.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'Keine Lobby verfügbar';
+        option.disabled = true;
+        option.selected = true;
+        lobbySelect.appendChild(option);
+      }
+    }
+
+    function updateActionButtons() {
+      const activeLobby = getActiveLobby();
+      const canManage = activeLobby ? isAdminRole(activeLobby.role) : false;
+      if (shareLobbyBtn) {
+        shareLobbyBtn.disabled = !canManage || !activeLobby;
+      }
+      if (deleteLobbyBtn) {
+        deleteLobbyBtn.disabled = !activeLobby || activeLobby.role !== 'owner';
+      }
+      if (leaveLobbyBtn) {
+        leaveLobbyBtn.disabled = !activeLobby || activeLobby.role === 'owner';
+      }
+      if (clonePresetsBtn) {
+        clonePresetsBtn.disabled = !canManage || lobbies.length < 2;
+      }
+    }
+
+    function updateSwitcherVisibility() {
+      if (!lobbySwitcher) {
+        return;
+      }
+      if (!authManager.getUser()) {
+        lobbySwitcher.classList.add('hidden');
+      } else {
+        lobbySwitcher.classList.remove('hidden');
+      }
+    }
+
+    function updateUI() {
+      updateSwitcherVisibility();
+      updateSelectOptions();
+      updateActionButtons();
+    }
+
+    async function loadLobbies({ force = false } = {}) {
+      if (!authManager.getUser()) {
+        lobbies = [];
+        ready = false;
+        apiClient.setActiveLobby(null);
+        updateUI();
+        notifyChange();
+        return [];
+      }
+
+      if (loading && !force) {
+        return lobbies.slice();
+      }
+
+      loading = true;
+      try {
+        const data = await apiClient.lobbies.list();
+        lobbies = Array.isArray(data)
+          ? data.map((lobby) => ({
+              id: Number(lobby.id),
+              name: lobby.name || 'Lobby',
+              role: lobby.role || 'member',
+              joinCode: typeof lobby.joinCode === 'string' ? lobby.joinCode : null,
+              ownerId: lobby.ownerId ?? null,
+            }))
+          : [];
+        const activeId = getActiveLobbyId();
+        if (!lobbies.some((lobby) => Number(lobby.id) === Number(activeId))) {
+          const fallback = lobbies[0]?.id ?? null;
+          apiClient.setActiveLobby(fallback);
+        }
+        lastError = null;
+        ready = true;
+        updateUI();
+        notifyChange();
+        resolveWaiters();
+        return lobbies.slice();
+      } catch (error) {
+        console.error('Lobbys konnten nicht geladen werden.', error);
+        lastError = error instanceof Error ? error : new Error('Unbekannter Fehler beim Laden der Lobbys.');
+        lobbies = [];
+        apiClient.setActiveLobby(null);
+        ready = true;
+        updateUI();
+        notifyChange();
+        resolveWaiters();
+        return [];
+      } finally {
+        loading = false;
+      }
+    }
+
+    function ensureLobbySelected() {
+      const lobby = getActiveLobby();
+      if (!lobby) {
+        showInfoMessage({
+          title: 'Keine Lobby ausgewählt',
+          text: 'Erstelle oder wähle eine Lobby, um fortzufahren.',
+          confirmText: 'Okay',
+        });
+      }
+      return lobby;
+    }
+
+    function openCreateDialog() {
+      showConfirmation({
+        title: 'Neue Lobby erstellen',
+        html: `
+          <label class="modal-field">
+            <span>Wie soll deine Lobby heißen?</span>
+            <input id="new-lobby-name" type="text" placeholder="Teamname" autocomplete="off" />
+          </label>
+        `,
+        confirmText: 'Anlegen',
+        cancelText: 'Abbrechen',
+        focus: 'confirm',
+        onConfirm: async () => {
+          const input = document.getElementById('new-lobby-name');
+          const name = input ? input.value.trim() : '';
+          try {
+            const lobby = await apiClient.lobbies.create(name);
+            await loadLobbies({ force: true });
+            if (lobby?.id) {
+              apiClient.setActiveLobby(lobby.id);
+            }
+            updateUI();
+            notifyChange();
+            showInfoMessage({
+              title: 'Lobby erstellt',
+              text: `Die Lobby „${lobby?.name || name || 'Neue Lobby'}“ ist startklar.`,
+              confirmText: 'Weiter',
+            });
+          } catch (error) {
+            showInfoMessage({
+              title: 'Erstellen fehlgeschlagen',
+              text: error?.message || 'Die Lobby konnte nicht angelegt werden.',
+              confirmText: 'Okay',
+            });
+          }
+        },
+      });
+    }
+
+    function openJoinDialog() {
+      showConfirmation({
+        title: 'Lobby beitreten',
+        html: `
+          <label class="modal-field">
+            <span>Einladungscode</span>
+            <input id="join-lobby-code" type="text" placeholder="z.B. a1b2c3" autocomplete="off" />
+          </label>
+        `,
+        confirmText: 'Beitreten',
+        cancelText: 'Abbrechen',
+        focus: 'confirm',
+        onConfirm: async () => {
+          const input = document.getElementById('join-lobby-code');
+          const code = input ? input.value.trim() : '';
+          if (!code) {
+            showInfoMessage({ title: 'Kein Code', text: 'Bitte gib einen gültigen Code ein.', confirmText: 'Okay' });
+            return;
+          }
+          try {
+            const lobby = await apiClient.lobbies.join(code);
+            await loadLobbies({ force: true });
+            if (lobby?.id) {
+              apiClient.setActiveLobby(lobby.id);
+            }
+            updateUI();
+            notifyChange();
+            showInfoMessage({
+              title: 'Willkommen in der Lobby',
+              text: `Du bist der Lobby „${lobby?.name || 'Neue Lobby'}“ beigetreten.`,
+              confirmText: 'Weiter',
+            });
+          } catch (error) {
+            showInfoMessage({
+              title: 'Beitritt fehlgeschlagen',
+              text: error?.message || 'Der Code ist ungültig oder abgelaufen.',
+              confirmText: 'Okay',
+            });
+          }
+        },
+      });
+    }
+
+    async function handleShareCode() {
+      const lobby = ensureLobbySelected();
+      if (!lobby) {
+        return;
+      }
+      if (!isAdminRole(lobby.role)) {
+        showInfoMessage({
+          title: 'Keine Berechtigung',
+          text: 'Nur Admins können den Beitrittscode teilen.',
+          confirmText: 'Okay',
+        });
+        return;
+      }
+
+      let joinCode = lobby.joinCode;
+      if (!joinCode) {
+        try {
+          joinCode = await apiClient.lobbies.rotateCode(lobby.id);
+          await loadLobbies({ force: true });
+        } catch (error) {
+          showInfoMessage({
+            title: 'Code konnte nicht erstellt werden',
+            text: error?.message || 'Bitte versuche es später erneut.',
+            confirmText: 'Okay',
+          });
+          return;
+        }
+      }
+
+      try {
+        await navigator.clipboard.writeText(joinCode);
+      } catch (error) {
+        // Clipboard might not be available – ignore.
+      }
+
+      showInfoMessage({
+        title: 'Beitrittscode kopiert',
+        html: `<p>Teile diesen Code mit deinem Team:</p><p class="lobby-code">${joinCode}</p><p>Der Code wurde (falls erlaubt) in die Zwischenablage kopiert.</p>`,
+        confirmText: 'Verstanden',
+      });
+    }
+
+    function handleDeleteLobby() {
+      const lobby = ensureLobbySelected();
+      if (!lobby) {
+        return;
+      }
+      if (lobby.role !== 'owner') {
+        showInfoMessage({
+          title: 'Keine Berechtigung',
+          text: 'Nur Eigentümer:innen können die Lobby löschen.',
+          confirmText: 'Okay',
+        });
+        return;
+      }
+
+      showConfirmation({
+        title: 'Lobby wirklich löschen?',
+        text: `Die Lobby „${lobby.name}“ wird für alle entfernt. Dieser Schritt kann nicht rückgängig gemacht werden.`,
+        confirmText: 'Ja, löschen',
+        cancelText: 'Abbrechen',
+        modalClass: 'danger',
+        onConfirm: async () => {
+          try {
+            await apiClient.lobbies.remove(lobby.id);
+            await loadLobbies({ force: true });
+            updateUI();
+            notifyChange();
+          } catch (error) {
+            showInfoMessage({
+              title: 'Löschen fehlgeschlagen',
+              text: error?.message || 'Die Lobby konnte nicht gelöscht werden.',
+              confirmText: 'Okay',
+            });
+          }
+        },
+      });
+    }
+
+    function handleLeaveLobby() {
+      const lobby = ensureLobbySelected();
+      if (!lobby) {
+        return;
+      }
+      if (lobby.role === 'owner') {
+        showInfoMessage({
+          title: 'Nicht möglich',
+          text: 'Eigentümer:innen müssen die Lobby löschen oder jemand anderem übertragen.',
+          confirmText: 'Okay',
+        });
+        return;
+      }
+
+      showConfirmation({
+        title: 'Lobby verlassen?',
+        text: `Du verlässt „${lobby.name}“. Du kannst später mit einem neuen Code wieder beitreten.`,
+        confirmText: 'Verlassen',
+        cancelText: 'Abbrechen',
+        onConfirm: async () => {
+          try {
+            await apiClient.lobbies.leave(lobby.id);
+            await loadLobbies({ force: true });
+            updateUI();
+            notifyChange();
+          } catch (error) {
+            showInfoMessage({
+              title: 'Verlassen fehlgeschlagen',
+              text: error?.message || 'Bitte versuche es später erneut.',
+              confirmText: 'Okay',
+            });
+          }
+        },
+      });
+    }
+
+    async function clonePresetsBetweenLobbies(sourceId, targetId) {
+      const [names, roles] = await Promise.all([
+        apiClient.savedNames.get({ lobbyId: sourceId }),
+        apiClient.rolePresets.get({ lobbyId: sourceId }),
+      ]);
+      await Promise.all([
+        apiClient.savedNames.set(names, { lobbyId: targetId }),
+        apiClient.rolePresets.set(roles, { lobbyId: targetId }),
+      ]);
+      apiClient.clearCaches({ lobbyId: targetId });
+      notifyChange();
+    }
+
+    function handleClonePresets() {
+      if (lobbies.length < 2) {
+        showInfoMessage({
+          title: 'Zu wenige Lobbys',
+          text: 'Lege mindestens zwei Lobbys an, um Presets zu klonen.',
+          confirmText: 'Okay',
+        });
+        return;
+      }
+      const active = getActiveLobby();
+      if (!active || !isAdminRole(active.role)) {
+        showInfoMessage({
+          title: 'Keine Berechtigung',
+          text: 'Nur Admins können Presets klonen.',
+          confirmText: 'Okay',
+        });
+        return;
+      }
+
+      const options = lobbies
+        .map((lobby) => `<option value="${lobby.id}" ${Number(lobby.id) === Number(active.id) ? 'selected' : ''}>${lobby.name}</option>`)
+        .join('');
+
+      const targetOptions = lobbies
+        .map((lobby) => `<option value="${lobby.id}" ${Number(lobby.id) === Number(active.id) ? 'selected' : ''}>${lobby.name}</option>`)
+        .join('');
+
+      showConfirmation({
+        title: 'Presets klonen',
+        html: `
+          <div class="modal-field-group">
+            <label class="modal-field">
+              <span>Quelle</span>
+              <select id="clone-source">${options}</select>
+            </label>
+            <label class="modal-field">
+              <span>Ziel</span>
+              <select id="clone-target">${targetOptions}</select>
+            </label>
+          </div>
+        `,
+        confirmText: 'Klonen',
+        cancelText: 'Abbrechen',
+        onConfirm: async () => {
+          const sourceValue = Number(document.getElementById('clone-source')?.value);
+          const targetValue = Number(document.getElementById('clone-target')?.value);
+          if (!Number.isFinite(sourceValue) || !Number.isFinite(targetValue)) {
+            showInfoMessage({ title: 'Ungültige Auswahl', text: 'Bitte wähle Quelle und Ziel.', confirmText: 'Okay' });
+            return;
+          }
+          if (sourceValue === targetValue) {
+            showInfoMessage({ title: 'Gleiche Lobby', text: 'Quelle und Ziel dürfen nicht identisch sein.', confirmText: 'Okay' });
+            return;
+          }
+          const targetLobby = findLobbyById(targetValue);
+          if (!targetLobby || !isAdminRole(targetLobby.role)) {
+            showInfoMessage({ title: 'Keine Berechtigung', text: 'Das Ziel erfordert Admin-Rechte.', confirmText: 'Okay' });
+            return;
+          }
+          try {
+            await clonePresetsBetweenLobbies(sourceValue, targetValue);
+            showInfoMessage({ title: 'Presets kopiert', text: 'Namen und Rollen wurden übernommen.', confirmText: 'Super' });
+          } catch (error) {
+            showInfoMessage({
+              title: 'Klonen fehlgeschlagen',
+              text: error?.message || 'Die Presets konnten nicht übertragen werden.',
+              confirmText: 'Okay',
+            });
+          }
+        },
+      });
+    }
+
+    if (lobbySelect) {
+      lobbySelect.addEventListener('change', (event) => {
+        const value = Number(event.target.value);
+        if (Number.isFinite(value) && value > 0) {
+          apiClient.setActiveLobby(value);
+        } else {
+          apiClient.setActiveLobby(null);
+        }
+        updateActionButtons();
+        notifyChange();
+      });
+    }
+
+    if (createLobbyBtn) {
+      createLobbyBtn.addEventListener('click', () => openCreateDialog());
+    }
+
+    if (joinLobbyBtn) {
+      joinLobbyBtn.addEventListener('click', () => openJoinDialog());
+    }
+
+    if (shareLobbyBtn) {
+      shareLobbyBtn.addEventListener('click', () => handleShareCode());
+    }
+
+    if (deleteLobbyBtn) {
+      deleteLobbyBtn.addEventListener('click', () => handleDeleteLobby());
+    }
+
+    if (leaveLobbyBtn) {
+      leaveLobbyBtn.addEventListener('click', () => handleLeaveLobby());
+    }
+
+    if (clonePresetsBtn) {
+      clonePresetsBtn.addEventListener('click', () => handleClonePresets());
+    }
+
+    updateUI();
+
+    return {
+      onUserChange(user) {
+        if (!user) {
+          lobbies = [];
+          ready = false;
+          apiClient.setActiveLobby(null);
+          updateUI();
+          notifyChange();
+          return;
+        }
+        loadLobbies({ force: true }).catch((error) => {
+          console.error('Lobbys konnten nicht neu geladen werden:', error);
+        });
+      },
+      ensureReady() {
+        if (ready) {
+          return Promise.resolve(getState());
+        }
+        return new Promise((resolve) => {
+          waiters.push(resolve);
+          loadLobbies({ force: true }).catch((error) => {
+            console.error('Initiales Laden der Lobbys fehlgeschlagen:', error);
+          });
+        });
+      },
+      onChange(handler) {
+        if (typeof handler === 'function') {
+          changeListeners.add(handler);
+          handler(getState());
+        }
+        return () => changeListeners.delete(handler);
+      },
+      getActiveLobbyId,
+      getActiveLobby,
+      isActiveLobbyAdmin() {
+        const lobby = getActiveLobby();
+        return lobby ? isAdminRole(lobby.role) : false;
+      },
+      refresh() {
+        return loadLobbies({ force: true });
+      },
+    };
   }
 
   // Hide confirmation modal
@@ -2569,6 +3320,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   function persistEventEngineState() {
+    if (!canEditActiveLobby()) {
+      return;
+    }
     try {
       const payload = {
         scheduler: eventScheduler.getState(),
@@ -2579,7 +3333,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             : []
         }
       };
-      persistValue(EVENT_ENGINE_STORAGE_KEY, JSON.stringify(payload));
+      persistValue(EVENT_ENGINE_STORAGE_KEY, JSON.stringify(payload), { silent: true });
     } catch (error) {
       // Ignore persistence errors
     }
@@ -2693,6 +3447,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!eventDeckListEl) {
       return;
     }
+    const canEditDecks = canEditActiveLobby();
     const decks = eventDeckMetadata.length > 0
       ? eventDeckMetadata
       : [{ id: 'legacy', name: 'Standard', description: 'Blutmond & Phoenix Pulse' }];
@@ -2711,6 +3466,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       toggleInput.type = 'checkbox';
       toggleInput.id = `deck-toggle-${deck.id}`;
       toggleInput.checked = config.enabled !== false && Number(config.weight) > 0;
+      toggleInput.disabled = !canEditDecks;
       toggleLabel.appendChild(toggleSpan);
       toggleLabel.appendChild(toggleInput);
       entry.appendChild(toggleLabel);
@@ -2734,49 +3490,51 @@ document.addEventListener("DOMContentLoaded", async () => {
       const updateWeightDisplay = () => {
         const value = Number(slider.value);
         weightDisplay.textContent = `${value.toFixed(1)}x`;
-        slider.disabled = !toggleInput.checked;
+        slider.disabled = !canEditDecks || !toggleInput.checked;
       };
 
       updateWeightDisplay();
 
-      slider.addEventListener('input', () => {
-        const value = Number(slider.value);
-        if (!eventConfig.decks[deck.id]) {
-          eventConfig.decks[deck.id] = { enabled: toggleInput.checked, weight: value };
-        } else {
-          eventConfig.decks[deck.id].weight = value;
-        }
-        if (value <= 0) {
-          toggleInput.checked = false;
-          eventConfig.decks[deck.id].enabled = false;
-        } else if (!toggleInput.checked) {
-          toggleInput.checked = true;
-          eventConfig.decks[deck.id].enabled = true;
-        }
-        updateWeightDisplay();
-      });
+      if (canEditDecks) {
+        slider.addEventListener('input', () => {
+          const value = Number(slider.value);
+          if (!eventConfig.decks[deck.id]) {
+            eventConfig.decks[deck.id] = { enabled: toggleInput.checked, weight: value };
+          } else {
+            eventConfig.decks[deck.id].weight = value;
+          }
+          if (value <= 0) {
+            toggleInput.checked = false;
+            eventConfig.decks[deck.id].enabled = false;
+          } else if (!toggleInput.checked) {
+            toggleInput.checked = true;
+            eventConfig.decks[deck.id].enabled = true;
+          }
+          updateWeightDisplay();
+        });
 
-      slider.addEventListener('change', () => {
-        saveEventConfig();
-        renderEventCardPreview();
-      });
+        slider.addEventListener('change', () => {
+          saveEventConfig();
+          renderEventCardPreview();
+        });
 
-      toggleInput.addEventListener('change', () => {
-        if (!eventConfig.decks[deck.id]) {
-          eventConfig.decks[deck.id] = { enabled: true, weight: 1 };
-        }
-        eventConfig.decks[deck.id].enabled = toggleInput.checked;
-        if (!toggleInput.checked) {
-          slider.value = '0';
-          eventConfig.decks[deck.id].weight = 0;
-        } else if (Number(eventConfig.decks[deck.id].weight) <= 0) {
-          slider.value = '1';
-          eventConfig.decks[deck.id].weight = 1;
-        }
-        updateWeightDisplay();
-        saveEventConfig();
-        renderEventCardPreview();
-      });
+        toggleInput.addEventListener('change', () => {
+          if (!eventConfig.decks[deck.id]) {
+            eventConfig.decks[deck.id] = { enabled: true, weight: 1 };
+          }
+          eventConfig.decks[deck.id].enabled = toggleInput.checked;
+          if (!toggleInput.checked) {
+            slider.value = '0';
+            eventConfig.decks[deck.id].weight = 0;
+          } else if (Number(eventConfig.decks[deck.id].weight) <= 0) {
+            slider.value = '1';
+            eventConfig.decks[deck.id].weight = 1;
+          }
+          updateWeightDisplay();
+          saveEventConfig();
+          renderEventCardPreview();
+        });
+      }
 
       sliderWrapper.appendChild(sliderLabel);
       sliderWrapper.appendChild(slider);
@@ -2837,6 +3595,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
 
     campaignSelectEl.value = eventConfig.campaignId || '';
+    campaignSelectEl.disabled = !canEditActiveLobby();
   }
 
   function renderCampaignPreview() {
@@ -5617,7 +6376,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         setNumber(key, value) {
           try {
             const numeric = Number.isFinite(value) ? value : 0;
-            persistValue(key, String(numeric));
+            persistValue(key, String(numeric), { silent: true });
           } catch (error) {
             // Ignore storage errors
           }
@@ -5866,6 +6625,36 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   let isLoadingLastUsed = false;
 
+  function applyLobbyPermissionsToControls(canEdit) {
+    const disable = !canEdit;
+    [saveNamesBtn, saveRolesBtn, saveGameBtn].forEach((element) => {
+      if (element) {
+        element.disabled = disable;
+      }
+    });
+    if (bodyguardJobChanceInput) {
+      bodyguardJobChanceInput.disabled = disable;
+    }
+    if (doctorJobChanceInput) {
+      doctorJobChanceInput.disabled = disable;
+    }
+    if (bloodMoonChanceInput) {
+      bloodMoonChanceInput.disabled = disable;
+    }
+    if (phoenixPulseChanceInput) {
+      phoenixPulseChanceInput.disabled = disable;
+    }
+    if (eventsEnabledCheckbox) {
+      eventsEnabledCheckbox.disabled = disable;
+    }
+    if (revealDeadRolesCheckbox) {
+      revealDeadRolesCheckbox.disabled = disable;
+    }
+    if (campaignSelectEl) {
+      campaignSelectEl.disabled = disable;
+    }
+  }
+
   const roleSuggestions = {
     4: { Dorfbewohner: 2, Werwolf: 1, Seer: 1 },
     5: { Dorfbewohner: 2, Werwolf: 1, Seer: 1, Hexe: 1 },
@@ -5985,6 +6774,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
+    if (!ensureLobbyWriteAccess('Namen zu speichern')) {
+      return;
+    }
+
     await withButtonLoading(saveNamesBtn, 'Speichere …', async () => {
       try {
         await apiClient.savedNames.set(names);
@@ -6055,6 +6848,10 @@ document.addEventListener("DOMContentLoaded", async () => {
         confirmText: 'Okay',
         log: { type: 'error', label: 'Speichern der Rollen fehlgeschlagen', detail: 'Keine Rollen mit Menge > 0 ausgewählt.' }
       });
+      return;
+    }
+
+    if (!ensureLobbyWriteAccess('Rollen zu speichern')) {
       return;
     }
     await withButtonLoading(saveRolesBtn, 'Speichere …', async () => {
@@ -6932,8 +7729,114 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
+  let lobbyRefreshSequence = 0;
+  let lastLoadedLobbyId = null;
+
+  async function refreshLobbyState(snapshot, { skipPrefetch = false } = {}) {
+    lobbyRefreshSequence += 1;
+    const refreshId = lobbyRefreshSequence;
+    const ready = !!snapshot?.ready;
+    const lobbyId = Number.isFinite(snapshot?.activeLobbyId) ? snapshot.activeLobbyId : null;
+    const canEdit = snapshot?.activeLobby
+      ? snapshot.activeLobby.role === 'owner' || snapshot.activeLobby.role === 'admin'
+      : canEditActiveLobby();
+
+    applyLobbyPermissionsToControls(canEdit);
+
+    if (!ready || !lobbyId) {
+      lastLoadedLobbyId = null;
+      if (sessionsList) {
+        sessionsList.innerHTML = '<li>Keine Lobby ausgewählt.</li>';
+      }
+      updateReplaySessionOptions([]);
+      resetReplayUI();
+      if (analyticsSummaryEl) {
+        analyticsSummaryEl.textContent = 'Bitte wähle eine Lobby.';
+      }
+      if (analyticsWinratesEl) {
+        analyticsWinratesEl.innerHTML = '';
+      }
+      if (analyticsMetaEl) {
+        analyticsMetaEl.textContent = '';
+      }
+      if (analyticsHighlightsEl) {
+        analyticsHighlightsEl.innerHTML = '';
+      }
+      if (analyticsPlayerTableBody) {
+        analyticsPlayerTableBody.innerHTML = '';
+      }
+      return;
+    }
+
+    if (!skipPrefetch) {
+      apiClient.clearCaches({ lobbyId });
+      try {
+        await apiClient.storage.prefetch(storageKeysToPrefetch, { lobbyId });
+      } catch (error) {
+        console.error('Lobby-Daten konnten nicht geladen werden.', error);
+      }
+    }
+
+    if (refreshId !== lobbyRefreshSequence) {
+      return;
+    }
+
+    lastLoadedLobbyId = lobbyId;
+
+    eventConfig = loadEventConfig();
+    eventConfig.decks = sanitizeDeckConfig(eventConfig.decks || {});
+    jobConfig = loadJobConfig();
+    bloodMoonConfig = loadBloodMoonConfig();
+    phoenixPulseConfig = loadPhoenixPulseConfig();
+
+    const nextEngineState = loadEventEngineState();
+    eventEngineState = nextEngineState;
+    restoreEventEngineState(nextEngineState);
+
+    if (bloodMoonEnabledCheckbox) {
+      bloodMoonEnabledCheckbox.checked = !!eventConfig.bloodMoonEnabled;
+    }
+    if (firstNightShieldCheckbox) {
+      firstNightShieldCheckbox.checked = eventConfig.firstNightShield !== false;
+    }
+    if (phoenixPulseEnabledCheckbox) {
+      phoenixPulseEnabledCheckbox.checked = !!eventConfig.phoenixPulseEnabled;
+    }
+
+    updateBodyguardChanceUI(jobConfig.bodyguardChance * 100, { save: false });
+    updateDoctorChanceUI(jobConfig.doctorChance * 100, { save: false });
+    setBloodMoonBaseChance(bloodMoonConfig.baseChance * 100, { save: false });
+    setPhoenixPulseChance((phoenixPulseConfig.chance || 0) * 100, { save: false });
+
+    const savedEventsEnabled = getPersistedValue('eventsEnabled');
+    if (eventsEnabledCheckbox) {
+      eventsEnabledCheckbox.checked = savedEventsEnabled !== null ? savedEventsEnabled === 'true' : true;
+    }
+
+    const savedRevealDeadRoles = getPersistedValue('revealDeadRoles');
+    if (revealDeadRolesCheckbox) {
+      revealDeadRolesCheckbox.checked = savedRevealDeadRoles !== null ? savedRevealDeadRoles === 'true' : false;
+    }
+
+    renderEventDeckControls();
+    renderEventCardPreview();
+    renderCampaignSelect();
+    renderCampaignPreview();
+    applyGlobalEventsEnabledState();
+    updateBloodMoonOdds();
+
+    await loadSessions();
+    if (refreshId !== lobbyRefreshSequence) {
+      return;
+    }
+    await loadAnalytics();
+  }
+
   // Session Management
   async function saveSession() {
+    if (!ensureLobbyWriteAccess('Sessions zu speichern')) {
+      return null;
+    }
     const roleCounts = rolesAssigned.reduce((acc, role) => {
       acc[role] = (acc[role] || 0) + 1;
       return acc;
@@ -7050,6 +7953,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     sessionsList.innerHTML = '';
 
+    const canManageSessions = !lobbyManager || lobbyManager.isActiveLobbyAdmin();
+
     sessions.forEach(session => {
       const li = document.createElement('li');
       const date = new Date(session.timestamp).toLocaleString('de-DE');
@@ -7058,7 +7963,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       li.innerHTML = `
         <div class="session-date">${date}</div>
         <div class="session-players">${playerNames}</div>
-        <button class="delete-session-btn" data-timestamp="${session.timestamp}">&times;</button>
+        ${canManageSessions ? `<button class="delete-session-btn" data-timestamp="${session.timestamp}">&times;</button>` : ''}
       `;
 
       li.addEventListener('click', (e) => {
@@ -7073,17 +7978,18 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     updateReplaySessionOptions(sessions);
 
-    // Add delete functionality
-    document.querySelectorAll('.delete-session-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const timestamp = Number(e.target.dataset.timestamp);
-        if (!Number.isFinite(timestamp)) {
-          return;
-        }
-        deleteSession(timestamp);
+    if (canManageSessions) {
+      document.querySelectorAll('.delete-session-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const timestamp = Number(e.target.dataset.timestamp);
+          if (!Number.isFinite(timestamp)) {
+            return;
+          }
+          deleteSession(timestamp);
+        });
       });
-    });
+    }
 
     return sessions;
   }
@@ -7339,6 +8245,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   async function deleteSession(timestamp) {
+    if (!ensureLobbyWriteAccess('Sessions zu löschen')) {
+      return;
+    }
     try {
       await apiClient.sessions.remove(timestamp);
       await loadSessions();
@@ -7709,27 +8618,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   const macroDescriptionEl = document.getElementById('admin-macro-description');
   const defaultMacroDescription = macroDescriptionEl ? macroDescriptionEl.textContent : '';
 
-  await loadSessions();
-  await loadAnalytics();
-
-  const narratorDashboard = document.getElementById('narrator-dashboard');
-  const dashboardPhaseEl = document.getElementById('dashboard-phase');
-  const dashboardTeamCountsEl = document.getElementById('dashboard-team-counts');
-  const dashboardRoleCountsEl = document.getElementById('dashboard-role-counts');
-  const dashboardMayorEl = document.getElementById('dashboard-mayor');
-  const dashboardSpotlightEl = document.getElementById('dashboard-spotlights');
-  const dashboardSilencedEl = document.getElementById('dashboard-silenced');
-  const dashboardEventsEl = document.getElementById('dashboard-events');
-
-  const pauseTimersBtn = document.getElementById('admin-pause-timers-btn');
-  const skipStepBtn = document.getElementById('admin-skip-step-btn');
-  const stepBackBtn = document.getElementById('admin-step-back-btn');
-  const rollbackCheckpointBtn = document.getElementById('admin-rollback-checkpoint-btn');
-  const defaultStepBackText = stepBackBtn ? stepBackBtn.textContent : 'Zum vorherigen Schritt';
-
-  const sandboxSelect = document.getElementById('sandbox-elimination-select');
-  const sandboxSimulateBtn = document.getElementById('sandbox-simulate-btn');
-  const sandboxResultEl = document.getElementById('sandbox-result');
+  await refreshLobbyState(initialLobbyState, { skipPrefetch: initialLobbyPrefetched });
+  if (lobbyManager && typeof lobbyManager.onChange === 'function') {
+    lobbyManager.onChange((snapshot) => {
+      refreshLobbyState(snapshot).catch((error) => {
+        console.error('Lobby-Wechsel konnte nicht verarbeitet werden.', error);
+      });
+    });
+  }
 
   function getLivingPlayers() {
     return players.filter(player => !deadPlayers.includes(player));
@@ -9211,7 +10107,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         label: '🌕 Blutmond (manuell)',
         expiresAfterNight: nightCounter + 1
       });
-      persistValue('bloodMoonPityTimer', '0');
+      persistValue('bloodMoonPityTimer', '0', { silent: true });
       persistEventEngineState();
       renderNarratorDashboard();
 
@@ -9235,7 +10131,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             label: '🌕 Blutmond (manuell)',
             expiresAfterNight: nightCounter + 1
           });
-          persistValue('bloodMoonPityTimer', '0');
+          persistValue('bloodMoonPityTimer', '0', { silent: true });
           persistEventEngineState();
           renderNarratorDashboard();
         }
