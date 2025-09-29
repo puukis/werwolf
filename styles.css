@@ -1297,6 +1297,38 @@ body.auth-locked {
   line-height: 1.4;
 }
 
+.role-info-desc {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--text-color);
+}
+
+.role-info-section-title {
+  font-weight: 600;
+  color: var(--text-color);
+  letter-spacing: 0.01em;
+}
+
+.role-info-abilities {
+  margin: 0.25rem 0 0 1.1rem;
+  padding: 0;
+  list-style: disc;
+  color: var(--text-light);
+}
+
+.role-info-abilities li {
+  margin-bottom: 0.35rem;
+}
+
+.role-info-jobs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
 .setup-container {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -3298,6 +3330,161 @@ body.phoenix-pulse-charged .container::before {
 .admin-section select,
 .admin-section button {
   width: 100%;
+}
+
+.role-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.role-editor-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+}
+
+.role-editor-card {
+  background: var(--container-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 1rem;
+  box-shadow: var(--glass-shadow-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.role-editor-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.role-editor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.role-editor-role,
+.role-editor-job {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 0.75rem;
+  background: var(--glass-panel-bg);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.role-editor-role input[type="text"],
+.role-editor-job input[type="text"],
+.role-editor-role textarea,
+.role-editor-job textarea,
+.role-editor-step textarea {
+  width: 100%;
+}
+
+.role-editor-role textarea,
+.role-editor-job textarea,
+.role-editor-step textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.role-editor-role-jobs,
+.role-editor-job-targets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.role-editor-role-jobs label,
+.role-editor-job-targets label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 999px;
+  background: var(--button-secondary-bg);
+  font-size: 0.85rem;
+}
+
+.role-editor-night-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.role-editor-night-empty {
+  padding: 0.75rem;
+  border: 1px dashed var(--border-color);
+  border-radius: 10px;
+  text-align: center;
+  font-size: 0.9rem;
+  color: var(--text-light);
+  background: var(--glass-panel-bg);
+}
+
+.role-editor-step {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--glass-panel-bg);
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.role-editor-step-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.role-editor-step-header input[type="text"] {
+  flex: 1;
+}
+
+.role-editor-step .drag-handle {
+  cursor: grab;
+  user-select: none;
+  font-size: 1.1rem;
+}
+
+.role-editor-step.dragging {
+  opacity: 0.6;
+}
+
+.role-editor-conditions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.role-editor-conditions label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.role-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.role-editor-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-light);
 }
 
 .ambience-section .ambience-controls {

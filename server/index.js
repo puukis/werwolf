@@ -1,5 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const runMigrations = require('./migrate');
 const { query } = require('./db');
 
@@ -17,6 +19,10 @@ const baseCookieOptions = {
   secure: isProduction,
   path: '/',
 };
+
+const ROLE_SCHEMA_KEY = 'werwolfRoleSchema';
+const defaultRoleSchemaPath = path.join(__dirname, '..', 'data', 'roles.json');
+let defaultRoleSchemaCache = null;
 
 function parseCookies(headerValue) {
   if (!headerValue || typeof headerValue !== 'string') {
@@ -265,6 +271,196 @@ async function removeSetting(key) {
   await query('DELETE FROM kv_store WHERE key = $1', [key]);
 }
 
+function cloneJson(value) {
+  return value === null || value === undefined ? null : JSON.parse(JSON.stringify(value));
+}
+
+function toTrimmedString(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.trim();
+}
+
+function uniqueStrings(list) {
+  if (!Array.isArray(list)) {
+    return [];
+  }
+  const seen = new Set();
+  const result = [];
+  list.forEach((entry) => {
+    const trimmed = toTrimmedString(entry);
+    if (!trimmed) {
+      return;
+    }
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    result.push(trimmed);
+  });
+  return result;
+}
+
+function normalizeRoleSchema(input) {
+  const data = input && typeof input === 'object' ? cloneJson(input) : {};
+
+  const rawCategories = Array.isArray(data.categories) ? data.categories : [];
+  const categories = [];
+  const categorySeen = new Set();
+  rawCategories.forEach((cat) => {
+    const id = toTrimmedString(cat?.id || cat?.name || cat);
+    if (!id) {
+      return;
+    }
+    const key = id.toLowerCase();
+    if (categorySeen.has(key)) {
+      return;
+    }
+    categorySeen.add(key);
+    const label = toTrimmedString(cat?.label) || id;
+    categories.push({ id, label });
+  });
+
+  if (categories.length === 0) {
+    categories.push({ id: 'village', label: 'Dorfbewohner' });
+    categories.push({ id: 'werwolf', label: 'Werwölfe' });
+    categories.push({ id: 'special', label: 'Sonderrollen' });
+  }
+
+  const defaultCategory = categories[0]?.id || 'special';
+  const validCategoryIds = new Set(categories.map((cat) => cat.id));
+
+  const rawRoles = Array.isArray(data.roles) ? data.roles : [];
+  const roles = [];
+  const roleSeen = new Set();
+  rawRoles.forEach((role) => {
+    const name = toTrimmedString(role?.name || role);
+    if (!name) {
+      return;
+    }
+    const key = name.toLowerCase();
+    if (roleSeen.has(key)) {
+      return;
+    }
+    roleSeen.add(key);
+    const category = validCategoryIds.has(role?.category) ? role.category : defaultCategory;
+    const description = toTrimmedString(role?.description);
+    const abilities = uniqueStrings(role?.abilities);
+    roles.push({ name, category, description, abilities });
+  });
+
+  const roleNames = roles.map((role) => role.name);
+  const roleNameSet = new Set(roleNames.map((name) => name.toLowerCase()));
+
+  const rawJobs = Array.isArray(data.jobs) ? data.jobs : [];
+  const jobs = [];
+  const jobSeen = new Set();
+  rawJobs.forEach((job) => {
+    const name = toTrimmedString(job?.name || job);
+    if (!name) {
+      return;
+    }
+    const key = name.toLowerCase();
+    if (jobSeen.has(key)) {
+      return;
+    }
+    jobSeen.add(key);
+    const description = toTrimmedString(job?.description);
+    const eligibleRoles = uniqueStrings(job?.eligibleRoles).filter((roleName) =>
+      roleNameSet.has(roleName.toLowerCase())
+    );
+    jobs.push({ name, description, eligibleRoles });
+  });
+
+  const allowedStepConditions = new Set(['firstNightOnly', 'requiresDoctorTargets']);
+
+  const rawNightSequence = data?.night && typeof data.night === 'object'
+    ? Array.isArray(data.night.sequence) ? data.night.sequence : []
+    : [];
+  const nightSequence = rawNightSequence.map((step) => {
+    const id = toTrimmedString(step?.id || step?.name || step);
+    const prompt = toTrimmedString(step?.prompt) || (id ? `${id} ist an der Reihe.` : 'Nachtaktion');
+    const requires = step && typeof step === 'object' ? step.requires : null;
+    const requiredRoles = uniqueStrings(requires?.roles).filter((roleName) =>
+      roleNameSet.has(roleName.toLowerCase())
+    );
+    const requiredJobs = uniqueStrings(requires?.jobs);
+    const phase = toTrimmedString(step?.phase) || 'night';
+    const conditions = {};
+    if (step && typeof step.conditions === 'object') {
+      allowedStepConditions.forEach((key) => {
+        if (typeof step.conditions[key] === 'boolean') {
+          conditions[key] = step.conditions[key];
+        }
+      });
+    }
+    return {
+      id: id || `step-${Math.random().toString(36).slice(2, 8)}`,
+      prompt,
+      requires: {
+        roles: requiredRoles,
+        jobs: requiredJobs,
+      },
+      phase,
+      conditions,
+    };
+  });
+
+  const version = Number.isFinite(Number(data.version)) ? Number(data.version) : 1;
+
+  return {
+    version,
+    categories,
+    roles,
+    jobs,
+    night: {
+      sequence: nightSequence,
+    },
+  };
+}
+
+async function loadDefaultRoleSchema() {
+  if (defaultRoleSchemaCache) {
+    return cloneJson(defaultRoleSchemaCache);
+  }
+  try {
+    const raw = await fs.promises.readFile(defaultRoleSchemaPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    defaultRoleSchemaCache = normalizeRoleSchema(parsed);
+    return cloneJson(defaultRoleSchemaCache);
+  } catch (error) {
+    console.error('Standard-Rollenschema konnte nicht geladen werden:', error);
+    defaultRoleSchemaCache = normalizeRoleSchema({});
+    return cloneJson(defaultRoleSchemaCache);
+  }
+}
+
+async function getStoredRoleSchema() {
+  const value = await getSetting(ROLE_SCHEMA_KEY);
+  if (!value) {
+    return null;
+  }
+  return normalizeRoleSchema(value);
+}
+
+async function getEffectiveRoleSchema() {
+  const stored = await getStoredRoleSchema();
+  if (stored) {
+    return { config: stored, source: 'custom' };
+  }
+  const fallback = await loadDefaultRoleSchema();
+  return { config: fallback, source: 'default' };
+}
+
+async function saveRoleSchema(schema) {
+  const normalized = normalizeRoleSchema(schema);
+  normalized.updatedAt = new Date().toISOString();
+  await setSetting(ROLE_SCHEMA_KEY, normalized);
+  return cloneJson(normalized);
+}
+
 app.get('/api/auth/me', (req, res) => {
   if (!req.user) {
     return res.json({ user: null });
@@ -452,6 +648,51 @@ app.put('/api/role-presets', async (req, res) => {
     res.json({ roles });
   } catch (error) {
     res.status(500).json({ error: 'Gespeicherte Rollen konnten nicht abgelegt werden.' });
+  }
+});
+
+app.get('/api/roles-config', async (req, res) => {
+  try {
+    const { config, source } = await getEffectiveRoleSchema();
+    res.json({ config, source });
+  } catch (error) {
+    console.error('Rollenkonfiguration konnte nicht geladen werden:', error);
+    res.status(500).json({ error: 'Rollenkonfiguration konnte nicht geladen werden.' });
+  }
+});
+
+async function handleRolesConfigUpdate(req, res, { statusOnCreate = 200 } = {}) {
+  try {
+    const payload = req.body && typeof req.body === 'object'
+      ? (req.body.config ?? req.body)
+      : null;
+    if (!payload || typeof payload !== 'object') {
+      return res.status(400).json({ error: 'Ungültige Rollenkonfiguration.' });
+    }
+    const saved = await saveRoleSchema(payload);
+    res.status(statusOnCreate).json({ config: saved, source: 'custom' });
+  } catch (error) {
+    console.error('Rollenkonfiguration konnte nicht gespeichert werden:', error);
+    res.status(500).json({ error: 'Rollenkonfiguration konnte nicht gespeichert werden.' });
+  }
+  return null;
+}
+
+app.post('/api/roles-config', async (req, res) => {
+  await handleRolesConfigUpdate(req, res, { statusOnCreate: 201 });
+});
+
+app.put('/api/roles-config', async (req, res) => {
+  await handleRolesConfigUpdate(req, res, { statusOnCreate: 200 });
+});
+
+app.delete('/api/roles-config', async (req, res) => {
+  try {
+    await removeSetting(ROLE_SCHEMA_KEY);
+    res.status(204).end();
+  } catch (error) {
+    console.error('Rollenkonfiguration konnte nicht zurückgesetzt werden:', error);
+    res.status(500).json({ error: 'Rollenkonfiguration konnte nicht zurückgesetzt werden.' });
   }
 });
 
