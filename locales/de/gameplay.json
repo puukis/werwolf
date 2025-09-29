@@ -1,0 +1,187 @@
+{
+  "meta": {
+    "locale": "de",
+    "fallback": "de"
+  },
+  "roles": {
+    "Dorfbewohner": {
+      "displayName": { "other": "Dorfbewohner" },
+      "category": "village",
+      "description": { "other": "Gewinnt, wenn alle Werwölfe eliminiert sind." },
+      "abilities": []
+    },
+    "Seer": {
+      "displayName": { "other": "Seher:in" },
+      "category": "village",
+      "description": { "other": "Kann jede Nacht die Rolle eines Spielers sehen." },
+      "abilities": [
+        { "id": "seer.vision", "text": { "other": "Sieht jede Nacht eine Spielerrolle." } }
+      ]
+    },
+    "Jäger": {
+      "displayName": { "male": "Jäger", "female": "Jägerin", "other": "Jäger:in" },
+      "category": "village",
+      "description": { "other": "Darf vor seinem Tod einen Spieler erschießen." },
+      "abilities": [
+        { "id": "hunter.retal", "text": { "other": "Kann beim Tod eine Person mitreißen." } }
+      ]
+    },
+    "Hexe": {
+      "displayName": { "other": "Hexe" },
+      "category": "village",
+      "description": { "other": "Hat einen Heil- und einen Gifttrank." },
+      "abilities": [
+        { "id": "witch.heal", "text": { "other": "Ein Heiltrank" } },
+        { "id": "witch.poison", "text": { "other": "Ein Gifttrank" } }
+      ]
+    },
+    "Stumme Jule": {
+      "displayName": { "other": "Stumme Jule" },
+      "category": "village",
+      "description": { "other": "Wählt jede Nacht jemanden, der bis zum nächsten Tag nicht reden darf." },
+      "abilities": [
+        { "id": "mute.choice", "text": { "other": "Schweigt eine Person pro Nacht" } }
+      ]
+    },
+    "Inquisitor": {
+      "displayName": { "other": "Inquisitor" },
+      "category": "village",
+      "description": { "other": "Kann jede Nacht prüfen, ob jemand zur Werwolf-Fraktion gehört." },
+      "abilities": [
+        { "id": "inquisitor.check", "text": { "other": "Prüft eine Person pro Nacht" } }
+      ]
+    },
+    "Sündenbock": {
+      "displayName": { "other": "Sündenbock" },
+      "category": "village",
+      "description": { "other": "Wird bei einem Gleichstand gelyncht." },
+      "abilities": [
+        { "id": "scapegoat.tie", "text": { "other": "Opfert sich bei Stimmengleichstand" } }
+      ]
+    },
+    "Geschwister": {
+      "displayName": { "other": "Geschwister" },
+      "category": "village",
+      "description": { "other": "Zwei Dorfbewohner, die sich gegenseitig kennen." },
+      "abilities": [
+        { "id": "siblings.know", "text": { "other": "Erkennen Geschwister in der ersten Nacht" } }
+      ]
+    },
+    "Geist": {
+      "displayName": { "other": "Geist" },
+      "category": "village",
+      "description": { "other": "Kann nach seinem Tod eine Nachricht senden." },
+      "abilities": [
+        { "id": "ghost.message", "text": { "other": "Sendet nach dem Tod eine Nachricht" } }
+      ]
+    },
+    "Werwolf": {
+      "displayName": { "other": "Werwolf" },
+      "category": "werwolf",
+      "description": { "other": "Gewinnt, wenn sie alle Dorfbewohner eliminieren." },
+      "abilities": [
+        { "id": "wolf.hunt", "text": { "other": "Eliminieren nachts gemeinsam" } }
+      ]
+    },
+    "Verfluchte": {
+      "displayName": { "other": "Verfluchte" },
+      "category": "werwolf",
+      "description": { "other": "Startet als Dorfbewohner und wird bei einem Angriff der Werwölfe selbst zum Werwolf." },
+      "abilities": [
+        { "id": "cursed.swap", "text": { "other": "Wechselt bei Werwolf-Angriff die Seite" } }
+      ]
+    },
+    "Amor": {
+      "displayName": { "other": "Amor" },
+      "category": "special",
+      "description": { "other": "Verknüpft zwei Liebende, die gemeinsam gewinnen." },
+      "abilities": [
+        { "id": "amor.link", "text": { "other": "Verbindet zwei Liebende" } }
+      ]
+    },
+    "Trickster": {
+      "displayName": { "other": "Trickster" },
+      "category": "special",
+      "description": { "other": "Gewinnt, wenn er gelyncht wird, bevor die Werwölfe gewinnen." },
+      "abilities": [
+        { "id": "trickster.lynch", "text": { "other": "Gewinnt beim eigenen Lynch" } }
+      ]
+    },
+    "Henker": {
+      "displayName": { "other": "Henker" },
+      "category": "special",
+      "description": { "other": "Gewinnt, wenn sein geheimes Ziel vom Dorf gelyncht wird. Spielt für sich allein." },
+      "abilities": [
+        { "id": "executioner.target", "text": { "other": "Erfährt ein geheimes Ziel" } }
+      ]
+    },
+    "Friedenstifter": {
+      "displayName": { "other": "Friedenstifter" },
+      "category": "special",
+      "description": { "other": "Gewinnt, wenn für zwei aufeinanderfolgende Runden niemand stirbt." },
+      "abilities": [
+        { "id": "pacifist.streak", "text": { "other": "Gewinnt nach zwei friedlichen Runden" } }
+      ]
+    },
+    "Michael Jackson": {
+      "displayName": { "other": "Michael Jackson" },
+      "category": "special",
+      "description": { "other": "Dorfbewohner-Sonderrolle: Ab der ersten Beschuldigung zählt seine Stimme doppelt, bei der zweiten Beschuldigung stirbt er sofort." },
+      "abilities": [
+        { "id": "mj.doubleVote", "text": { "other": "Stimme zählt doppelt nach erster Beschuldigung" } },
+        { "id": "mj.secondAccuse", "text": { "other": "Stirbt bei zweiter Beschuldigung" } }
+      ]
+    }
+  },
+  "jobs": {
+    "Bodyguard": {
+      "displayName": { "other": "Bodyguard" },
+      "description": { "other": "Wählt jede Nacht eine Person und schützt sie vor Angriffen der Werwölfe." }
+    },
+    "Doctor": {
+      "displayName": { "other": "Arzt" },
+      "description": { "other": "Wacht nach einer blutigen Nacht auf und kann eine der Opferpersonen zurück ins Leben holen." }
+    }
+  },
+  "events": {
+    "blood-moon": {
+      "label": { "other": "🌕 Blutmond" },
+      "description": { "other": "Der Mond färbt sich rot – die Werwölfe dürfen ein zweites Opfer wählen." },
+      "log": {
+        "label": { "other": "Blutmond steigt auf" },
+        "detail": { "other": "Die Werwölfe dürfen in dieser Nacht zwei Opfer wählen." }
+      },
+      "note": { "other": "Die Werwölfe wählen zwei Opfer." },
+      "preview": { "other": "Werwölfe wählen zwei Opfer." }
+    },
+    "phoenix-pulse": {
+      "label": { "other": "🔥 Phoenix Pulse" },
+      "description": { "other": "Eine uralte Energie lodert durch das Dorf – Nachtopfer werden wiederbelebt." },
+      "log": {
+        "label": { "other": "Phoenix Pulse geladen" },
+        "detail": { "other": "Die Phoenix Pulse lädt und wird bei Tagesanbruch explodieren." }
+      },
+      "note": { "other": "Nachtopfer werden am Morgen wiederbelebt." },
+      "message": { "other": "<br><strong>🔥 Phoenix Pulse:</strong> Eine uralte Energie sammelt sich in dieser Nacht." },
+      "preview": { "other": "Nachtopfer kehren bei Tagesanbruch zurück." }
+    }
+  },
+  "logs": {
+    "bodyguard.saved": {
+      "label": { "other": "Bodyguard Rettung" },
+      "detail": { "other": "{player}" }
+    },
+    "doctor.skipped": {
+      "label": { "other": "Arzt verzichtet" },
+      "detail": { "other": "Keine Heilung gewählt" }
+    },
+    "doctor.healed": {
+      "label": { "other": "Arzt heilt" },
+      "detail": { "other": "{player}" }
+    },
+    "doctor.alive": {
+      "label": { "other": "Arzt vergeblich" },
+      "detail": { "other": "{player} war bereits am Leben" }
+    }
+  }
+}

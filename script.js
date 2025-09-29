@@ -233,6 +233,19 @@ const apiClient = (() => {
         return theme;
       },
     },
+    locale: {
+      async get() {
+        const data = await request('/locale');
+        return data || {};
+      },
+      async set(preference) {
+        const payload = preference === undefined ? {} : { preference };
+        return request('/locale', {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        });
+      },
+    },
     savedNames: {
       async get() {
         const data = await request('/saved-names');
@@ -420,6 +433,558 @@ const apiClient = (() => {
   };
 })();
 
+const localization = (() => {
+  const DEFAULT_LOCALE = 'de';
+  const SUPPORTED_LOCALES = new Set(['de', 'en']);
+  const LOCALE_STORAGE_KEY = 'werwolfLocalePreference';
+  const catalogs = new Map();
+  const listeners = new Set();
+  const pluralRules = new Map();
+  let activeLocale = DEFAULT_LOCALE;
+  let fallbackLocale = DEFAULT_LOCALE;
+  let preference = 'system';
+  let initPromise = null;
+  let hasInitialized = false;
+
+  function normalizeLocale(value) {
+    if (typeof value !== 'string') {
+      return null;
+    }
+    const trimmed = value.trim().toLowerCase();
+    if (!trimmed) {
+      return null;
+    }
+    if (SUPPORTED_LOCALES.has(trimmed)) {
+      return trimmed;
+    }
+    const parts = trimmed.split('-');
+    if (parts.length > 1 && SUPPORTED_LOCALES.has(parts[0])) {
+      return parts[0];
+    }
+    return null;
+  }
+
+  function normalizePreference(value) {
+    if (value === null || value === undefined) {
+      return 'system';
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim().toLowerCase();
+      if (trimmed === 'system' || trimmed === '') {
+        return 'system';
+      }
+      const normalized = normalizeLocale(trimmed);
+      if (normalized) {
+        return normalized;
+      }
+    }
+    return null;
+  }
+
+  function detectPreferredLocale() {
+    if (typeof process !== 'undefined' && process?.env?.NODE_ENV === 'test') {
+      return DEFAULT_LOCALE;
+    }
+    if (typeof navigator !== 'undefined') {
+      if (typeof navigator.userAgent === 'string' && navigator.userAgent.includes('jsdom')) {
+        return DEFAULT_LOCALE;
+      }
+      const candidates = Array.isArray(navigator.languages)
+        ? navigator.languages
+        : (navigator.language ? [navigator.language] : []);
+      for (const candidate of candidates) {
+        const normalized = normalizeLocale(candidate);
+        if (normalized) {
+          return normalized;
+        }
+      }
+    }
+    return DEFAULT_LOCALE;
+  }
+
+  function getNestedValue(target, key) {
+    if (!target || typeof key !== 'string') {
+      return undefined;
+    }
+    return key.split('.').reduce((acc, part) => {
+      if (acc && Object.prototype.hasOwnProperty.call(acc, part)) {
+        return acc[part];
+      }
+      return undefined;
+    }, target);
+  }
+
+  function getLocaleChain() {
+    const chain = [activeLocale];
+    if (fallbackLocale && fallbackLocale !== activeLocale) {
+      chain.push(fallbackLocale);
+    }
+    return chain;
+  }
+
+  async function fetchJson(path) {
+    if (typeof fetch !== 'function') {
+      return null;
+    }
+    try {
+      const response = await fetch(path, { cache: 'no-store' });
+      if (!response.ok) {
+        return null;
+      }
+      return await response.json();
+    } catch (error) {
+      console.error(`Lokalisierungsdatei ${path} konnte nicht geladen werden.`, error);
+      return null;
+    }
+  }
+
+  async function ensureCatalog(locale) {
+    if (!locale || catalogs.has(locale)) {
+      return catalogs.get(locale) || null;
+    }
+    const [messages, gameplay] = await Promise.all([
+      fetchJson(`/locales/${encodeURIComponent(locale)}/messages.json`),
+      fetchJson(`/locales/${encodeURIComponent(locale)}/gameplay.json`)
+    ]);
+    const catalog = {
+      messages: messages?.messages || {},
+      gameplay: gameplay || {}
+    };
+    catalogs.set(locale, catalog);
+    return catalog;
+  }
+
+  function getPluralRules(locale) {
+    if (!pluralRules.has(locale)) {
+      try {
+        pluralRules.set(locale, new Intl.PluralRules(locale));
+      } catch (error) {
+        pluralRules.set(locale, new Intl.PluralRules(DEFAULT_LOCALE));
+      }
+    }
+    return pluralRules.get(locale);
+  }
+
+  function formatPlaceholders(template, params) {
+    if (!template || typeof template !== 'string') {
+      return template;
+    }
+    if (!params || typeof params !== 'object') {
+      return template;
+    }
+    return template.replace(/\{(\w+)\}/g, (match, token) => {
+      if (Object.prototype.hasOwnProperty.call(params, token)) {
+        const value = params[token];
+        return value === undefined || value === null ? '' : String(value);
+      }
+      return match;
+    });
+  }
+
+  function selectVariant(entry, params, locale) {
+    if (entry === null || entry === undefined) {
+      return null;
+    }
+    if (typeof entry === 'string') {
+      return entry;
+    }
+    if (typeof entry !== 'object') {
+      return null;
+    }
+
+    const { count, gender } = params || {};
+    let candidate = null;
+
+    if (typeof count === 'number') {
+      const rules = getPluralRules(locale);
+      const category = rules.select(count);
+      if (Object.prototype.hasOwnProperty.call(entry, category)) {
+        candidate = entry[category];
+      }
+      if (candidate === null || candidate === undefined) {
+        candidate = entry.other;
+      }
+    }
+
+    if ((candidate === null || candidate === undefined) && typeof gender === 'string') {
+      const normalizedGender = gender.toLowerCase();
+      if (Object.prototype.hasOwnProperty.call(entry, normalizedGender)) {
+        candidate = entry[normalizedGender];
+      }
+      if (candidate === null || candidate === undefined) {
+        candidate = entry.other;
+      }
+    }
+
+    if (candidate === null || candidate === undefined) {
+      candidate = entry.other !== undefined ? entry.other : null;
+    }
+
+    if (candidate && typeof candidate === 'object') {
+      return selectVariant(candidate, params, locale);
+    }
+
+    return candidate || null;
+  }
+
+  function formatMessageForLocale(locale, key, params) {
+    if (!locale || !key) {
+      return null;
+    }
+    const catalog = catalogs.get(locale);
+    if (!catalog) {
+      return null;
+    }
+    const raw = getNestedValue(catalog.messages, key);
+    if (raw === null || raw === undefined) {
+      return null;
+    }
+    const variant = selectVariant(raw, params, locale);
+    if (typeof variant !== 'string') {
+      return null;
+    }
+    return formatPlaceholders(variant, params);
+  }
+
+  function resolveGameplayEntry(type, id) {
+    if (!id || !type) {
+      return null;
+    }
+    const chain = getLocaleChain();
+    for (const locale of chain) {
+      const catalog = catalogs.get(locale);
+      const entry = catalog?.gameplay?.[type]?.[id];
+      if (entry) {
+        return { locale, entry };
+      }
+    }
+    return null;
+  }
+
+  function formatGameplayString(type, id, field, params) {
+    const resolved = resolveGameplayEntry(type, id);
+    if (!resolved) {
+      return null;
+    }
+    const value = resolved.entry?.[field];
+    const variant = selectVariant(value, params, resolved.locale);
+    if (typeof variant !== 'string') {
+      return null;
+    }
+    return formatPlaceholders(variant, params);
+  }
+
+  function getRoleDisplayName(roleName, params = {}) {
+    const formatted = formatGameplayString('roles', roleName, 'displayName', params);
+    return formatted || roleName;
+  }
+
+  function getRoleDescription(roleName, params = {}) {
+    return formatGameplayString('roles', roleName, 'description', params);
+  }
+
+  function getRoleAbilities(roleName, params = {}) {
+    const resolved = resolveGameplayEntry('roles', roleName);
+    if (!resolved) {
+      return [];
+    }
+    const abilities = Array.isArray(resolved.entry?.abilities) ? resolved.entry.abilities : [];
+    return abilities
+      .map((ability) => selectVariant(ability?.text, params, resolved.locale))
+      .filter((text) => typeof text === 'string' && text.trim().length > 0)
+      .map((text) => formatPlaceholders(text, params));
+  }
+
+  function getJobDisplayName(jobName, params = {}) {
+    const formatted = formatGameplayString('jobs', jobName, 'displayName', params);
+    return formatted || jobName;
+  }
+
+  function getJobDescription(jobName, params = {}) {
+    return formatGameplayString('jobs', jobName, 'description', params);
+  }
+
+  function getEventStrings(eventId, params = {}) {
+    const resolved = resolveGameplayEntry('events', eventId);
+    if (!resolved) {
+      return null;
+    }
+    const { locale, entry } = resolved;
+    const formatField = (field) => {
+      const variant = selectVariant(entry?.[field], params, locale);
+      return typeof variant === 'string' ? formatPlaceholders(variant, params) : null;
+    };
+    const logLabel = selectVariant(entry?.log?.label, params, locale);
+    const logDetail = selectVariant(entry?.log?.detail, params, locale);
+    return {
+      label: formatField('label'),
+      description: formatField('description'),
+      note: formatField('note'),
+      message: formatField('message'),
+      preview: formatField('preview'),
+      log: (logLabel || logDetail)
+        ? {
+            label: logLabel ? formatPlaceholders(logLabel, params) : null,
+            detail: logDetail ? formatPlaceholders(logDetail, params) : null,
+          }
+        : null,
+    };
+  }
+
+  function getLogTemplate(key) {
+    const resolved = resolveGameplayEntry('logs', key);
+    if (!resolved) {
+      return null;
+    }
+    const { locale, entry } = resolved;
+    const labelVariant = selectVariant(entry?.label, {}, locale);
+    const detailVariant = selectVariant(entry?.detail, {}, locale);
+    return {
+      label: typeof labelVariant === 'string' ? labelVariant : null,
+      detail: typeof detailVariant === 'string' ? detailVariant : null,
+    };
+  }
+
+  function collectTranslatableNodes(root) {
+    if (!root) {
+      return [];
+    }
+    if (root === document) {
+      return Array.from(document.querySelectorAll('[data-i18n-key]'));
+    }
+    if (root instanceof Element || root instanceof DocumentFragment) {
+      const nodes = [];
+      if (root instanceof Element && root.hasAttribute('data-i18n-key')) {
+        nodes.push(root);
+      }
+      nodes.push(...root.querySelectorAll('[data-i18n-key]'));
+      return nodes;
+    }
+    return [];
+  }
+
+  function applyTranslations(root = document) {
+    if (typeof document === 'undefined' || !root) {
+      return;
+    }
+    const nodes = collectTranslatableNodes(root);
+    nodes.forEach((node) => {
+      const key = node.getAttribute('data-i18n-key');
+      if (!key) {
+        return;
+      }
+      const attr = node.getAttribute('data-i18n-attr');
+      const paramsAttr = node.getAttribute('data-i18n-params');
+      let params = {};
+      if (paramsAttr) {
+        try {
+          params = JSON.parse(paramsAttr);
+        } catch (error) {
+          params = {};
+        }
+      }
+      const message = t(key, params);
+      if (message === null || message === undefined) {
+        return;
+      }
+      if (!attr || attr === 'text') {
+        node.textContent = message;
+      } else if (attr === 'html') {
+        node.innerHTML = message;
+      } else {
+        node.setAttribute(attr, message);
+      }
+    });
+    if (typeof document !== 'undefined' && document.documentElement) {
+      document.documentElement.setAttribute('lang', activeLocale || DEFAULT_LOCALE);
+    }
+  }
+
+  function setNodeTranslation(node, key, params = null, { attr = 'text' } = {}) {
+    if (!node) {
+      return;
+    }
+    if (!key) {
+      node.removeAttribute('data-i18n-key');
+      node.removeAttribute('data-i18n-attr');
+      node.removeAttribute('data-i18n-params');
+      if ('textContent' in node) {
+        node.textContent = '';
+      }
+      return;
+    }
+    node.setAttribute('data-i18n-key', key);
+    if (attr && attr !== 'text') {
+      node.setAttribute('data-i18n-attr', attr);
+    } else {
+      node.removeAttribute('data-i18n-attr');
+    }
+    if (params && typeof params === 'object' && Object.keys(params).length > 0) {
+      node.setAttribute('data-i18n-params', JSON.stringify(params));
+    } else {
+      node.removeAttribute('data-i18n-params');
+    }
+    applyTranslations(node instanceof Element ? node : undefined);
+  }
+
+  function notify() {
+    listeners.forEach((listener) => {
+      try {
+        listener(activeLocale);
+      } catch (error) {
+        console.error('Fehler beim Lokalisierungslistener:', error);
+      }
+    });
+  }
+
+  async function applyLocale(locale, { silent = false } = {}) {
+    const normalized = normalizeLocale(locale) || DEFAULT_LOCALE;
+    await ensureCatalog(normalized);
+    activeLocale = normalized;
+    if (!silent) {
+      applyTranslations();
+      notify();
+    }
+    return activeLocale;
+  }
+
+  async function persistPreference(value) {
+    if (!apiClient?.storage) {
+      return;
+    }
+    try {
+      if (!value || value === 'system') {
+        await apiClient.storage.removeItem(LOCALE_STORAGE_KEY);
+      } else {
+        await apiClient.storage.setItem(LOCALE_STORAGE_KEY, value);
+      }
+    } catch (error) {
+      console.error('Sprachpräferenz konnte nicht gespeichert werden.', error);
+    }
+    if (apiClient?.locale?.set) {
+      try {
+        await apiClient.locale.set(value === 'system' ? null : value);
+      } catch (error) {
+        console.error('Serverseitige Sprachpräferenz konnte nicht gespeichert werden.', error);
+      }
+    }
+  }
+
+  async function setPreferredLocale(next, { persist = true, silent = false } = {}) {
+    const normalized = normalizePreference(next);
+    if (normalized === null) {
+      return activeLocale;
+    }
+    preference = normalized;
+    if (preference === 'system') {
+      const detected = detectPreferredLocale();
+      await applyLocale(detected, { silent });
+      if (persist) {
+        await persistPreference('system');
+      }
+      return detected;
+    }
+    await applyLocale(preference, { silent });
+    if (persist) {
+      await persistPreference(preference);
+    }
+    return activeLocale;
+  }
+
+  async function init() {
+    if (initPromise) {
+      return initPromise;
+    }
+    initPromise = (async () => {
+      await ensureCatalog(fallbackLocale);
+      let storedPreference = null;
+      try {
+        storedPreference = await apiClient.storage.getItem(LOCALE_STORAGE_KEY);
+      } catch (error) {
+        storedPreference = null;
+      }
+      let serverPreference = null;
+      if (apiClient?.locale?.get) {
+        try {
+          const response = await apiClient.locale.get();
+          if (response && typeof response.locale === 'string') {
+            serverPreference = response.locale;
+          }
+        } catch (error) {
+          serverPreference = null;
+        }
+      }
+      const sourcePreference = serverPreference ?? storedPreference;
+      const normalized = normalizePreference(sourcePreference);
+      preference = normalized === null ? 'system' : normalized;
+      if (preference === 'system') {
+        await applyLocale(detectPreferredLocale(), { silent: true });
+      } else {
+        await applyLocale(preference, { silent: true });
+      }
+      applyTranslations();
+      hasInitialized = true;
+      return activeLocale;
+    })();
+    return initPromise;
+  }
+
+  function t(key, params = {}) {
+    const chain = getLocaleChain();
+    for (const locale of chain) {
+      const message = formatMessageForLocale(locale, key, params);
+      if (message !== null && message !== undefined) {
+        return message;
+      }
+    }
+    return null;
+  }
+
+  function onChange(listener) {
+    if (typeof listener === 'function') {
+      listeners.add(listener);
+      if (hasInitialized) {
+        try {
+          listener(activeLocale);
+        } catch (error) {
+          console.error('Fehler beim Lokalisierungslistener:', error);
+        }
+      }
+    }
+    return () => listeners.delete(listener);
+  }
+
+  function getLocale() {
+    return activeLocale;
+  }
+
+  function getPreference() {
+    return preference;
+  }
+
+  return {
+    init,
+    t,
+    applyTranslations,
+    setNodeTranslation,
+    setPreferredLocale,
+    getLocale,
+    getPreference,
+    onChange,
+    getRoleDisplayName,
+    getRoleDescription,
+    getRoleAbilities,
+    getJobDisplayName,
+    getJobDescription,
+    getEventStrings,
+    getLogTemplate,
+    formatGameplayString,
+    getLocaleChain,
+    getSupportedLocales: () => Array.from(SUPPORTED_LOCALES),
+    getFallbackLocale: () => fallbackLocale,
+  };
+})();
+
 function createAuthManager() {
   const welcomeScreen = document.getElementById('welcome-screen');
   const authTabs = Array.from(document.querySelectorAll('[data-auth-target]'));
@@ -446,6 +1011,10 @@ function createAuthManager() {
 
   const cloneUser = (user) => (user ? { ...user } : null);
 
+  localization.onChange(() => {
+    updateUserChip();
+  });
+
   function clearMessage() {
     if (!authMessage) {
       return;
@@ -454,12 +1023,13 @@ function createAuthManager() {
       clearTimeout(messageTimeout);
       messageTimeout = null;
     }
+    localization.setNodeTranslation(authMessage, null);
     authMessage.textContent = '';
     authMessage.classList.remove('visible', 'error', 'success', 'info');
     authMessage.removeAttribute('data-variant');
   }
 
-  function setMessage(text, variant = 'info', { persist = false } = {}) {
+  function setMessage(message, variant = 'info', { persist = false } = {}) {
     if (!authMessage) {
       return;
     }
@@ -469,7 +1039,16 @@ function createAuthManager() {
       messageTimeout = null;
     }
 
-    authMessage.textContent = text;
+    let resolvedText = '';
+    if (message && typeof message === 'object' && typeof message.key === 'string') {
+      localization.setNodeTranslation(authMessage, message.key, message.params || null);
+      resolvedText = localization.t(message.key, message.params || {}) || '';
+    } else {
+      localization.setNodeTranslation(authMessage, null);
+      resolvedText = typeof message === 'string' ? message : '';
+    }
+
+    authMessage.textContent = resolvedText;
     authMessage.dataset.variant = variant;
     authMessage.classList.add('visible');
     authMessage.classList.remove('error', 'success', 'info');
@@ -478,6 +1057,7 @@ function createAuthManager() {
     if (!persist) {
       messageTimeout = setTimeout(() => {
         if (authMessage) {
+          localization.setNodeTranslation(authMessage, null);
           authMessage.classList.remove('visible', 'error', 'success', 'info');
           authMessage.textContent = '';
           authMessage.removeAttribute('data-variant');
@@ -560,7 +1140,7 @@ function createAuthManager() {
         userNameEl.textContent = '';
       }
       if (userRoleEl) {
-        userRoleEl.textContent = '';
+        localization.setNodeTranslation(userRoleEl, null);
         userRoleEl.classList.add('hidden');
       }
       if (logoutBtn) {
@@ -573,14 +1153,16 @@ function createAuthManager() {
     userChip.classList.remove('hidden');
     userChip.setAttribute('aria-hidden', 'false');
     if (userNameEl) {
-      userNameEl.textContent = currentUser.displayName || currentUser.email || 'Spielleitung';
+      const fallbackName =
+        localization.t('user.displayName.fallback') || 'Spielleitung';
+      userNameEl.textContent = currentUser.displayName || currentUser.email || fallbackName;
     }
     if (userRoleEl) {
       if (currentUser.isAdmin) {
-        userRoleEl.textContent = 'Admin';
+        localization.setNodeTranslation(userRoleEl, 'user.role.admin');
         userRoleEl.classList.remove('hidden');
       } else {
-        userRoleEl.textContent = '';
+        localization.setNodeTranslation(userRoleEl, null);
         userRoleEl.classList.add('hidden');
       }
     }
@@ -622,6 +1204,12 @@ function createAuthManager() {
     updateUserChip();
 
     if (currentUser) {
+      if (Object.prototype.hasOwnProperty.call(currentUser, 'locale')) {
+        const preferred = currentUser.locale || 'system';
+        localization.setPreferredLocale(preferred, { persist: false }).catch((error) => {
+          console.error('Lokalisierung konnte nicht mit dem Benutzerprofil synchronisiert werden.', error);
+        });
+      }
       if (!suppressScreen) {
         toggleScreen(false);
       }
@@ -636,6 +1224,8 @@ function createAuthManager() {
   function handleUnauthorized(message) {
     if (message) {
       setMessage(message, 'error', { persist: true });
+    } else {
+      setMessage({ key: 'auth.errors.unauthorized' }, 'error', { persist: true });
     }
     applyUser(null, { refreshCaches: true });
     setActiveForm('login');
@@ -671,7 +1261,7 @@ function createAuthManager() {
       const password = loginPasswordInput?.value ?? '';
 
       if (!email || !password) {
-        setMessage('Bitte gib E-Mail und Passwort ein.', 'error');
+        setMessage({ key: 'auth.errors.missingCredentials' }, 'error');
         return;
       }
 
@@ -688,10 +1278,10 @@ function createAuthManager() {
           loginForm.reset();
           applyUser(user, { refreshCaches: true });
         } else {
-          setMessage('Anmeldung fehlgeschlagen.', 'error', { persist: true });
+          setMessage({ key: 'auth.login.failure' }, 'error', { persist: true });
         }
       } catch (error) {
-        setMessage(error?.message || 'Anmeldung fehlgeschlagen.', 'error', { persist: true });
+        setMessage(error?.message || { key: 'auth.login.failure' }, 'error', { persist: true });
       } finally {
         if (submitBtn) {
           submitBtn.disabled = false;
@@ -715,7 +1305,7 @@ function createAuthManager() {
       const adminCodeRaw = registerAdminInput?.value.trim() ?? '';
 
       if (!displayName || !email || !password) {
-        setMessage('Bitte fülle alle Pflichtfelder aus.', 'error');
+        setMessage({ key: 'auth.errors.missingRegistrationFields' }, 'error');
         return;
       }
 
@@ -736,10 +1326,10 @@ function createAuthManager() {
           registerForm.reset();
           applyUser(user, { refreshCaches: true });
         } else {
-          setMessage('Registrierung fehlgeschlagen.', 'error', { persist: true });
+          setMessage({ key: 'auth.register.failure' }, 'error', { persist: true });
         }
       } catch (error) {
-        setMessage(error?.message || 'Registrierung fehlgeschlagen.', 'error', { persist: true });
+        setMessage(error?.message || { key: 'auth.register.failure' }, 'error', { persist: true });
       } finally {
         if (submitBtn) {
           submitBtn.disabled = false;
@@ -759,9 +1349,9 @@ function createAuthManager() {
       logoutBtn.disabled = true;
       try {
         await apiClient.auth.logout();
-        setMessage('Du wurdest abgemeldet. Bis bald!', 'info');
+        setMessage({ key: 'auth.logout.success' }, 'info');
       } catch (error) {
-        setMessage(error?.message || 'Abmelden fehlgeschlagen.', 'error', { persist: true });
+        setMessage(error?.message || { key: 'auth.logout.failure' }, 'error', { persist: true });
       } finally {
         applyUser(null, { refreshCaches: true });
         setActiveForm('login');
@@ -792,10 +1382,10 @@ function createAuthManager() {
         toggleScreen(false);
         return cloneUser(currentUser);
       }
-      setMessage('Bitte melde dich an, um weiterzuspielen.', 'info');
+      setMessage({ key: 'auth.login.required' }, 'info');
     } catch (error) {
       if (error?.status && error.status !== 401) {
-        setMessage(error.message || 'Anmeldung momentan nicht möglich.', 'error', { persist: true });
+        setMessage(error.message || { key: 'auth.login.unavailable' }, 'error', { persist: true });
       }
     }
 
@@ -888,7 +1478,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     'bloodMoonPityTimer',
     'werwolfSavedNames',
     'werwolfSavedRoles',
-    'werwolfLastUsed'
+    'werwolfLastUsed',
+    'werwolfLocalePreference'
   ];
 
   let latestLobbySnapshot = null;
@@ -896,6 +1487,23 @@ document.addEventListener("DOMContentLoaded", async () => {
   let lobbyUiInitialized = false;
   let pendingSessionReload = false;
   const READ_ONLY_HINT = 'Du hast nur Leserechte in dieser Lobby.';
+  let localeSelect = null;
+  let roleSchemaReady = false;
+  let eventDefinitionsReady = false;
+  let phoenixPulseStatus = null;
+
+  try {
+    await localization.init();
+  } catch (error) {
+    console.error('Lokalisierung konnte nicht initialisiert werden.', error);
+  }
+  if (typeof navigator !== 'undefined' && typeof navigator.userAgent === 'string' && navigator.userAgent.includes('jsdom')) {
+    try {
+      await localization.setPreferredLocale('de', { persist: false, silent: true });
+    } catch (error) {
+      // ignore test environment locale adjustments
+    }
+  }
 
   function updateReadOnlyClass() {
     const shouldMarkReadOnly = Boolean(latestLobbySnapshot && !canEditActiveLobby);
@@ -910,6 +1518,39 @@ document.addEventListener("DOMContentLoaded", async () => {
       applyLobbyWriteState(canEditActiveLobby);
     }
   }
+
+  function syncLocaleSelector() {
+    if (!localeSelect) {
+      return;
+    }
+    const preference = localization.getPreference();
+    if (preference === 'system') {
+      localeSelect.value = 'system';
+    } else {
+      localeSelect.value = preference || localization.getLocale() || 'system';
+    }
+  }
+
+  syncLocaleSelector();
+
+  if (localeSelect) {
+    localeSelect.addEventListener('change', async (event) => {
+      const selected = event.target.value;
+      try {
+        await localization.setPreferredLocale(selected);
+      } catch (error) {
+        console.error('Sprachpräferenz konnte nicht aktualisiert werden.', error);
+      }
+    });
+  }
+
+  localization.onChange(() => {
+    localization.applyTranslations();
+    syncLocaleSelector();
+    if (roleSchemaReady) {
+      refreshLocalizationCaches();
+    }
+  });
 
   async function syncLobbyContext(lobby) {
     latestLobbySnapshot = lobby ? { ...lobby } : null;
@@ -929,7 +1570,10 @@ document.addEventListener("DOMContentLoaded", async () => {
         pendingSessionReload = true;
       }
     } else if (lobbyUiInitialized && sessionsList) {
-      sessionsList.innerHTML = '<li>Keine Lobby ausgewählt.</li>';
+      sessionsList.innerHTML = '';
+      const emptyItem = document.createElement('li');
+      localization.setNodeTranslation(emptyItem, 'lobbies.emptySelection');
+      sessionsList.appendChild(emptyItem);
       updateReplaySessionOptions([]);
       pendingSessionReload = false;
     }
@@ -1317,14 +1961,21 @@ document.addEventListener("DOMContentLoaded", async () => {
     roleDescriptions = {};
     roleAbilityMap.clear();
     roleSchema.roles.forEach((role) => {
-      roleDescriptions[role.name] = role.description || '';
-      roleAbilityMap.set(role.name, Array.isArray(role.abilities) ? role.abilities.slice() : []);
+      const localizedDescription = localization.getRoleDescription(role.name);
+      roleDescriptions[role.name] = localizedDescription || role.description || '';
+      const localizedAbilities = localization.getRoleAbilities(role.name);
+      if (Array.isArray(localizedAbilities) && localizedAbilities.length > 0) {
+        roleAbilityMap.set(role.name, localizedAbilities);
+      } else {
+        roleAbilityMap.set(role.name, Array.isArray(role.abilities) ? role.abilities.slice() : []);
+      }
     });
 
     jobDescriptions = {};
     jobEligibilityMap.clear();
     roleSchema.jobs.forEach((job) => {
-      jobDescriptions[job.name] = job.description || '';
+      const localizedDescription = localization.getJobDescription(job.name);
+      jobDescriptions[job.name] = localizedDescription || job.description || '';
       jobEligibilityMap.set(job.name, new Set(job.eligibleRoles || []));
     });
 
@@ -1359,6 +2010,36 @@ document.addEventListener("DOMContentLoaded", async () => {
       renderRoleEditorNight();
     }
     updateRoleEditorStatus();
+  }
+
+  function refreshLocalizationCaches() {
+    if (roleSchema && Array.isArray(roleSchema.roles)) {
+      roleSchema.roles.forEach((role) => {
+        const localizedDescription = localization.getRoleDescription(role.name);
+        if (localizedDescription) {
+          roleDescriptions[role.name] = localizedDescription;
+        }
+        const localizedAbilities = localization.getRoleAbilities(role.name);
+        if (Array.isArray(localizedAbilities) && localizedAbilities.length > 0) {
+          roleAbilityMap.set(role.name, localizedAbilities);
+        }
+      });
+    }
+    if (roleSchema && Array.isArray(roleSchema.jobs)) {
+      roleSchema.jobs.forEach((job) => {
+        const localizedDescription = localization.getJobDescription(job.name);
+        if (localizedDescription) {
+          jobDescriptions[job.name] = localizedDescription;
+        }
+      });
+    }
+    applyEventLocalization();
+    updatePhoenixPulseStatus();
+    if (roleEditorReady) {
+      renderRoleEditorRoles();
+      renderRoleEditorJobs();
+      renderRoleEditorNight();
+    }
   }
 
   async function loadFallbackRoleSchema() {
@@ -1471,6 +2152,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 
   await initializeRoleSchema();
+  roleSchemaReady = true;
+  refreshLocalizationCaches();
 
   // Sidebar elements and toggle
   const sessionsSidebar = document.getElementById('sessions-sidebar');
@@ -1600,6 +2283,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const campaignSelectEl = document.getElementById('campaign-select');
   const campaignPreviewListEl = document.getElementById('campaign-preview-list');
   const eventCardPreviewListEl = document.getElementById('event-card-preview');
+  localeSelect = document.getElementById('locale-select');
   const openConfigBtn = document.getElementById('open-config-btn');
   const configModal = document.getElementById('config-modal');
   const closeConfigBtn = document.getElementById('close-config-btn');
@@ -1607,6 +2291,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const JOB_CONFIG_STORAGE_KEY = 'werwolfJobConfig';
   const EVENT_CONFIG_STORAGE_KEY = 'werwolfEventConfig';
   const BLOOD_MOON_CONFIG_STORAGE_KEY = 'werwolfBloodMoonConfig';
+  const LOCALE_PREFERENCE_STORAGE_KEY = 'werwolfLocalePreference';
   const DEFAULT_PHOENIX_PULSE_CHANCE = 0.05;
   const PHOENIX_PULSE_CONFIG_STORAGE_KEY = 'werwolfPhoenixPulseConfig';
   const EVENT_ENGINE_STORAGE_KEY = 'werwolfEventEngineState';
@@ -2274,6 +2959,65 @@ document.addEventListener("DOMContentLoaded", async () => {
   const campaignDefinitions = Array.isArray(window.WERWOLF_CAMPAIGNS)
     ? window.WERWOLF_CAMPAIGNS.slice()
     : [];
+  eventDefinitionsReady = true;
+
+  function applyEventLocalization() {
+    if (!eventDefinitionsReady) {
+      return;
+    }
+    eventCardDefinitions.forEach((card) => {
+      if (!card || !card.id) {
+        return;
+      }
+      if (!card.__localizedWrapped) {
+        const originalEffect = typeof card.effect === 'function' ? card.effect.bind(card) : null;
+        if (originalEffect) {
+          card.effect = function (...args) {
+            const result = originalEffect(...args);
+            const currentStrings = localization.getEventStrings(card.id) || {};
+            if (result && typeof result === 'object') {
+              if (currentStrings.log) {
+                result.log = {
+                  ...(result.log || {}),
+                  label: currentStrings.log.label || result.log?.label || undefined,
+                  detail: currentStrings.log.detail || result.log?.detail || undefined,
+                };
+              }
+              if (currentStrings.message && Object.prototype.hasOwnProperty.call(result, 'message')) {
+                result.message = currentStrings.message;
+              }
+              if (currentStrings.note && Object.prototype.hasOwnProperty.call(result, 'narratorNote')) {
+                result.narratorNote = currentStrings.note;
+              }
+            }
+            return result;
+          };
+        }
+        if (typeof card.preview === 'function') {
+          const originalPreview = card.preview.bind(card);
+          card.preview = function (...args) {
+            const currentStrings = localization.getEventStrings(card.id);
+            if (currentStrings?.preview) {
+              return currentStrings.preview;
+            }
+            return originalPreview(...args);
+          };
+        }
+        card.__localizedWrapped = true;
+      }
+      const strings = localization.getEventStrings(card.id);
+      if (strings?.label) {
+        card.label = strings.label;
+      }
+      if (strings?.description) {
+        card.description = strings.description;
+      }
+    });
+    renderEventDeckControls();
+    renderEventCardPreview();
+    renderCampaignSelect();
+    renderCampaignPreview();
+  }
 
   if (eventDeckMetadata.length === 0) {
     eventDeckMetadata.push({
@@ -2995,7 +3739,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const graveyardCloseBtn = document.getElementById('graveyard-close-btn');
   const phoenixPulseOverlay = document.getElementById('phoenix-pulse-overlay');
   const phoenixPulseMessage = document.getElementById('phoenix-pulse-message');
-  const phoenixPulseStatus = document.getElementById('phoenix-pulse-status');
+  phoenixPulseStatus = document.getElementById('phoenix-pulse-status');
   const ambiencePlaylistContainer = document.getElementById('ambience-playlists');
   const ambienceStingerContainer = document.getElementById('ambience-stingers');
   const ambienceLightingContainer = document.getElementById('ambience-lighting');
@@ -4055,7 +4799,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       const toggleLabel = document.createElement('label');
       toggleLabel.className = 'config-toggle';
       const toggleSpan = document.createElement('span');
-      toggleSpan.textContent = deck.name || deck.id;
+      const deckNameKey = `events.decks.${deck.id}.name`;
+      toggleSpan.textContent = localization.t(deckNameKey) || deck.name || deck.id;
       const toggleInput = document.createElement('input');
       toggleInput.type = 'checkbox';
       toggleInput.id = `deck-toggle-${deck.id}`;
@@ -4068,7 +4813,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       sliderWrapper.className = 'config-slider';
       const sliderLabel = document.createElement('label');
       sliderLabel.setAttribute('for', `deck-weight-${deck.id}`);
-      sliderLabel.textContent = 'Gewichtung';
+      sliderLabel.textContent = localization.t('settings.events.deckWeight') || 'Gewichtung';
       const slider = document.createElement('input');
       slider.type = 'range';
       slider.id = `deck-weight-${deck.id}`;
@@ -4132,10 +4877,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       sliderWrapper.appendChild(weightDisplay);
       entry.appendChild(sliderWrapper);
 
-      if (deck.description) {
+      const deckDescriptionKey = `events.decks.${deck.id}.description`;
+      const deckDescription = localization.t(deckDescriptionKey) || deck.description;
+      if (deckDescription) {
         const helper = document.createElement('p');
         helper.className = 'config-helper';
-        helper.textContent = deck.description;
+        helper.textContent = deckDescription;
         entry.appendChild(helper);
       }
 
@@ -4171,7 +4918,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     campaignSelectEl.innerHTML = '';
     const freeOption = document.createElement('option');
     freeOption.value = '';
-    freeOption.textContent = 'Freies Spiel';
+    freeOption.textContent = localization.t('events.campaigns.freePlay') || 'Freies Spiel';
     campaignSelectEl.appendChild(freeOption);
 
     campaignDefinitions.forEach(campaign => {
@@ -4180,8 +4927,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
       const option = document.createElement('option');
       option.value = campaign.id;
-      option.textContent = campaign.name || campaign.id;
-      option.dataset.description = campaign.description || '';
+      const nameKey = `events.campaigns.${campaign.id}.name`;
+      const descriptionKey = `events.campaigns.${campaign.id}.description`;
+      option.textContent = localization.t(nameKey) || campaign.name || campaign.id;
+      option.dataset.description = localization.t(descriptionKey) || campaign.description || '';
       campaignSelectEl.appendChild(option);
     });
 
@@ -4196,7 +4945,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const campaign = campaignDefinitions.find(entry => entry && entry.id === eventConfig.campaignId);
     if (!campaign) {
       const li = document.createElement('li');
-      li.textContent = 'Keine Kampagne aktiv.';
+      li.textContent = localization.t('events.campaigns.noneActive') || 'Keine Kampagne aktiv.';
       campaignPreviewListEl.appendChild(li);
       return;
     }
@@ -4205,7 +4954,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const upcoming = script.filter(step => !executedKeys.has(`${step.night || 0}:${step.eventId || step.id}`));
     if (upcoming.length === 0) {
       const li = document.createElement('li');
-      li.textContent = 'Alle Beats dieser Kampagne wurden erlebt.';
+      li.textContent = localization.t('events.campaigns.complete') || 'Alle Beats dieser Kampagne wurden erlebt.';
       campaignPreviewListEl.appendChild(li);
       return;
     }
@@ -4214,9 +4963,15 @@ document.addEventListener("DOMContentLoaded", async () => {
       const li = document.createElement('li');
       const card = eventCardDefinitions.find(entry => entry.id === step.eventId);
       const label = card ? card.label || card.id : step.eventId;
-      const title = step.title || label;
-      const description = step.description || card?.description || '';
-      li.innerHTML = `<strong>Nacht ${step.night}</strong>: ${title}${description ? ` – ${description}` : ''}`;
+      const titleKey = `events.campaigns.${campaign.id}.stepTitle`;
+      const descriptionKey = `events.campaigns.${campaign.id}.stepDescription`;
+      const localizedTitle = localization.t(titleKey, { event: label, night: step.night }) || step.title || label;
+      const localizedDescription = localization.t(descriptionKey, { event: label, night: step.night })
+        || step.description
+        || card?.description
+        || '';
+      const nightLabel = localization.t('events.campaigns.nightLabel', { night: step.night }) || `Nacht ${step.night}`;
+      li.innerHTML = `<strong>${escapeHtml(nightLabel)}</strong>: ${escapeHtml(localizedTitle)}${localizedDescription ? ` – ${escapeHtml(localizedDescription)}` : ''}`;
       campaignPreviewListEl.appendChild(li);
     });
   }
@@ -4465,6 +5220,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   };
 
   function getJobDisplayName(job) {
+    const translated = localization.getJobDisplayName(job);
+    if (translated) {
+      const fallbackLabel = jobDisplayNames[job];
+      if (fallbackLabel && !translated.includes(fallbackLabel)) {
+        return `${translated} (${fallbackLabel})`;
+      }
+      return translated;
+    }
     return jobDisplayNames[job] || job;
   }
 
@@ -4476,14 +5239,15 @@ document.addEventListener("DOMContentLoaded", async () => {
       const displayJobs = jobs.map(getJobDisplayName).filter(Boolean);
       return displayJobs.join(' & ');
     }
+    const roleLabel = localization.getRoleDisplayName(role) || role;
     if (!Array.isArray(jobs) || jobs.length === 0) {
-      return role;
+      return roleLabel;
     }
     const displayJobs = jobs.map(getJobDisplayName).filter(Boolean);
     if (displayJobs.length === 0) {
-      return role;
+      return roleLabel;
     }
-    return `${role} & ${displayJobs.join(' & ')}`;
+    return `${roleLabel} & ${displayJobs.join(' & ')}`;
   }
 
   function getJobClassModifier(job) {
@@ -5231,7 +5995,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     const detail = source ? `${target} – ${source}` : target;
     const sourceText = source ? ` vor ${source}` : '';
     resultOutput.innerHTML += `<br>Der Bodyguard hat ${target}${sourceText} gerettet!`;
-    logAction({ type: 'night', label: logLabel || 'Bodyguard Rettung', detail });
+    logAction({
+      type: 'night',
+      label: logLabel || undefined,
+      detail,
+      logKey: 'bodyguard.saved',
+      params: { player: target }
+    });
     renderNarratorDashboard();
   }
 
@@ -5251,19 +6021,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     phoenixPulseStatus.classList.remove('active', 'resolved');
 
     if (!isPhoenixPulseAvailable()) {
-      phoenixPulseStatus.textContent = 'Phoenix Pulse: deaktiviert';
+      phoenixPulseStatus.textContent = localization.t('phoenix.status.disabled') || 'Phoenix Pulse: deaktiviert';
       return;
     }
 
     if (phoenixPulsePending) {
-      phoenixPulseStatus.textContent = 'Phoenix Pulse: bereit';
+      phoenixPulseStatus.textContent = localization.t('phoenix.status.ready') || 'Phoenix Pulse: bereit';
       phoenixPulseStatus.classList.add('active');
     } else if (phoenixPulseJustResolved && phoenixPulseRevivedPlayers.length > 0) {
       const revivedList = phoenixPulseRevivedPlayers.join(', ');
-      phoenixPulseStatus.textContent = `Phoenix Pulse: ${revivedList} zurück`; 
+      phoenixPulseStatus.textContent = localization.t('phoenix.status.resolved', { players: revivedList })
+        || `Phoenix Pulse: ${revivedList} zurück`;
       phoenixPulseStatus.classList.add('resolved');
     } else {
-      phoenixPulseStatus.textContent = 'Phoenix Pulse: –';
+      phoenixPulseStatus.textContent = localization.t('phoenix.status.default') || 'Phoenix Pulse: –';
     }
   }
 
@@ -6559,7 +7330,12 @@ document.addEventListener("DOMContentLoaded", async () => {
           cancelText: 'Zurück',
           onConfirm: () => {
             clearDoctorPending();
-            logAction({ type: 'night', label: 'Arzt verzichtet', detail: 'Keine Heilung gewählt' });
+            logAction({
+              type: 'night',
+              logKey: 'doctor.skipped',
+              params: {},
+              detail: 'Keine Heilung gewählt'
+            });
             renderNarratorDashboard();
             moveToNextNightStep();
           }
@@ -6584,12 +7360,22 @@ document.addEventListener("DOMContentLoaded", async () => {
           if (resultOutput) {
             resultOutput.innerHTML += `<br>🩺 Der Arzt hat ${name} geheilt!`;
           }
-          logAction({ type: 'night', label: 'Arzt heilt', detail: name });
+          logAction({
+            type: 'night',
+            logKey: 'doctor.healed',
+            params: { player: name },
+            detail: name
+          });
         } else {
           if (resultOutput) {
             resultOutput.innerHTML += `<br>🩺 Der Arzt wollte ${name} heilen, aber die Person lebt bereits.`;
           }
-          logAction({ type: 'night', label: 'Arzt vergeblich', detail: `${name} war bereits am Leben` });
+          logAction({
+            type: 'night',
+            logKey: 'doctor.alive',
+            params: { player: name },
+            detail: `${name} war bereits am Leben`
+          });
         }
         clearDoctorPending();
         renderNarratorDashboard();
@@ -8906,44 +9692,57 @@ document.addEventListener("DOMContentLoaded", async () => {
     const title = document.getElementById('role-info-title');
     const desc = document.getElementById('role-info-desc');
 
-    const normalizedRole = role || 'Unbekannte Rolle';
+    const canonicalRole = typeof role === 'string' ? role : '';
+    const fallbackRoleLabel = localization.t('roles.info.unknown') || 'Unbekannte Rolle';
+    const normalizedRole = localization.getRoleDisplayName(canonicalRole) || canonicalRole || fallbackRoleLabel;
     const jobListRaw = Array.isArray(jobs) ? jobs.filter(Boolean) : [];
-    const jobDisplayList = jobListRaw.map(getJobDisplayName).filter(Boolean);
+    const jobDisplayList = jobListRaw
+      .map((job) => localization.getJobDisplayName(job) || getJobDisplayName(job))
+      .filter(Boolean);
     const titleText = jobDisplayList.length
       ? `${normalizedRole} (${jobDisplayList.join(' + ')})`
       : normalizedRole;
 
     title.textContent = titleText;
 
-    const baseDescription = roleDescriptions[normalizedRole] || roleDescriptions[role] || "Keine Beschreibung für diese Rolle verfügbar.";
-    const abilities = getRoleAbilities(normalizedRole);
+    const baseDescription = localization.getRoleDescription(canonicalRole)
+      || roleDescriptions[canonicalRole]
+      || roleDescriptions[normalizedRole]
+      || localization.t('roles.info.noDescription')
+      || 'Keine Beschreibung für diese Rolle verfügbar.';
+    const localizedAbilities = localization.getRoleAbilities(canonicalRole);
+    const abilities = Array.isArray(localizedAbilities) && localizedAbilities.length > 0
+      ? localizedAbilities
+      : getRoleAbilities(canonicalRole);
 
     const descriptionHtml = `<p>${escapeHtml(baseDescription)}</p>`;
 
+    const abilityTitle = localization.t('roles.info.abilitiesTitle') || 'Fähigkeiten';
     const abilityHtml = Array.isArray(abilities) && abilities.length > 0
-      ? `<div><span class="role-info-section-title">Fähigkeiten</span><ul class="role-info-abilities">${abilities
+      ? `<div><span class="role-info-section-title">${escapeHtml(abilityTitle)}</span><ul class="role-info-abilities">${abilities
           .map((ability) => `<li>${escapeHtml(ability)}</li>`)
           .join('')}</ul></div>`
       : '';
 
     const jobHtmlEntries = jobListRaw
       .map((job) => {
-        const label = getJobDisplayName(job);
+        const label = localization.getJobDisplayName(job) || getJobDisplayName(job);
         if (!label) {
           return '';
         }
         const modifier = getJobClassModifier(job);
         const badgeClass = modifier ? `job-badge job-badge--${modifier}` : 'job-badge';
         const badgeHtml = `<span class="${badgeClass}">${escapeHtml(label)}</span>`;
-        const description = jobDescriptions[job];
+        const description = localization.getJobDescription(job) || jobDescriptions[job];
         const descriptionHtml = description ? `<span class="job-description-text">${escapeHtml(description)}</span>` : '';
         return `<span class="job-description">${badgeHtml}${descriptionHtml}</span>`;
       })
       .filter(Boolean)
       .join('');
 
+    const jobsTitle = localization.t('roles.info.jobsTitle') || 'Jobs';
     const jobsHtml = jobHtmlEntries
-      ? `<div><span class="role-info-section-title">Jobs</span><div class="role-info-jobs">${jobHtmlEntries}</div></div>`
+      ? `<div><span class="role-info-section-title">${escapeHtml(jobsTitle)}</span><div class="role-info-jobs">${jobHtmlEntries}</div></div>`
       : '';
 
     desc.innerHTML = `${descriptionHtml}${abilityHtml}${jobsHtml}`;
@@ -11062,15 +11861,39 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  function logAction({ type = 'info', label, detail = '', metadata = {} }) {
+  function logAction({ type = 'info', label, detail = '', metadata = {}, logKey = null, params = {} }) {
     const createdAt = new Date();
     actionSequenceCounter += 1;
+    let resolvedLabel = label;
+    let resolvedDetail = detail;
+
+    if (logKey) {
+      const templateLabel = localization.formatGameplayString('logs', logKey, 'label', params);
+      if (templateLabel) {
+        resolvedLabel = templateLabel;
+      } else if (!resolvedLabel) {
+        const template = localization.getLogTemplate(logKey);
+        if (template?.label) {
+          resolvedLabel = template.label;
+        }
+      }
+      const templateDetail = localization.formatGameplayString('logs', logKey, 'detail', params);
+      if (templateDetail) {
+        resolvedDetail = templateDetail;
+      } else if (!resolvedDetail) {
+        const template = localization.getLogTemplate(logKey);
+        if (template?.detail) {
+          resolvedDetail = template.detail;
+        }
+      }
+    }
+
     const entry = {
       id: `action-${createdAt.getTime()}-${actionSequenceCounter}`,
       sequence: actionSequenceCounter,
       type,
-      label,
-      detail,
+      label: resolvedLabel,
+      detail: resolvedDetail,
       createdAt,
       phase: nightMode ? 'night' : (dayMode ? 'day' : 'setup'),
       step: nightMode ? nightSteps[nightIndex] || null : null,
@@ -11091,8 +11914,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     return entry;
   }
 
-  function recordAction({ type = 'admin', label, detail = '', undo, redo }) {
-    logAction({ type, label, detail });
+  function recordAction({ type = 'admin', label, detail = '', undo, redo, logKey = null, params = {} }) {
+    logAction({ type, label, detail, logKey, params });
     if (typeof undo === 'function' && typeof redo === 'function') {
       undoStack.push({ label, detail, undo, redo });
       redoStack.length = 0;

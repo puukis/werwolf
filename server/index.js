@@ -9,6 +9,31 @@ const app = express();
 app.use(express.json({ limit: '2mb' }));
 app.use(cookieParserMiddleware);
 app.use(loadUserFromSession);
+app.use('/locales', express.static(localeCatalogRoot));
+
+app.get('/assets/localized/:locale/:asset', async (req, res) => {
+  const locale = normalizeLocaleInput(req.params.locale);
+  if (!locale) {
+    return res.status(404).json({ error: 'Locale nicht unterstützt.' });
+  }
+  const assetName = typeof req.params.asset === 'string' ? req.params.asset : '';
+  if (!assetName || assetName.includes('..') || assetName.includes('/')) {
+    return res.status(400).json({ error: 'Ungültiger Dateiname.' });
+  }
+
+  const candidates = [locale, 'de'];
+  for (const candidate of candidates) {
+    const filePath = path.join(localizedAssetsRoot, candidate, assetName);
+    try {
+      await fs.promises.access(filePath, fs.constants.R_OK);
+      return res.sendFile(filePath);
+    } catch (error) {
+      // try fallback
+    }
+  }
+
+  return res.status(404).json({ error: 'Asset nicht gefunden.' });
+});
 
 const SESSION_COOKIE_NAME = 'werwolf_session';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
@@ -26,12 +51,33 @@ let defaultRoleSchemaCache = null;
 
 const LOBBY_HEADER = 'x-werwolf-lobby';
 const LOBBY_JOIN_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const SUPPORTED_LOCALES = new Set(['de', 'en']);
+const localizedAssetsRoot = path.join(__dirname, '..', 'assets', 'localized');
+const localeCatalogRoot = path.join(__dirname, '..', 'locales');
 
 class HttpError extends Error {
   constructor(status, message) {
     super(message);
     this.status = status;
   }
+}
+
+function normalizeLocaleInput(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) {
+    return null;
+  }
+  if (SUPPORTED_LOCALES.has(trimmed)) {
+    return trimmed;
+  }
+  const base = trimmed.split('-')[0];
+  if (base && SUPPORTED_LOCALES.has(base)) {
+    return base;
+  }
+  return null;
 }
 
 function handleApiError(res, error, fallbackMessage) {
@@ -511,6 +557,7 @@ function formatUser(row) {
     email: row.email,
     displayName: row.display_name,
     isAdmin: row.is_admin,
+    locale: row.locale || null,
   };
 }
 
@@ -556,7 +603,7 @@ async function loadSession(token) {
   }
   const tokenHash = hashToken(token);
   const result = await query(
-    `SELECT s.token_hash, s.expires_at, u.id, u.email, u.display_name, u.is_admin
+    `SELECT s.token_hash, s.expires_at, u.id, u.email, u.display_name, u.is_admin, u.locale
        FROM user_sessions s
        JOIN users u ON u.id = s.user_id
       WHERE s.token_hash = $1`,
@@ -582,6 +629,7 @@ async function loadSession(token) {
       email: row.email,
       displayName: row.display_name,
       isAdmin: row.is_admin,
+      locale: row.locale || null,
     },
   };
 }
@@ -900,10 +948,10 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     const result = await query(
-      `SELECT id, email, display_name, is_admin, password_hash
-         FROM users
-        WHERE LOWER(email) = LOWER($1)
-        LIMIT 1`,
+    `SELECT id, email, display_name, is_admin, password_hash, locale
+       FROM users
+      WHERE LOWER(email) = LOWER($1)
+      LIMIT 1`,
       [normalizedEmail]
     );
 
@@ -976,7 +1024,7 @@ app.post('/api/auth/register', async (req, res) => {
     const insertResult = await query(
       `INSERT INTO users (email, password_hash, display_name, is_admin)
        VALUES ($1, $2, $3, $4)
-       RETURNING id, email, display_name, is_admin`,
+       RETURNING id, email, display_name, is_admin, locale`,
       [normalizedEmail, passwordHash, normalizedDisplayName, isAdmin]
     );
 
@@ -994,6 +1042,41 @@ app.post('/api/auth/register', async (req, res) => {
 });
 
 app.use('/api', requireAuthForApi);
+
+app.get('/api/locale', (req, res) => {
+  const preference = typeof req.user?.locale === 'string' ? req.user.locale : null;
+  const effective = normalizeLocaleInput(preference) || 'de';
+  res.json({
+    locale: preference,
+    effective,
+    fallback: 'de',
+    supported: Array.from(SUPPORTED_LOCALES),
+  });
+});
+
+app.put('/api/locale', async (req, res) => {
+  const preference = typeof req.body?.preference === 'string'
+    ? req.body.preference
+    : (typeof req.body?.locale === 'string' ? req.body.locale : req.body?.preference);
+
+  const trimmedPreference = typeof preference === 'string' ? preference.trim().toLowerCase() : null;
+  const normalized = normalizeLocaleInput(preference);
+
+  if (trimmedPreference && trimmedPreference !== 'system' && !normalized) {
+    return res.status(400).json({ error: 'Diese Sprache wird nicht unterstützt.' });
+  }
+
+  const storeValue = (!trimmedPreference || trimmedPreference === 'system') ? null : normalized;
+
+  try {
+    await query('UPDATE users SET locale = $1 WHERE id = $2', [storeValue, req.user.id]);
+    req.user.locale = storeValue;
+    const effective = normalizeLocaleInput(storeValue) || 'de';
+    res.json({ locale: storeValue, effective, fallback: 'de' });
+  } catch (error) {
+    handleApiError(res, error, 'Sprache konnte nicht gespeichert werden.');
+  }
+});
 
 app.get('/api/lobbies', async (req, res) => {
   try {
