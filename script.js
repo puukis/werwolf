@@ -1571,6 +1571,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   const addRoleBtn = document.getElementById("add-role");
   const assignBtn = document.getElementById("assign");
   const resultOutput = document.getElementById("result-output");
+  const revealControlsEl = document.getElementById('reveal-controls');
+  const currentRevealPlayerEl = document.getElementById('current-player-display');
+  const revealNextBtn = document.getElementById('reveal-next-btn');
   const nextBtn = document.getElementById("next-btn");
   const finishBtn = document.getElementById("finish-btn");
   const startNightBtn = document.getElementById("start-night-btn");
@@ -4751,6 +4754,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   let jobsAssigned = [];
   let currentIndex = 0;
   let revealed = false;
+  let currentlyFlippedCard = null;
+  let revealTurnOrder = [];
+  let revealTurnIndex = -1;
+  let revealCards = [];
+  let revealCurrentPlayerHasFlipped = false;
 
   let roleLayoutCustomized = false;
   let lastSuggestionSnapshot = null;
@@ -8736,19 +8744,32 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         // Create and display reveal cards
         const revealGrid = document.getElementById('reveal-grid');
+        hideRevealControls();
         revealGrid.innerHTML = ''; // Clear previous cards
-        let currentlyFlippedCard = null;
+        revealCards = new Array(players.length);
+        revealCurrentPlayerHasFlipped = false;
+        currentlyFlippedCard = null;
 
         players.forEach((player, index) => {
           const card = document.createElement('div');
           card.className = 'reveal-card';
+          card.dataset.playerIndex = String(index);
           card.style.animationDelay = `${index * 0.05}s`;
+          if (deadPlayers.includes(player)) {
+            card.classList.add('dead');
+          }
           card.onclick = () => {
+            if (revealTurnIndex < 0 || revealTurnOrder[revealTurnIndex] !== index) {
+              return;
+            }
             if (currentlyFlippedCard && currentlyFlippedCard !== card) {
               currentlyFlippedCard.classList.remove('flipped');
             }
             card.classList.toggle('flipped');
-            currentlyFlippedCard = card.classList.contains('flipped') ? card : null;
+            const isFlipped = card.classList.contains('flipped');
+            currentlyFlippedCard = isFlipped ? card : null;
+            revealCurrentPlayerHasFlipped = isFlipped;
+            refreshRevealControls();
           };
 
           const inner = document.createElement('div');
@@ -8784,7 +8805,12 @@ document.addEventListener("DOMContentLoaded", async () => {
           inner.appendChild(back);
           card.appendChild(inner);
           revealGrid.appendChild(card);
+          revealCards[index] = card;
         });
+
+        const revealOrder = players.map((_, idx) => idx);
+        shuffleArray(revealOrder);
+        setRevealTurnOrder(revealOrder);
 
         nightCounter = 0;
         gameCheckpoints.length = 0;
@@ -8962,6 +8988,116 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
+  function hideRevealControls() {
+    revealCards.forEach((card) => {
+      if (card) {
+        card.classList.remove('reveal-disabled', 'active');
+      }
+    });
+    revealTurnOrder = [];
+    revealTurnIndex = -1;
+    revealCards = [];
+    revealCurrentPlayerHasFlipped = false;
+    currentlyFlippedCard = null;
+    if (revealControlsEl) {
+      revealControlsEl.style.display = 'none';
+    }
+    if (currentRevealPlayerEl) {
+      currentRevealPlayerEl.textContent = '';
+    }
+    if (revealNextBtn) {
+      revealNextBtn.disabled = true;
+      revealNextBtn.style.display = '';
+    }
+  }
+
+  function updateRevealCardStates() {
+    const hasActive = revealTurnIndex >= 0 && revealTurnIndex < revealTurnOrder.length;
+    revealCards.forEach((card, index) => {
+      if (!card) {
+        return;
+      }
+      const isCurrent = hasActive && revealTurnOrder[revealTurnIndex] === index;
+      if (card.classList.contains('dead')) {
+        card.classList.remove('reveal-disabled');
+      } else {
+        card.classList.toggle('reveal-disabled', !isCurrent);
+      }
+      card.classList.toggle('active', isCurrent);
+    });
+  }
+
+  function refreshRevealControls() {
+    if (!revealControlsEl) {
+      return;
+    }
+    if (revealTurnIndex < 0 || revealTurnIndex >= revealTurnOrder.length) {
+      hideRevealControls();
+      return;
+    }
+
+    revealControlsEl.style.display = 'flex';
+    const currentPlayerIndex = revealTurnOrder[revealTurnIndex];
+    const playerName = players[currentPlayerIndex] || '';
+    const isLast = revealTurnIndex === revealTurnOrder.length - 1;
+
+    if (currentRevealPlayerEl) {
+      if (!playerName) {
+        currentRevealPlayerEl.textContent = 'Aktueller Spieler unbekannt';
+      } else if (isLast) {
+        currentRevealPlayerEl.textContent = `Letzter Spieler: ${playerName} – danach „Fertig“ drücken.`;
+      } else {
+        currentRevealPlayerEl.textContent = `Aktueller Spieler: ${playerName}`;
+      }
+    }
+
+    if (revealNextBtn) {
+      if (isLast) {
+        revealNextBtn.style.display = 'none';
+        revealNextBtn.disabled = true;
+      } else {
+        revealNextBtn.style.display = '';
+        revealNextBtn.disabled = !revealCurrentPlayerHasFlipped;
+      }
+    }
+
+    updateRevealCardStates();
+  }
+
+  function setRevealTurnOrder(order) {
+    if (!Array.isArray(order) || order.length === 0) {
+      hideRevealControls();
+      return;
+    }
+
+    revealTurnOrder = order.slice();
+    revealTurnIndex = 0;
+    revealCurrentPlayerHasFlipped = false;
+    currentlyFlippedCard = null;
+    refreshRevealControls();
+  }
+
+  function advanceRevealTurn() {
+    if (revealTurnIndex < 0 || revealTurnIndex >= revealTurnOrder.length - 1) {
+      return;
+    }
+
+    if (currentlyFlippedCard) {
+      currentlyFlippedCard.classList.remove('flipped');
+      currentlyFlippedCard = null;
+    }
+
+    revealTurnIndex += 1;
+    revealCurrentPlayerHasFlipped = false;
+    refreshRevealControls();
+  }
+
+  if (revealNextBtn) {
+    revealNextBtn.addEventListener('click', () => {
+      advanceRevealTurn();
+    });
+  }
+
   function syncJobChanceInputs() {
     updateBodyguardChanceUI(jobConfig.bodyguardChance * 100, { save: false });
     updateDoctorChanceUI(jobConfig.doctorChance * 100, { save: false });
@@ -8976,6 +9112,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById('ergebnisse-title').style.display = 'none';
     document.querySelector('.navigation-buttons').style.display = 'none';
     document.getElementById('reveal-grid').style.display = 'none';
+    hideRevealControls();
     showRolesOverviewBtn.style.display = 'none';
     firstNightShieldUsed = false;
     syncJobChanceInputs();
@@ -10040,31 +10177,41 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // Create and display reveal cards
     const revealGrid = document.getElementById('reveal-grid');
+    hideRevealControls();
     revealGrid.innerHTML = ''; // Clear previous cards
-    let currentlyFlippedCard = null;
-    
+    revealCards = new Array(players.length);
+    revealCurrentPlayerHasFlipped = false;
+    currentlyFlippedCard = null;
+
     players.forEach((player, index) => {
       const card = document.createElement('div');
       card.className = 'reveal-card';
+      card.dataset.playerIndex = String(index);
       card.style.animationDelay = `${index * 0.05}s`;
       if (deadPlayers.includes(player)) {
         card.classList.add('dead');
       }
       card.onclick = () => {
+        if (revealTurnIndex < 0 || revealTurnOrder[revealTurnIndex] !== index) {
+          return;
+        }
         if (currentlyFlippedCard && currentlyFlippedCard !== card) {
           currentlyFlippedCard.classList.remove('flipped');
         }
         card.classList.toggle('flipped');
-        currentlyFlippedCard = card.classList.contains('flipped') ? card : null;
+        const isFlipped = card.classList.contains('flipped');
+        currentlyFlippedCard = isFlipped ? card : null;
+        revealCurrentPlayerHasFlipped = isFlipped;
+        refreshRevealControls();
       };
-      
+
       const inner = document.createElement('div');
       inner.className = 'reveal-card-inner';
-      
+
       const front = document.createElement('div');
       front.className = 'reveal-card-front';
       front.textContent = player;
-      
+
       const back = document.createElement('div');
       back.className = 'reveal-card-back';
       const role = rolesAssigned[index];
@@ -10077,7 +10224,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       renderRoleWithJobs(roleNameEl, role, jobs);
       back.innerHTML = `<span class="player-name">${player}</span>`;
       back.prepend(roleNameEl);
-      
+
       const infoBtn = document.createElement('button');
       infoBtn.className = 'info-btn';
       infoBtn.textContent = 'Info';
@@ -10091,7 +10238,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       inner.appendChild(back);
       card.appendChild(inner);
       revealGrid.appendChild(card);
+      revealCards[index] = card;
     });
+
+    const revealOrder = players.map((_, idx) => idx);
+    shuffleArray(revealOrder);
+    setRevealTurnOrder(revealOrder);
 
 
     if (nightMode) {
