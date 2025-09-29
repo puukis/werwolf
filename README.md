@@ -195,6 +195,32 @@ SQL
 
 > ⚠️ Ersetze `wechselmich` unbedingt durch ein sicheres Passwort.
 
+#### Windows-spezifische Einrichtung
+
+1. Lade den aktuellen [PostgreSQL-Installer für Windows](https://www.postgresql.org/download/windows/) herunter und führe ihn aus. Aktiviere während der Installation das Paket **Command Line Tools**, damit `psql.exe` verfügbar ist.
+2. Öffne anschließend das **SQL Shell (psql)** oder die Windows-Terminal-App als Administrator: `Startmenü → PostgreSQL → SQL Shell (psql)`.
+3. Verbinde dich mit der Standardrolle `postgres` (die Fragen nach Server, Port und Datenbank kannst du mit Enter bestätigen) und führe nacheinander die folgenden Befehle aus:
+
+   ```sql
+   CREATE ROLE werwolf_user WITH LOGIN PASSWORD 'wechselmich';
+   CREATE DATABASE werwolf OWNER werwolf_user;
+   GRANT ALL PRIVILEGES ON DATABASE werwolf TO werwolf_user;
+   ```
+
+4. Lege die benötigten Umgebungsvariablen in PowerShell (z. B. im Projektordner) temporär so fest:
+
+   ```powershell
+   $env:PGHOST = "localhost"
+   $env:PGPORT = "5432"
+   $env:PGUSER = "werwolf_user"
+   $env:PGPASSWORD = "wechselmich"
+   $env:PGDATABASE = "werwolf"
+   ```
+
+   > ✅ Für eine dauerhafte Speicherung kannst du dieselben Werte mit `setx` setzen. Starte danach dein Terminal neu, damit die Variablen verfügbar sind.
+
+5. Installiere im selben Terminal die Projekt-Abhängigkeiten (`npm install`) und führe anschließend `npm run migrate` aus, um die Tabellen in deiner neuen Datenbank anzulegen.
+
 ### 2. Umgebungsvariablen konfigurieren
 
 Der Server liest seine Verbindungseinstellungen aus den Standard-Postgres-Variablen (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`) oder aus einer kompletten `DATABASE_URL`. Für lokale Installationen genügt beispielsweise eine `.env`-Datei (z. B. via [`direnv`](https://direnv.net/) oder [npm `dotenv-cli`](https://www.npmjs.com/package/dotenv-cli)) mit folgendem Inhalt:
