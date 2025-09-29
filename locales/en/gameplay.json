@@ -1,0 +1,187 @@
+{
+  "meta": {
+    "locale": "en",
+    "fallback": "de"
+  },
+  "roles": {
+    "Dorfbewohner": {
+      "displayName": { "other": "Villager" },
+      "category": "village",
+      "description": { "other": "Wins when all werewolves are eliminated." },
+      "abilities": []
+    },
+    "Seer": {
+      "displayName": { "other": "Seer" },
+      "category": "village",
+      "description": { "other": "May learn one player's role each night." },
+      "abilities": [
+        { "id": "seer.vision", "text": { "other": "Learns one role each night." } }
+      ]
+    },
+    "Jäger": {
+      "displayName": { "male": "Hunter", "female": "Huntress", "other": "Hunter" },
+      "category": "village",
+      "description": { "other": "May shoot a player before dying." },
+      "abilities": [
+        { "id": "hunter.retal", "text": { "other": "May take someone with them when they die." } }
+      ]
+    },
+    "Hexe": {
+      "displayName": { "other": "Witch" },
+      "category": "village",
+      "description": { "other": "Has one healing and one poison potion." },
+      "abilities": [
+        { "id": "witch.heal", "text": { "other": "One healing potion" } },
+        { "id": "witch.poison", "text": { "other": "One poison potion" } }
+      ]
+    },
+    "Stumme Jule": {
+      "displayName": { "other": "Silent Julie" },
+      "category": "village",
+      "description": { "other": "Silences a player each night until the next day." },
+      "abilities": [
+        { "id": "mute.choice", "text": { "other": "Silences one player per night" } }
+      ]
+    },
+    "Inquisitor": {
+      "displayName": { "other": "Inquisitor" },
+      "category": "village",
+      "description": { "other": "Checks each night whether someone belongs to the werewolf faction." },
+      "abilities": [
+        { "id": "inquisitor.check", "text": { "other": "Checks one player per night" } }
+      ]
+    },
+    "Sündenbock": {
+      "displayName": { "other": "Scapegoat" },
+      "category": "village",
+      "description": { "other": "Is lynched when votes tie." },
+      "abilities": [
+        { "id": "scapegoat.tie", "text": { "other": "Sacrifices themselves on ties" } }
+      ]
+    },
+    "Geschwister": {
+      "displayName": { "other": "Siblings" },
+      "category": "village",
+      "description": { "other": "Two villagers who know each other." },
+      "abilities": [
+        { "id": "siblings.know", "text": { "other": "Meet in the first night" } }
+      ]
+    },
+    "Geist": {
+      "displayName": { "other": "Ghost" },
+      "category": "village",
+      "description": { "other": "May send a message after death." },
+      "abilities": [
+        { "id": "ghost.message", "text": { "other": "Sends a message after death" } }
+      ]
+    },
+    "Werwolf": {
+      "displayName": { "other": "Werewolf" },
+      "category": "werwolf",
+      "description": { "other": "Wins when they eliminate all villagers." },
+      "abilities": [
+        { "id": "wolf.hunt", "text": { "other": "Hunt together at night" } }
+      ]
+    },
+    "Verfluchte": {
+      "displayName": { "other": "Cursed" },
+      "category": "werwolf",
+      "description": { "other": "Starts as a villager and becomes a werewolf when attacked." },
+      "abilities": [
+        { "id": "cursed.swap", "text": { "other": "Switches sides when attacked" } }
+      ]
+    },
+    "Amor": {
+      "displayName": { "other": "Cupid" },
+      "category": "special",
+      "description": { "other": "Bonds two lovers who win together." },
+      "abilities": [
+        { "id": "amor.link", "text": { "other": "Binds two lovers" } }
+      ]
+    },
+    "Trickster": {
+      "displayName": { "other": "Trickster" },
+      "category": "special",
+      "description": { "other": "Wins if lynched before the werewolves win." },
+      "abilities": [
+        { "id": "trickster.lynch", "text": { "other": "Wins when lynched" } }
+      ]
+    },
+    "Henker": {
+      "displayName": { "other": "Executioner" },
+      "category": "special",
+      "description": { "other": "Wins when their secret target is lynched. Plays solo." },
+      "abilities": [
+        { "id": "executioner.target", "text": { "other": "Learns a secret target" } }
+      ]
+    },
+    "Friedenstifter": {
+      "displayName": { "other": "Peacemaker" },
+      "category": "special",
+      "description": { "other": "Wins when no one dies for two consecutive rounds." },
+      "abilities": [
+        { "id": "pacifist.streak", "text": { "other": "Wins after two peaceful rounds" } }
+      ]
+    },
+    "Michael Jackson": {
+      "displayName": { "other": "Michael Jackson" },
+      "category": "special",
+      "description": { "other": "Special villager: after the first accusation their vote counts twice; after the second they die instantly." },
+      "abilities": [
+        { "id": "mj.doubleVote", "text": { "other": "Vote counts twice after first accusation" } },
+        { "id": "mj.secondAccuse", "text": { "other": "Dies on the second accusation" } }
+      ]
+    }
+  },
+  "jobs": {
+    "Bodyguard": {
+      "displayName": { "other": "Bodyguard" },
+      "description": { "other": "Chooses a person each night and protects them from werewolf attacks." }
+    },
+    "Doctor": {
+      "displayName": { "other": "Doctor" },
+      "description": { "other": "Wakes after a bloody night and may revive one victim." }
+    }
+  },
+  "events": {
+    "blood-moon": {
+      "label": { "other": "🌕 Blood Moon" },
+      "description": { "other": "The moon turns red – the werewolves may choose a second victim." },
+      "log": {
+        "label": { "other": "Blood Moon rises" },
+        "detail": { "other": "The werewolves may select two victims tonight." }
+      },
+      "note": { "other": "The werewolves choose two victims." },
+      "preview": { "other": "Werewolves pick two victims." }
+    },
+    "phoenix-pulse": {
+      "label": { "other": "🔥 Phoenix Pulse" },
+      "description": { "other": "An ancient surge sweeps the village – night victims are revived." },
+      "log": {
+        "label": { "other": "Phoenix Pulse charged" },
+        "detail": { "other": "The Phoenix Pulse charges and will erupt at dawn." }
+      },
+      "note": { "other": "Night victims return at daybreak." },
+      "message": { "other": "<br><strong>🔥 Phoenix Pulse:</strong> An ancient energy gathers tonight." },
+      "preview": { "other": "Night victims return at daybreak." }
+    }
+  },
+  "logs": {
+    "bodyguard.saved": {
+      "label": { "other": "Bodyguard rescue" },
+      "detail": { "other": "{player}" }
+    },
+    "doctor.skipped": {
+      "label": { "other": "Doctor declines" },
+      "detail": { "other": "No healing chosen" }
+    },
+    "doctor.healed": {
+      "label": { "other": "Doctor heals" },
+      "detail": { "other": "{player}" }
+    },
+    "doctor.alive": {
+      "label": { "other": "Doctor too late" },
+      "detail": { "other": "{player} was already alive" }
+    }
+  }
+}

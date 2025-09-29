@@ -38,16 +38,16 @@
             <div class="phoenix-spark spark-4"></div>
         </div>
         <div class="phoenix-pulse-text">
-            <h3>Phoenix Pulse</h3>
-            <p id="phoenix-pulse-message">Die Phoenix Pulse lodert durch das Dorf.</p>
+            <h3 data-i18n-key="phoenix.overlay.title">Phoenix Pulse</h3>
+            <p id="phoenix-pulse-message" data-i18n-key="phoenix.overlay.message">Die Phoenix Pulse lodert durch das Dorf.</p>
         </div>
     </div>
     <aside id="sessions-sidebar" class="sessions-sidebar">
-        <h2>Gespeicherte Sessions</h2>
+        <h2 data-i18n-key="sessions.sidebar.title">Gespeicherte Sessions</h2>
         <ul id="sessions-list"></ul>
     </aside>
-    <button id="sessions-toggle" class="sessions-toggle" aria-label="Toggle sessions sidebar">☰</button>
-    <button id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode">
+    <button id="sessions-toggle" class="sessions-toggle" aria-label="Sessions-Leiste umschalten" data-i18n-key="sessions.toggle.aria" data-i18n-attr="aria-label">☰</button>
+    <button id="theme-toggle" class="theme-toggle" aria-label="Dunkelmodus umschalten" data-i18n-key="theme.toggle.aria" data-i18n-attr="aria-label">
         <svg class="sun-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 18a6 6 0 1 1 0-12 6 6 0 0 1 0 12zm0-2a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM11 1h2v3h-2V1zm0 19h2v3h-2v-3zM3.515 4.929l1.414-1.414L7.05 5.636 5.636 7.05 3.515 4.93zM16.95 18.364l1.414-1.414 2.121 2.121-1.414 1.414-2.121-2.121zm2.122-14.85l1.414 1.415-2.121 2.121-1.414-1.414 2.121-2.121zM5.636 16.95l1.414 1.414-2.121 2.121-1.414-1.414 2.121-2.121zM23 11v2h-3v-2h3zM4 11v2H1v-2h3z"/>
         </svg>
@@ -58,56 +58,59 @@
     <div id="welcome-screen" class="welcome-screen" aria-hidden="true">
         <div class="welcome-panel">
             <div class="welcome-hero">
-                <h2>Willkommen zurück, Erzähler:in</h2>
-                <p>Verwalte Sessions, Rollen und Ereignisse mit wenigen Klicks und behalte dein Dorf jederzeit im Blick.</p>
+                <h2 data-i18n-key="welcome.hero.title">Willkommen zurück, Erzähler:in</h2>
+                <p data-i18n-key="welcome.hero.subtitle">Verwalte Sessions, Rollen und Ereignisse mit wenigen Klicks und behalte dein Dorf jederzeit im Blick.</p>
                 <ul class="welcome-highlights">
                     <li>
                         <span class="welcome-icon">🛡️</span>
                         <div>
-                            <strong>Geschützt</strong>
-                            <p>Nur angemeldete Leitungen sehen gespeicherte Sessions, Rollenlayouts und Spielstände.</p>
+                            <strong data-i18n-key="welcome.highlights.protected.title">Geschützt</strong>
+                            <p data-i18n-key="welcome.highlights.protected.body">Nur angemeldete Leitungen sehen gespeicherte Sessions, Rollenlayouts und Spielstände.</p>
                         </div>
                     </li>
                     <li>
                         <span class="welcome-icon">⚡</span>
                         <div>
-                            <strong>Schneller Einstieg</strong>
-                            <p>Deine zuletzt genutzten Einstellungen stehen direkt bereit – auch auf neuen Geräten.</p>
+                            <strong data-i18n-key="welcome.highlights.quickStart.title">Schneller Einstieg</strong>
+                            <p data-i18n-key="welcome.highlights.quickStart.body">Deine zuletzt genutzten Einstellungen stehen direkt bereit – auch auf neuen Geräten.</p>
                         </div>
                     </li>
                     <li>
                         <span class="welcome-icon">🌙</span>
                         <div>
-                            <strong>Atmosphäre pur</strong>
-                            <p>Wechsle dynamisch zwischen hellen und dunklen Themen und bring das Dorf zum Leuchten.</p>
+                            <strong data-i18n-key="welcome.highlights.atmosphere.title">Atmosphäre pur</strong>
+                            <p data-i18n-key="welcome.highlights.atmosphere.body">Wechsle dynamisch zwischen hellen und dunklen Themen und bring das Dorf zum Leuchten.</p>
                         </div>
                     </li>
                 </ul>
             </div>
             <div class="auth-card" role="dialog" aria-labelledby="auth-tabs" aria-modal="true">
-                <div class="auth-tabs" id="auth-tabs" role="tablist" aria-label="Anmeldung und Registrierung">
-                    <button type="button" class="auth-tab active" data-auth-target="login" aria-pressed="true">Anmelden</button>
-                    <button type="button" class="auth-tab" data-auth-target="register" aria-pressed="false">Registrieren</button>
+                <div class="auth-tabs" id="auth-tabs" role="tablist" aria-label="Anmeldung und Registrierung" data-i18n-key="auth.tabs.aria" data-i18n-attr="aria-label">
+                    <button type="button" class="auth-tab active" data-auth-target="login" aria-pressed="true" data-i18n-key="auth.tabs.login">Anmelden</button>
+                    <button type="button" class="auth-tab" data-auth-target="register" aria-pressed="false" data-i18n-key="auth.tabs.register">Registrieren</button>
                 </div>
                 <div id="auth-message" class="auth-message" aria-live="polite"></div>
                 <form id="login-form" class="auth-form active" autocomplete="on">
-                    <label for="login-email">E-Mail-Adresse</label>
-                    <input id="login-email" type="email" name="email" autocomplete="email" required placeholder="du@beispiel.de" />
-                    <label for="login-password">Passwort</label>
-                    <input id="login-password" type="password" name="password" autocomplete="current-password" required placeholder="••••••••" />
-                    <button type="submit" class="primary-btn">Loslegen</button>
+                    <label for="login-email" data-i18n-key="auth.login.emailLabel">E-Mail-Adresse</label>
+                    <input id="login-email" type="email" name="email" autocomplete="email" required placeholder="du@beispiel.de" data-i18n-key="auth.login.emailPlaceholder" data-i18n-attr="placeholder" />
+                    <label for="login-password" data-i18n-key="auth.login.passwordLabel">Passwort</label>
+                    <input id="login-password" type="password" name="password" autocomplete="current-password" required placeholder="••••••••" data-i18n-key="auth.login.passwordPlaceholder" data-i18n-attr="placeholder" />
+                    <button type="submit" class="primary-btn" data-i18n-key="auth.login.submit">Loslegen</button>
                 </form>
                 <form id="register-form" class="auth-form" autocomplete="on">
-                    <label for="register-display-name">Anzeigename</label>
-                    <input id="register-display-name" type="text" name="displayName" autocomplete="name" required placeholder="Spielleitung" />
-                    <label for="register-email">E-Mail-Adresse</label>
-                    <input id="register-email" type="email" name="email" autocomplete="email" required placeholder="du@beispiel.de" />
-                    <label for="register-password">Passwort</label>
-                    <input id="register-password" type="password" name="password" autocomplete="new-password" required placeholder="Mindestens 8 Zeichen" />
-                    <label for="register-admin-code">Administrator-Code <span class="optional">(optional)</span></label>
-                    <input id="register-admin-code" type="text" name="adminCode" autocomplete="one-time-code" placeholder="Nur falls vorhanden" />
-                    <p class="auth-hint">Die erste registrierte Person wird automatisch Admin. Weitere Admins benötigen einen Code.</p>
-                    <button type="submit" class="primary-btn">Registrieren</button>
+                    <label for="register-display-name" data-i18n-key="auth.register.displayNameLabel">Anzeigename</label>
+                    <input id="register-display-name" type="text" name="displayName" autocomplete="name" required placeholder="Spielleitung" data-i18n-key="auth.register.displayNamePlaceholder" data-i18n-attr="placeholder" />
+                    <label for="register-email" data-i18n-key="auth.register.emailLabel">E-Mail-Adresse</label>
+                    <input id="register-email" type="email" name="email" autocomplete="email" required placeholder="du@beispiel.de" data-i18n-key="auth.register.emailPlaceholder" data-i18n-attr="placeholder" />
+                    <label for="register-password" data-i18n-key="auth.register.passwordLabel">Passwort</label>
+                    <input id="register-password" type="password" name="password" autocomplete="new-password" required placeholder="Mindestens 8 Zeichen" data-i18n-key="auth.register.passwordPlaceholder" data-i18n-attr="placeholder" />
+                    <label for="register-admin-code">
+                        <span data-i18n-key="auth.register.adminCodeLabel">Administrator-Code</span>
+                        <span class="optional" data-i18n-key="auth.register.optionalTag">(optional)</span>
+                    </label>
+                    <input id="register-admin-code" type="text" name="adminCode" autocomplete="one-time-code" placeholder="Nur falls vorhanden" data-i18n-key="auth.register.adminCodePlaceholder" data-i18n-attr="placeholder" />
+                    <p class="auth-hint" data-i18n-key="auth.register.hint">Die erste registrierte Person wird automatisch Admin. Weitere Admins benötigen einen Code.</p>
+                    <button type="submit" class="primary-btn" data-i18n-key="auth.register.submit">Registrieren</button>
                 </form>
             </div>
         </div>
@@ -115,13 +118,13 @@
     <main class="container">
         <div class="main-header">
             <div class="main-header-content">
-                <h1>Werwolf</h1>
-                <p class="subtitle">Rollenverteiler für das Werwolf-Spiel</p>
+                <h1 data-i18n-key="app.title">Werwolf</h1>
+                <p class="subtitle" data-i18n-key="app.subtitle">Rollenverteiler für das Werwolf-Spiel</p>
                 <div id="blood-moon-odds" class="blood-moon-odds"></div>
-                <div id="phoenix-pulse-status" class="phoenix-pulse-status" aria-live="polite">Phoenix Pulse: –</div>
+                <div id="phoenix-pulse-status" class="phoenix-pulse-status" aria-live="polite" data-i18n-key="phoenix.status.default">Phoenix Pulse: –</div>
                 <div class="config-action">
                     <button id="open-config-btn" type="button" class="secondary-btn config-btn">
-                        ⚙️ Konfiguration
+                        ⚙️ <span data-i18n-key="toolbar.config">Konfiguration</span>
                     </button>
                 </div>
             </div>
@@ -129,11 +132,11 @@
                 <div id="user-chip" class="user-chip hidden" aria-live="polite" aria-atomic="true">
                     <span class="user-avatar" aria-hidden="true">🎲</span>
                     <div class="user-info">
-                        <span id="user-name" class="user-name">Spielleitung</span>
-                        <span id="user-role" class="user-role-badge hidden">Admin</span>
+                        <span id="user-name" class="user-name" data-i18n-key="user.displayName.fallback">Spielleitung</span>
+                        <span id="user-role" class="user-role-badge hidden" data-i18n-key="user.role.admin">Admin</span>
                     </div>
                 </div>
-                <button id="logout-btn" type="button" class="secondary-btn subtle-btn hidden">Abmelden</button>
+                <button id="logout-btn" type="button" class="secondary-btn subtle-btn hidden" data-i18n-key="auth.logout.button">Abmelden</button>
             </div>
         </div>
 
@@ -270,76 +273,87 @@ Carla
     <div id="config-modal" class="modal" aria-hidden="true">
         <div class="modal-content config-modal-content">
             <button id="close-config-btn" class="modal-close-btn" type="button" aria-label="Konfigurationsmenü schließen">&times;</button>
-            <h3>Konfiguration</h3>
+            <h3 data-i18n-key="settings.modal.title">Konfiguration</h3>
             <div class="config-section">
-                <h4>Ereignisse</h4>
+                <h4 data-i18n-key="settings.events.heading">Ereignisse</h4>
                 <label class="config-toggle" for="events-enabled">
-                    <span>Random Events an</span>
+                    <span data-i18n-key="settings.events.randomEventsEnabled">Random Events an</span>
                     <input type="checkbox" id="events-enabled" checked>
                 </label>
                 <label class="config-toggle" for="blood-moon-enabled">
-                    <span>Blutmond aktiv</span>
+                    <span data-i18n-key="settings.events.bloodMoonEnabled">Blutmond aktiv</span>
                     <input type="checkbox" id="blood-moon-enabled" checked>
                 </label>
                 <div class="config-slider">
-                    <label for="blood-moon-chance">Blutmond-Grundchance</label>
+                    <label for="blood-moon-chance" data-i18n-key="settings.events.bloodMoonChance">Blutmond-Grundchance</label>
                     <input type="range" id="blood-moon-chance" min="0" max="100" step="5" value="20">
                     <span id="blood-moon-chance-display">20%</span>
                 </div>
                 <label class="config-toggle" for="first-night-shield">
-                    <span>Schutznacht aktiv</span>
+                    <span data-i18n-key="settings.events.firstNightShield">Schutznacht aktiv</span>
                     <input type="checkbox" id="first-night-shield" checked>
                 </label>
                 <label class="config-toggle" for="phoenix-pulse-enabled">
-                    <span>Phoenix Pulse aktiv</span>
+                    <span data-i18n-key="settings.events.phoenixPulseEnabled">Phoenix Pulse aktiv</span>
                     <input type="checkbox" id="phoenix-pulse-enabled" checked>
                 </label>
                 <div class="config-slider">
-                    <label for="phoenix-pulse-chance">Phoenix Pulse Chance</label>
+                    <label for="phoenix-pulse-chance" data-i18n-key="settings.events.phoenixPulseChance">Phoenix Pulse Chance</label>
                     <input type="range" id="phoenix-pulse-chance" min="0" max="100" step="1" value="5">
                     <span id="phoenix-pulse-chance-display">5%</span>
                 </div>
                 <div class="config-subsection">
-                    <h5>Ereignisdecks</h5>
+                    <h5 data-i18n-key="settings.events.deckHeading">Ereignisdecks</h5>
                     <div id="event-deck-list" class="event-deck-list"></div>
                 </div>
                 <div class="config-subsection">
-                    <h5>Kampagnen</h5>
-                    <label for="campaign-select">Kampagnen-Preset</label>
+                    <h5 data-i18n-key="settings.events.campaignHeading">Kampagnen</h5>
+                    <label for="campaign-select" data-i18n-key="settings.events.campaignSelect">Kampagnen-Preset</label>
                     <select id="campaign-select"></select>
                     <div id="campaign-preview" class="campaign-preview">
-                        <h6>Kommende Story-Beats</h6>
+                        <h6 data-i18n-key="settings.events.campaignPreview">Kommende Story-Beats</h6>
                         <ul id="campaign-preview-list"></ul>
                     </div>
                     <div id="event-consequence-preview" class="event-consequence-preview">
-                        <h6>Mögliche Konsequenzen</h6>
+                        <h6 data-i18n-key="settings.events.consequencePreview">Mögliche Konsequenzen</h6>
                         <ul id="event-card-preview"></ul>
                     </div>
                 </div>
             </div>
             <div class="config-section">
-                <h4>Spielinformationen</h4>
+                <h4 data-i18n-key="settings.gameInfo.heading">Spielinformationen</h4>
                 <label class="config-toggle" for="reveal-dead-roles">
-                    <span>Rollen der Toten aufdecken</span>
+                    <span data-i18n-key="settings.gameInfo.revealDeadRoles">Rollen der Toten aufdecken</span>
                     <input type="checkbox" id="reveal-dead-roles" checked>
                 </label>
             </div>
             <div class="config-section">
-                <h4>Jobs</h4>
+                <h4 data-i18n-key="settings.jobs.heading">Jobs</h4>
                 <div class="config-slider">
-                    <label for="bodyguard-job-chance">Bodyguard-Job Chance</label>
+                    <label for="bodyguard-job-chance" data-i18n-key="settings.jobs.bodyguardChance">Bodyguard-Job Chance</label>
                     <input type="range" id="bodyguard-job-chance" min="0" max="100" step="5" value="0">
                     <span id="bodyguard-job-chance-display">0%</span>
                 </div>
                 <div class="config-slider">
-                    <label for="doctor-job-chance">Arzt-Job Chance</label>
+                    <label for="doctor-job-chance" data-i18n-key="settings.jobs.doctorChance">Arzt-Job Chance</label>
                     <input type="range" id="doctor-job-chance" min="0" max="100" step="5" value="0">
                     <span id="doctor-job-chance-display">0%</span>
                 </div>
-                <p class="job-note">Nur Dorfbewohner-Rollen können Bodyguard- und Arzt-Jobs erhalten.</p>
+                <p class="job-note" data-i18n-key="settings.jobs.note">Nur Dorfbewohner-Rollen können Bodyguard- und Arzt-Jobs erhalten.</p>
+            </div>
+            <div class="config-section">
+                <h4 data-i18n-key="settings.locale.heading">Sprache &amp; Lokalisierung</h4>
+                <label class="config-select" for="locale-select">
+                    <span data-i18n-key="settings.locale.selectLabel">Bevorzugte Sprache</span>
+                    <select id="locale-select">
+                        <option value="system" data-i18n-key="settings.locale.systemOption">Systemsprache verwenden</option>
+                        <option value="de" data-i18n-key="settings.locale.germanOption">Deutsch</option>
+                        <option value="en" data-i18n-key="settings.locale.englishOption">Englisch</option>
+                    </select>
+                </label>
             </div>
             <div class="config-footer">
-                <button id="close-config-footer-btn" type="button" class="primary-btn">Schließen</button>
+                <button id="close-config-footer-btn" type="button" class="primary-btn" data-i18n-key="settings.footer.close">Schließen</button>
             </div>
         </div>
     </div>
