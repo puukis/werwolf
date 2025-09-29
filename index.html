@@ -240,7 +240,7 @@ Carla
         <div class="modal-content">
             <span class="close-modal">&times;</span>
             <h3 id="role-info-title"></h3>
-            <p id="role-info-desc"></p>
+            <div id="role-info-desc" class="role-info-desc"></div>
         </div>
     </div>
 
@@ -444,6 +444,40 @@ Carla
                 <button id="admin-rollback-checkpoint-btn" type="button" class="secondary-btn small-btn">Zum letzten Checkpoint</button>
             </div>
             <p class="admin-helper-text">Checkpoints werden automatisch zu Beginn jeder Tag- und Nachtphase erstellt.</p>
+        </div>
+        <div class="admin-section role-editor-section">
+            <h5>Rollen &amp; Nachtsequenz</h5>
+            <p id="role-editor-status" class="admin-helper-text">Konfiguration: Standard</p>
+            <div class="role-editor">
+                <div class="role-editor-columns">
+                    <div class="role-editor-card">
+                        <div class="role-editor-card-header">
+                            <h6>Rollen</h6>
+                            <button id="role-editor-add-role" type="button" class="secondary-btn small-btn">Rolle hinzufügen</button>
+                        </div>
+                        <div id="role-editor-roles" class="role-editor-list"></div>
+                    </div>
+                    <div class="role-editor-card">
+                        <div class="role-editor-card-header">
+                            <h6>Jobs</h6>
+                            <button id="role-editor-add-job" type="button" class="secondary-btn small-btn">Job hinzufügen</button>
+                        </div>
+                        <div id="role-editor-jobs" class="role-editor-list"></div>
+                    </div>
+                    <div class="role-editor-card">
+                        <div class="role-editor-card-header">
+                            <h6>Nachtsequenz</h6>
+                            <button id="role-editor-add-night-step" type="button" class="secondary-btn small-btn">Schritt hinzufügen</button>
+                        </div>
+                        <p class="role-editor-hint">Ziehe die Schritte, um die Reihenfolge anzupassen.</p>
+                        <ul id="role-editor-night-list" class="role-editor-night-list"></ul>
+                    </div>
+                </div>
+                <div class="role-editor-actions">
+                    <button id="role-editor-save" type="button" class="primary-btn small-btn" disabled>Konfiguration speichern</button>
+                    <button id="role-editor-reset" type="button" class="secondary-btn small-btn">Standard wiederherstellen</button>
+                </div>
+            </div>
         </div>
         <div class="admin-section sandbox-section">
             <h5>Was-wäre-wenn-Sandbox</h5>

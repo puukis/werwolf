@@ -3,6 +3,10 @@
 const fs = require('fs');
 const path = require('path');
 
+const defaultRoleSchema = JSON.parse(
+  fs.readFileSync(path.join(__dirname, '..', 'data', 'roles.json'), 'utf8')
+);
+
 function createBackendMock() {
   const storage = new Map();
   let savedNames = [];
@@ -10,12 +14,15 @@ function createBackendMock() {
   let theme = null;
   let sessions = [];
   let loggedIn = true;
+  let storedRoleSchema = null;
   const defaultUser = {
     id: 1,
     email: 'test@narrator.de',
     displayName: 'Testleitung',
     isAdmin: true,
   };
+
+  const clone = (value) => (value === null || value === undefined ? null : JSON.parse(JSON.stringify(value)));
 
   const normalizeTheme = (value) => {
     if (typeof value !== 'string') {
@@ -118,6 +125,26 @@ function createBackendMock() {
         }
       }
 
+      if (pathname === '/api/roles-config') {
+        if (method === 'GET') {
+          const schema = storedRoleSchema ? clone(storedRoleSchema) : clone(defaultRoleSchema);
+          const source = storedRoleSchema ? 'custom' : 'default';
+          return response(200, { config: schema, source });
+        }
+        if (method === 'PUT' || method === 'POST') {
+          const next = payload && typeof payload === 'object'
+            ? (payload.config ?? payload)
+            : null;
+          storedRoleSchema = next ? clone(next) : null;
+          const status = method === 'POST' ? 201 : 200;
+          return response(status, { config: storedRoleSchema ? clone(storedRoleSchema) : null, source: 'custom' });
+        }
+        if (method === 'DELETE') {
+          storedRoleSchema = null;
+          return empty();
+        }
+      }
+
       if (pathname === '/api/sessions') {
         if (method === 'GET') {
           const ordered = sessions.slice().sort((a, b) => b.timestamp - a.timestamp);
@@ -175,6 +202,7 @@ function createBackendMock() {
       theme = null;
       sessions = [];
       loggedIn = true;
+      storedRoleSchema = null;
     },
     setTheme(value) {
       theme = typeof value === 'string' ? value : null;
@@ -190,6 +218,9 @@ function createBackendMock() {
     getStorage(key) {
       return storage.has(key) ? storage.get(key) : null;
     },
+    setRoleSchema(schema) {
+      storedRoleSchema = schema ? clone(schema) : null;
+    }
   };
 
   return backend;
@@ -381,6 +412,59 @@ const flushAsync = () => new Promise((resolve) => setTimeout(resolve, 0));
     const latest = testApi.getActionLog()[0];
     expect(latest.type).toBe('error');
     expect(latest.label).toBe('Speichern der Namen fehlgeschlagen');
+  });
+
+  test('custom role schema updates night order and role info', () => {
+    const customSchema = {
+      version: 1,
+      categories: [
+        { id: 'village', label: 'Dorfbewohner' },
+        { id: 'werwolf', label: 'Werwölfe' },
+        { id: 'special', label: 'Sonderrollen' }
+      ],
+      roles: [
+        { name: 'Dorfbewohner', category: 'village', description: 'Schläft ruhig.', abilities: [] },
+        { name: 'Werwolf', category: 'werwolf', description: 'Jagt nachts.', abilities: [] },
+        { name: 'Traumwächter', category: 'special', description: 'Bewacht die Träume des Dorfs.', abilities: ['Kann Visionen deuten.'] }
+      ],
+      jobs: [
+        { name: 'Orakel', description: 'Deutet Visionen der Traumwächterin.', eligibleRoles: ['Traumwächter'] }
+      ],
+      night: {
+        sequence: [
+          { id: 'Orakel', prompt: 'Das Orakel erwacht.', requires: { jobs: ['Orakel'] } },
+          { id: 'Traumwächter', prompt: 'Die Traumwächterin sucht eine Vision.', requires: { roles: ['Traumwächter'] } },
+          { id: 'Werwolf', prompt: 'Werwölfe wählen ihr Opfer.', requires: { roles: ['Werwolf'] } }
+        ]
+      }
+    };
+
+    backend.setRoleSchema(customSchema);
+    testApi.setRoleSchema(customSchema);
+
+    testApi.setState({
+      players: ['Anna', 'Boris', 'Clara'],
+      rolesAssigned: ['Traumwächter', 'Werwolf', 'Dorfbewohner'],
+      jobsAssigned: [['Orakel'], [], []],
+      deadPlayers: []
+    });
+
+    const sequence = testApi.generateNightSequence();
+    expect(sequence).toEqual(['Orakel', 'Traumwächter', 'Werwolf']);
+    expect(testApi.getNightPrompt('Traumwächter')).toBe('Die Traumwächterin sucht eine Vision.');
+
+    testApi.showRoleInfo('Traumwächter', { jobs: ['Orakel'] });
+    const modal = document.getElementById('role-info-modal');
+    expect(modal.style.display).toBe('flex');
+    const abilityItems = Array.from(document.querySelectorAll('#role-info-desc .role-info-abilities li')).map((li) => li.textContent);
+    expect(abilityItems).toContain('Kann Visionen deuten.');
+    const jobBadge = document.querySelector('#role-info-desc .job-badge');
+    expect(jobBadge).toBeTruthy();
+    expect(jobBadge.textContent).toBe('Orakel');
+    const jobDescription = document.querySelector('#role-info-desc .job-description-text');
+    expect(jobDescription).toBeTruthy();
+    expect(jobDescription.textContent).toBe('Deutet Visionen der Traumwächterin.');
+    modal.querySelector('.close-modal').click();
   });
 
   test('bodyguard job chance slider syncs UI, state, and storage', () => {
