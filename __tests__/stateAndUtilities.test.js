@@ -11,7 +11,40 @@ function createBackendMock() {
   const storage = new Map();
   let savedNames = [];
   let savedRoles = [];
+  const themePresets = {
+    version: 1,
+    presets: [
+      {
+        id: 'default',
+        name: 'Standardkulisse',
+        description: 'Standardkulisse',
+        preview: { accent: '#22c55e', background: '' },
+        variants: {
+          light: {
+            label: 'Tag',
+            variables: {
+              '--bg-image': 'none',
+              '--bg-overlay': 'none',
+            },
+          },
+          dark: {
+            label: 'Nacht',
+            variables: {
+              '--bg-image': 'none',
+              '--bg-overlay': 'none',
+            },
+          },
+        },
+      },
+    ],
+  };
   let theme = null;
+  let themeSelection = {
+    presetId: themePresets.presets[0].id,
+    variant: 'light',
+    custom: {},
+    updatedAt: null,
+  };
   let sessions = [];
   let loggedIn = true;
   let storedRoleSchema = null;
@@ -77,6 +110,38 @@ function createBackendMock() {
     },
   });
 
+  const cloneThemePresets = () => JSON.parse(JSON.stringify(themePresets));
+
+  const buildThemeState = () => {
+    const preset = themePresets.presets[0];
+    const resolved = {};
+    Object.entries(preset.variants).forEach(([variantKey, variantConfig]) => {
+      resolved[variantKey] = {
+        variables: { ...(variantConfig.variables || {}) },
+        assets: {
+          presetBackgroundImage: variantConfig.variables?.['--bg-image'] || null,
+        },
+      };
+    });
+    return {
+      presetsVersion: themePresets.version,
+      preset: {
+        id: preset.id,
+        name: preset.name,
+        description: preset.description,
+        preview: { ...preset.preview },
+      },
+      selection: {
+        presetId: themeSelection.presetId,
+        variant: themeSelection.variant,
+        custom: { ...(themeSelection.custom || {}) },
+        updatedAt: themeSelection.updatedAt || undefined,
+      },
+      resolved,
+      warnings: [],
+    };
+  };
+
   const backend = {
     fetch: jest.fn(async (url, options = {}) => {
       const { pathname } = new URL(url, 'http://localhost');
@@ -90,18 +155,43 @@ function createBackendMock() {
         }
       }
 
+      if (pathname.startsWith('/api/themes') && method === 'GET') {
+        return response(200, cloneThemePresets());
+      }
+
       if (pathname === '/api/theme') {
         if (method === 'GET') {
-          return response(200, { theme });
+          if (!themeSelection) {
+            themeSelection = {
+              presetId: themePresets.presets[0].id,
+              variant: theme || 'light',
+              custom: {},
+            };
+          }
+          if (theme) {
+            themeSelection.variant = normalizeTheme(theme) || themeSelection.variant;
+          }
+          return response(200, buildThemeState());
         }
         if (method === 'PUT') {
-          const normalized = normalizeTheme(payload?.theme);
+          let update = payload?.selection ?? payload?.theme ?? payload;
+          if (typeof update === 'string') {
+            update = { variant: update };
+          }
+          const normalized = normalizeTheme(update?.variant);
           if (!normalized) {
             return response(400, { error: 'Ungültiges Theme.' });
           }
+          themeSelection = {
+            ...themeSelection,
+            presetId: update?.presetId || themeSelection.presetId,
+            variant: normalized,
+            custom: update?.custom && typeof update.custom === 'object' ? { ...update.custom } : { ...(themeSelection.custom || {}) },
+            updatedAt: new Date().toISOString(),
+          };
           theme = normalized;
           storage.set('theme', normalized);
-          return response(200, { theme });
+          return response(200, buildThemeState());
         }
       }
 
@@ -286,21 +376,41 @@ function createBackendMock() {
       savedNames = [];
       savedRoles = [];
       theme = null;
+      themeSelection = {
+        presetId: themePresets.presets[0].id,
+        variant: 'light',
+        custom: {},
+        updatedAt: null,
+      };
       sessions = [];
       loggedIn = true;
       storedRoleSchema = null;
       ensureLobbies();
     },
     setTheme(value) {
-      theme = typeof value === 'string' ? value : null;
-      if (theme) {
-        storage.set('theme', theme);
+      const normalized = normalizeTheme(value);
+      if (normalized) {
+        theme = normalized;
+        themeSelection = {
+          ...themeSelection,
+          presetId: themeSelection.presetId || themePresets.presets[0].id,
+          variant: normalized,
+          updatedAt: new Date().toISOString(),
+        };
+        storage.set('theme', normalized);
       } else {
+        theme = null;
+        themeSelection = {
+          presetId: themePresets.presets[0].id,
+          variant: 'light',
+          custom: {},
+          updatedAt: null,
+        };
         storage.delete('theme');
       }
     },
     getTheme() {
-      return theme;
+      return themeSelection?.variant || 'light';
     },
     getStorage(key) {
       return storage.has(key) ? storage.get(key) : null;

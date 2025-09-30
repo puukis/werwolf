@@ -38,7 +38,7 @@ A web-based role-playing game of deception and deduction. This is a digital vers
 - **Dynamic Role Assignment**: Automatically suggests role compositions based on the number of players.
 - **Interactive Gameplay**: Features distinct night and day phases with interactive choices for special roles.
 - **Special Roles**: Includes a variety of roles like Werwolf, Seer, Witch, Amor, and more, each with unique abilities.
-- **Light & Dark Mode**: A sleek theme toggle for comfortable viewing in any lighting condition.
+- **Individuelle Themes & Kulissen**: Wähle aus Presets, lade eigene Hintergründe hoch und passe Akzentfarben live für jede Lobby an.
 - **Session Management**: Save and load previous game sessions to pick up right where you left off.
 - **Random Events**: An optional "Full Moon" event that gives werewolves an extra kill, adding a layer of unpredictability.
 - **Responsive Design**: Playable on both desktop and mobile devices.

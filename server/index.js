@@ -52,6 +52,198 @@ const ROLE_SCHEMA_KEY = 'werwolfRoleSchema';
 const defaultRoleSchemaPath = path.join(__dirname, '..', 'data', 'roles.json');
 let defaultRoleSchemaCache = null;
 
+const THEME_SELECTION_KEY = 'theme';
+const defaultThemePresetPath = path.join(__dirname, '..', 'data', 'themes.json');
+let defaultThemePresetCache = null;
+const SSE_KEEPALIVE_INTERVAL_MS = 25000;
+const MAX_THEME_UPLOAD_BYTES = 1024 * 1024 * 1.5;
+
+const sseClientsByLobby = new Map();
+const EMBEDDED_THEME_PRESETS = Object.freeze({
+  version: 1,
+  presets: [
+    {
+      id: 'evergreen-hollow',
+      name: 'Immergrüne Lichtung',
+      description: 'Sattes Waldgrün mit mystischem Nebel und warmem Glasglanz.',
+      preview: {
+        accent: '#22c55e',
+        background: 'https://images.unsplash.com/photo-1691268079349-1e22a841a6de?q=80&w=1920&auto=format&fit=crop'
+      },
+      variants: {
+        light: {
+          label: 'Tag',
+          variables: {
+            '--bg-fallback': '#132019',
+            '--bg-image': 'url("https://images.unsplash.com/photo-1691268079349-1e22a841a6de?q=80&w=2069&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D")',
+            '--ambient-overlay': 'radial-gradient(120% 120% at 80% 20%, rgba(102, 153, 123, 0.18) 0%, rgba(102, 153, 123, 0) 70%)',
+            '--bg-overlay': 'linear-gradient(210deg, rgba(20, 32, 25, 0.76) 0%, rgba(10, 18, 13, 0.72) 55%, rgba(5, 10, 7, 0.78) 100%)',
+            '--container-bg': 'rgba(243, 248, 244, 0.72)',
+            '--container-bg-strong': 'rgba(230, 239, 233, 0.82)',
+            '--text-color': 'rgba(23, 37, 30, 0.95)',
+            '--text-light': 'rgba(73, 97, 84, 0.82)',
+            '--border-color': 'rgba(120, 153, 133, 0.36)',
+            '--border-strong': 'rgba(120, 153, 133, 0.55)',
+            '--button-bg': 'rgba(34, 197, 94, 0.88)',
+            '--button-hover': 'rgba(22, 163, 74, 0.92)',
+            '--button-secondary-bg': 'rgba(220, 235, 225, 0.7)',
+            '--button-secondary-hover': 'rgba(201, 225, 208, 0.75)',
+            '--button-danger-bg': 'rgba(239, 68, 68, 0.9)',
+            '--button-danger-hover': 'rgba(220, 38, 38, 0.95)',
+            '--button-danger-text': '#ffffff',
+            '--badge-readonly-bg': 'rgba(226, 232, 240, 0.7)',
+            '--badge-readonly-text': 'rgba(30, 41, 59, 0.82)',
+            '--result-bg': 'rgba(233, 241, 236, 0.67)',
+            '--role-color': 'rgba(26, 42, 34, 0.95)',
+            '--special-role-color': 'rgba(27, 120, 86, 0.85)',
+            '--job-bodyguard-bg': 'rgba(32, 120, 92, 0.85)',
+            '--job-bodyguard-text': 'rgba(236, 253, 245, 0.98)',
+            '--job-doctor-bg': 'rgba(231, 175, 78, 0.88)',
+            '--job-doctor-text': 'rgba(45, 33, 0, 0.85)',
+            '--input-bg': 'rgba(244, 249, 245, 0.74)',
+            '--input-border': 'rgba(120, 153, 133, 0.45)',
+            '--shadow-color': 'rgba(10, 24, 16, 0.2)',
+            '--glass-blur-sm': '14px',
+            '--glass-blur-lg': '30px',
+            '--glass-shadow-soft': '0 22px 54px rgba(20, 32, 25, 0.15)',
+            '--glass-shadow-strong': '0 48px 96px rgba(10, 18, 13, 0.18)',
+            '--theme-toggle-bg': 'rgba(236, 246, 238, 0.7)',
+            '--theme-toggle-border': 'rgba(120, 153, 133, 0.38)',
+            '--theme-toggle-hover': 'rgba(224, 238, 229, 0.88)',
+            '--theme-toggle-shadow': '0 18px 32px rgba(12, 28, 18, 0.2)',
+            '--theme-toggle-fallback': 'rgba(214, 227, 218, 0.9)',
+            '--glow-color': 'rgba(146, 200, 152, 0.24)',
+            '--lighting-wash-color': 'rgba(233, 249, 238, 0.32)',
+            '--lighting-wash-opacity': '0',
+            '--lighting-vignette-color': 'rgba(12, 24, 18, 0.75)',
+            '--lighting-vignette-opacity': '0',
+            '--lighting-spotlight-color': 'rgba(255, 255, 245, 0.3)',
+            '--lighting-spotlight-opacity': '0',
+            '--lighting-spotlight-scale': '1',
+            '--lighting-master-opacity': '0',
+            '--particles-opacity': '0',
+            '--particles-color': 'rgba(255, 255, 255, 0.4)',
+            '--particles-size': '220px',
+            '--particles-blur': '70px',
+            '--ambient-transition': '0.85s ease',
+            '--glass-panel-bg': 'rgba(245, 249, 246, 0.64)',
+            '--glass-panel-strong-bg': 'rgba(230, 239, 234, 0.74)',
+            '--glass-panel-border': 'rgba(143, 176, 155, 0.4)',
+            '--glass-panel-highlight': 'rgba(255, 255, 255, 0.82)',
+            '--glass-panel-specular': 'rgba(95, 168, 121, 0.18)',
+            '--glass-panel-shadow': '0 24px 60px rgba(16, 28, 22, 0.15), 0 12px 28px rgba(52, 168, 83, 0.12)',
+            '--glass-panel-hover-shadow': '0 34px 88px rgba(16, 28, 22, 0.18), 0 18px 40px rgba(52, 168, 83, 0.16)',
+            '--glass-panel-fallback': 'rgba(238, 245, 240, 0.94)',
+            '--card-surface-bg': 'rgba(17, 25, 40, 0.32)',
+            '--card-surface-strong-bg': 'rgba(17, 25, 40, 0.42)',
+            '--card-surface-border': 'rgba(255, 255, 255, 0.125)',
+            '--card-surface-shadow': '0 32px 72px rgba(10, 24, 16, 0.26)',
+            '--card-surface-hover-shadow': '0 44px 96px rgba(10, 24, 16, 0.32)',
+            '--card-surface-fallback': 'rgba(230, 239, 234, 0.92)',
+            '--glass-button-bg-start': 'rgba(34, 197, 94, 0.95)',
+            '--glass-button-bg-end': 'rgba(16, 185, 129, 0.85)',
+            '--glass-button-hover-start': 'rgba(22, 163, 74, 0.98)',
+            '--glass-button-hover-end': 'rgba(5, 150, 105, 0.92)',
+            '--glass-button-border': 'rgba(224, 255, 239, 0.58)',
+            '--glass-button-shadow': '0 20px 36px rgba(22, 163, 74, 0.28), 0 12px 24px rgba(15, 35, 22, 0.2)',
+            '--glass-button-hover-shadow': '0 26px 44px rgba(22, 163, 74, 0.32), 0 14px 28px rgba(15, 35, 22, 0.22)',
+            '--glass-secondary-bg-start': 'rgba(238, 245, 240, 0.74)',
+            '--glass-secondary-bg-end': 'rgba(214, 227, 218, 0.68)',
+            '--glass-secondary-hover-start': 'rgba(228, 239, 232, 0.82)',
+            '--glass-secondary-hover-end': 'rgba(210, 225, 214, 0.74)',
+            '--glass-secondary-border': 'rgba(143, 176, 155, 0.45)',
+            '--glass-secondary-shadow': '0 14px 32px rgba(120, 153, 133, 0.22), 0 10px 22px rgba(16, 28, 22, 0.15)',
+            '--glass-secondary-hover-shadow': '0 20px 40px rgba(120, 153, 133, 0.26), 0 12px 26px rgba(16, 28, 22, 0.18)',
+            '--glass-focus-ring': 'rgba(34, 197, 94, 0.52)',
+            '--glass-sheen-angle': '135deg'
+          }
+        },
+        dark: {
+          label: 'Nacht',
+          variables: {
+            '--bg-fallback': '#070f09',
+            '--bg-image': 'url("https://images.unsplash.com/photo-1691268079349-1e22a841a6de?q=80&w=2069&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D")',
+            '--ambient-overlay': 'radial-gradient(120% 120% at 20% 20%, rgba(74, 222, 128, 0.16) 0%, rgba(74, 222, 128, 0) 70%)',
+            '--bg-overlay': 'linear-gradient(210deg, rgba(5, 12, 8, 0.82) 0%, rgba(4, 11, 7, 0.82) 55%, rgba(1, 4, 2, 0.86) 100%)',
+            '--container-bg': 'rgba(13, 24, 17, 0.74)',
+            '--container-bg-strong': 'rgba(18, 32, 23, 0.78)',
+            '--text-color': 'rgba(220, 235, 225, 0.96)',
+            '--text-light': 'rgba(158, 175, 165, 0.78)',
+            '--border-color': 'rgba(62, 95, 74, 0.44)',
+            '--border-strong': 'rgba(94, 135, 109, 0.6)',
+            '--button-bg': 'rgba(22, 163, 74, 0.88)',
+            '--button-hover': 'rgba(21, 128, 61, 0.9)',
+            '--button-secondary-bg': 'rgba(24, 38, 30, 0.72)',
+            '--button-secondary-hover': 'rgba(34, 51, 39, 0.78)',
+            '--button-danger-bg': 'rgba(239, 68, 68, 0.82)',
+            '--button-danger-hover': 'rgba(252, 165, 165, 0.88)',
+            '--button-danger-text': '#ffffff',
+            '--badge-readonly-bg': 'rgba(55, 65, 81, 0.72)',
+            '--badge-readonly-text': 'rgba(248, 250, 252, 0.9)',
+            '--result-bg': 'rgba(20, 34, 26, 0.67)',
+            '--role-color': 'rgba(222, 236, 227, 0.95)',
+            '--special-role-color': 'rgba(74, 222, 128, 0.85)',
+            '--job-bodyguard-bg': 'rgba(16, 115, 78, 0.82)',
+            '--job-bodyguard-text': 'rgba(227, 252, 239, 0.96)',
+            '--job-doctor-bg': 'rgba(210, 161, 60, 0.82)',
+            '--job-doctor-text': 'rgba(31, 20, 0, 0.86)',
+            '--input-bg': 'rgba(24, 38, 30, 0.74)',
+            '--input-border': 'rgba(62, 95, 74, 0.5)',
+            '--shadow-color': 'rgba(4, 10, 7, 0.6)',
+            '--glass-blur-sm': '16px',
+            '--glass-blur-lg': '34px',
+            '--glass-shadow-soft': '0 24px 54px rgba(3, 8, 6, 0.48)',
+            '--glass-shadow-strong': '0 56px 104px rgba(3, 8, 6, 0.6)',
+            '--theme-toggle-bg': 'rgba(19, 32, 24, 0.58)',
+            '--theme-toggle-border': 'rgba(62, 95, 74, 0.48)',
+            '--theme-toggle-hover': 'rgba(28, 45, 34, 0.72)',
+            '--theme-toggle-shadow': '0 20px 36px rgba(3, 8, 6, 0.6)',
+            '--theme-toggle-fallback': 'rgba(61, 76, 65, 0.85)',
+            '--glow-color': 'rgba(74, 222, 128, 0.28)',
+            '--lighting-wash-color': 'rgba(45, 72, 56, 0.48)',
+            '--lighting-wash-opacity': '0',
+            '--lighting-vignette-color': 'rgba(2, 6, 4, 0.85)',
+            '--lighting-vignette-opacity': '0',
+            '--lighting-spotlight-color': 'rgba(255, 204, 158, 0.32)',
+            '--lighting-spotlight-opacity': '0',
+            '--lighting-spotlight-scale': '1.1',
+            '--lighting-master-opacity': '0',
+            '--particles-opacity': '0',
+            '--particles-color': 'rgba(255, 206, 170, 0.42)',
+            '--particles-size': '260px',
+            '--particles-blur': '90px',
+            '--ambient-transition': '0.95s ease',
+            '--glass-panel-bg': 'rgba(16, 28, 22, 0.74)',
+            '--glass-panel-strong-bg': 'rgba(21, 36, 28, 0.78)',
+            '--glass-panel-border': 'rgba(62, 95, 74, 0.52)',
+            '--glass-panel-highlight': 'rgba(158, 175, 165, 0.3)',
+            '--glass-panel-specular': 'rgba(74, 222, 128, 0.26)',
+            '--glass-panel-shadow': '0 28px 64px rgba(3, 8, 6, 0.58), 0 16px 36px rgba(34, 197, 94, 0.18)',
+            '--glass-panel-hover-shadow': '0 36px 88px rgba(3, 8, 6, 0.64), 0 20px 44px rgba(34, 197, 94, 0.22)',
+            '--glass-panel-fallback': 'rgba(21, 36, 28, 0.85)',
+            '--glass-button-bg-start': 'rgba(34, 197, 94, 0.92)',
+            '--glass-button-bg-end': 'rgba(16, 185, 129, 0.88)',
+            '--glass-button-hover-start': 'rgba(22, 163, 74, 0.98)',
+            '--glass-button-hover-end': 'rgba(5, 150, 105, 0.92)',
+            '--glass-button-border': 'rgba(125, 211, 161, 0.4)',
+            '--glass-button-shadow': '0 22px 42px rgba(34, 197, 94, 0.35), 0 16px 32px rgba(3, 8, 6, 0.55)',
+            '--glass-button-hover-shadow': '0 28px 52px rgba(34, 197, 94, 0.4), 0 20px 40px rgba(3, 8, 6, 0.6)',
+            '--glass-secondary-bg-start': 'rgba(28, 45, 34, 0.78)',
+            '--glass-secondary-bg-end': 'rgba(19, 32, 24, 0.72)',
+            '--glass-secondary-hover-start': 'rgba(38, 56, 44, 0.86)',
+            '--glass-secondary-hover-end': 'rgba(25, 40, 30, 0.78)',
+            '--glass-secondary-border': 'rgba(62, 95, 74, 0.55)',
+            '--glass-secondary-shadow': '0 16px 36px rgba(4, 10, 7, 0.58), 0 10px 24px rgba(34, 197, 94, 0.18)',
+            '--glass-secondary-hover-shadow': '0 22px 44px rgba(4, 10, 7, 0.62), 0 12px 28px rgba(34, 197, 94, 0.22)',
+            '--glass-focus-ring': 'rgba(34, 197, 94, 0.6)',
+            '--glass-sheen-angle': '135deg'
+          }
+        }
+      }
+    }
+  ]
+});
+
 const LOBBY_HEADER = 'x-werwolf-lobby';
 const LOBBY_JOIN_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const SUPPORTED_LOCALES = new Set(['de', 'en']);
@@ -210,6 +402,491 @@ function handleApiError(res, error, fallbackMessage) {
     console.error('API-Fehler', error);
   }
   return res.status(500).json({ error: fallbackMessage || 'Unbekannter Fehler.' });
+}
+
+function getSseClientsForLobby(lobbyId) {
+  if (!sseClientsByLobby.has(lobbyId)) {
+    sseClientsByLobby.set(lobbyId, new Set());
+  }
+  return sseClientsByLobby.get(lobbyId);
+}
+
+function cleanupSseClient(client) {
+  if (!client) {
+    return;
+  }
+  if (client.keepAlive) {
+    clearInterval(client.keepAlive);
+  }
+  const clients = sseClientsByLobby.get(client.lobbyId);
+  if (clients) {
+    clients.delete(client);
+    if (clients.size === 0) {
+      sseClientsByLobby.delete(client.lobbyId);
+    }
+  }
+}
+
+function registerSseClient(lobbyId, res) {
+  const clientId = typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const client = {
+    id: clientId,
+    lobbyId,
+    res,
+    keepAlive: null,
+  };
+  client.keepAlive = setInterval(() => {
+    try {
+      res.write(': keep-alive\n\n');
+    } catch (error) {
+      cleanupSseClient(client);
+    }
+  }, SSE_KEEPALIVE_INTERVAL_MS);
+  res.on('close', () => cleanupSseClient(client));
+  res.on('error', () => cleanupSseClient(client));
+  getSseClientsForLobby(lobbyId).add(client);
+  return client;
+}
+
+function sendSseEvent(client, eventName, payload) {
+  if (!client || !client.res || client.res.writableEnded) {
+    cleanupSseClient(client);
+    return;
+  }
+  try {
+    client.res.write(`event: ${eventName}\n`);
+    const data = payload === undefined ? {} : payload;
+    client.res.write(`data: ${JSON.stringify(data)}\n\n`);
+  } catch (error) {
+    cleanupSseClient(client);
+  }
+}
+
+function broadcastSseEvent(lobbyId, eventName, payload) {
+  const clients = sseClientsByLobby.get(lobbyId);
+  if (!clients || clients.size === 0) {
+    return;
+  }
+  for (const client of [...clients]) {
+    sendSseEvent(client, eventName, payload);
+  }
+}
+
+const HEX_COLOR_REGEX = /^#([0-9a-fA-F]{6})$/;
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function parseHexColor(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const match = value.trim().match(HEX_COLOR_REGEX);
+  if (!match) {
+    return null;
+  }
+  const hex = match[1];
+  return {
+    r: parseInt(hex.slice(0, 2), 16),
+    g: parseInt(hex.slice(2, 4), 16),
+    b: parseInt(hex.slice(4, 6), 16),
+  };
+}
+
+function formatRgba(color, alpha = 1) {
+  const normalizedAlpha = clamp(alpha, 0, 1);
+  return `rgba(${color.r}, ${color.g}, ${color.b}, ${Number(normalizedAlpha.toFixed(3))})`;
+}
+
+function adjustColor(color, amount) {
+  const ratio = clamp(amount, -1, 1);
+  const adjustChannel = (channel) => {
+    if (ratio >= 0) {
+      return Math.round(channel + (255 - channel) * ratio);
+    }
+    return Math.round(channel + channel * ratio);
+  };
+  return {
+    r: clamp(adjustChannel(color.r), 0, 255),
+    g: clamp(adjustChannel(color.g), 0, 255),
+    b: clamp(adjustChannel(color.b), 0, 255),
+  };
+}
+
+function mixColors(color, target, amount) {
+  const ratio = clamp(amount, 0, 1);
+  return {
+    r: Math.round(color.r + (target.r - color.r) * ratio),
+    g: Math.round(color.g + (target.g - color.g) * ratio),
+    b: Math.round(color.b + (target.b - color.b) * ratio),
+  };
+}
+
+function srgbChannelToLinear(value) {
+  const channel = value / 255;
+  if (channel <= 0.04045) {
+    return channel / 12.92;
+  }
+  return ((channel + 0.055) / 1.055) ** 2.4;
+}
+
+function relativeLuminance(color) {
+  const r = srgbChannelToLinear(color.r);
+  const g = srgbChannelToLinear(color.g);
+  const b = srgbChannelToLinear(color.b);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrastRatio(colorA, colorB) {
+  const lumA = relativeLuminance(colorA);
+  const lumB = relativeLuminance(colorB);
+  const lighter = Math.max(lumA, lumB);
+  const darker = Math.min(lumA, lumB);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function toCssUrl(value) {
+  if (typeof value !== 'string' || !value.trim()) {
+    return null;
+  }
+  const sanitized = value.replace(/"/g, '\\"');
+  return `url("${sanitized}")`;
+}
+
+function sanitizeAccentColor(value) {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!HEX_COLOR_REGEX.test(trimmed)) {
+    return null;
+  }
+  return `#${trimmed.slice(1).toLowerCase()}`;
+}
+
+function sanitizeBackgroundInput(value) {
+  if (value === null) {
+    return null;
+  }
+  let type = 'url';
+  let source = null;
+  if (typeof value === 'string') {
+    source = value.trim();
+    if (!source) {
+      return null;
+    }
+    if (source.startsWith('data:image/')) {
+      type = 'upload';
+    }
+  } else if (value && typeof value === 'object') {
+    type = toTrimmedString(value.type) || 'url';
+    if (typeof value.value === 'string') {
+      source = value.value.trim();
+    } else if (typeof value.url === 'string') {
+      source = value.url.trim();
+    } else if (typeof value.data === 'string') {
+      source = value.data.trim();
+    }
+  }
+  if (!source) {
+    return null;
+  }
+  if (source.startsWith('data:image/')) {
+    if (Buffer.byteLength(source, 'utf8') > MAX_THEME_UPLOAD_BYTES) {
+      return null;
+    }
+    return { type: 'upload', value: source };
+  }
+  const normalized = source.replace(/\s+/g, '');
+  if (!/^https?:\/\//i.test(normalized)) {
+    return null;
+  }
+  return { type: 'url', value: normalized };
+}
+
+function normalizeThemePresetList(data) {
+  const version = Number.isFinite(Number(data?.version)) ? Number(data.version) : 1;
+  const presets = [];
+  if (Array.isArray(data?.presets)) {
+    data.presets.forEach((preset, index) => {
+      const id = toTrimmedString(preset?.id) || `preset-${index + 1}`;
+      const name = toTrimmedString(preset?.name) || 'Theme';
+      const description = toTrimmedString(preset?.description) || '';
+      const preview = {
+        accent: sanitizeAccentColor(preset?.preview?.accent) || '#22c55e',
+        background: toTrimmedString(preset?.preview?.background) || '',
+      };
+      const variants = {};
+      if (preset && typeof preset.variants === 'object') {
+        Object.entries(preset.variants).forEach(([variantKey, variantValue]) => {
+          const key = toTrimmedString(variantKey).toLowerCase();
+          if (!key) {
+            return;
+          }
+          const label = toTrimmedString(variantValue?.label) || key;
+          const variables = {};
+          if (variantValue && typeof variantValue.variables === 'object') {
+            Object.entries(variantValue.variables).forEach(([varName, varValue]) => {
+              if (typeof varName === 'string' && varName.startsWith('--') && varValue !== undefined && varValue !== null) {
+                variables[varName] = String(varValue);
+              }
+            });
+          }
+          if (Object.keys(variables).length > 0) {
+            variants[key] = { label, variables };
+          }
+        });
+      }
+      if (Object.keys(variants).length > 0) {
+        presets.push({ id, name, description, preview, variants });
+      }
+    });
+  }
+  if (presets.length === 0) {
+    if (data !== EMBEDDED_THEME_PRESETS) {
+      return normalizeThemePresetList(EMBEDDED_THEME_PRESETS);
+    }
+    return { version: 1, presets: EMBEDDED_THEME_PRESETS.presets };
+  }
+  return { version, presets };
+}
+
+async function loadThemePresets() {
+  if (defaultThemePresetCache) {
+    return cloneJson(defaultThemePresetCache);
+  }
+  try {
+    const raw = await fs.promises.readFile(defaultThemePresetPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    defaultThemePresetCache = normalizeThemePresetList(parsed);
+  } catch (error) {
+    console.error('Theme-Presets konnten nicht geladen werden:', error);
+    defaultThemePresetCache = normalizeThemePresetList(EMBEDDED_THEME_PRESETS);
+  }
+  return cloneJson(defaultThemePresetCache);
+}
+
+function findThemePreset(presets, presetId) {
+  return presets.find((preset) => preset.id === presetId) || presets[0];
+}
+
+function normalizeThemeSelection(rawInput, presets) {
+  const warnings = [];
+  const { presets: presetList } = normalizeThemePresetList({ version: 1, presets });
+  const availablePresets = presetList.length > 0 ? presetList : EMBEDDED_THEME_PRESETS.presets;
+  const defaultPreset = availablePresets[0];
+  let presetId = defaultPreset?.id || 'fallback';
+  let variant = 'light';
+  const custom = {};
+  let updatedAt = null;
+
+  if (typeof rawInput === 'string') {
+    variant = rawInput === 'dark' ? 'dark' : 'light';
+  } else if (rawInput && typeof rawInput === 'object') {
+    if (typeof rawInput.presetId === 'string') {
+      const trimmed = toTrimmedString(rawInput.presetId);
+      if (trimmed) {
+        presetId = trimmed;
+      }
+    }
+    if (typeof rawInput.variant === 'string') {
+      const trimmed = toTrimmedString(rawInput.variant).toLowerCase();
+      if (trimmed) {
+        variant = trimmed;
+      }
+    }
+    if (typeof rawInput.updatedAt === 'string') {
+      updatedAt = rawInput.updatedAt;
+    }
+    const customSource = rawInput.custom && typeof rawInput.custom === 'object' ? rawInput.custom : rawInput;
+    if (customSource && typeof customSource === 'object') {
+      if (Object.prototype.hasOwnProperty.call(customSource, 'accentColor')) {
+        const accent = sanitizeAccentColor(customSource.accentColor);
+        if (accent) {
+          custom.accentColor = accent;
+        } else if (customSource.accentColor !== null && customSource.accentColor !== undefined) {
+          warnings.push('Akzentfarbe konnte nicht übernommen werden.');
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(customSource, 'backgroundImage')) {
+        const background = sanitizeBackgroundInput(customSource.backgroundImage);
+        if (background) {
+          custom.backgroundImage = background;
+        } else if (customSource.backgroundImage !== null && customSource.backgroundImage !== undefined) {
+          warnings.push('Hintergrund konnte nicht übernommen werden.');
+        }
+      }
+    }
+  }
+
+  const preset = findThemePreset(availablePresets, presetId);
+  const variantKeys = Object.keys(preset?.variants || {});
+  if (!variantKeys.includes(variant)) {
+    variant = variantKeys.includes('light') ? 'light' : variantKeys[0] || 'light';
+  }
+
+  const selection = {
+    presetId: preset?.id || presetId,
+    variant,
+    custom: Object.keys(custom).length > 0 ? custom : {},
+  };
+  if (updatedAt) {
+    selection.updatedAt = updatedAt;
+  }
+
+  return { selection, warnings };
+}
+
+function mergeThemeSelection(baseSelection, update, presets) {
+  const raw = {
+    presetId: baseSelection.presetId,
+    variant: baseSelection.variant,
+    updatedAt: baseSelection.updatedAt,
+    custom: { ...baseSelection.custom },
+  };
+  if (update && typeof update === 'object') {
+    if (typeof update.presetId === 'string') {
+      raw.presetId = update.presetId;
+    }
+    if (typeof update.variant === 'string') {
+      raw.variant = update.variant;
+    }
+    const updateCustom = update.custom && typeof update.custom === 'object' ? update.custom : null;
+    if (updateCustom) {
+      if (Object.prototype.hasOwnProperty.call(updateCustom, 'accentColor')) {
+        if (updateCustom.accentColor === null) {
+          delete raw.custom.accentColor;
+        } else {
+          raw.custom.accentColor = updateCustom.accentColor;
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(updateCustom, 'backgroundImage')) {
+        if (updateCustom.backgroundImage === null) {
+          delete raw.custom.backgroundImage;
+        } else {
+          raw.custom.backgroundImage = updateCustom.backgroundImage;
+        }
+      }
+    }
+  }
+  return normalizeThemeSelection(raw, presets);
+}
+
+function buildAccentOverrides(accentRgb, variantKey) {
+  const baseAlpha = variantKey === 'dark' ? 0.88 : 0.88;
+  const hoverAlpha = variantKey === 'dark' ? 0.9 : 0.92;
+  const start = adjustColor(accentRgb, 0.12);
+  const strongLight = mixColors(accentRgb, { r: 255, g: 255, b: 255 }, 0.45);
+  const hoverStart = adjustColor(accentRgb, -0.08);
+  const hoverEnd = adjustColor(accentRgb, -0.2);
+  const glowBase = mixColors(accentRgb, { r: 255, g: 255, b: 255 }, 0.35);
+  const lightGlowAlpha = variantKey === 'dark' ? 0.28 : 0.24;
+  const shadowAlpha = variantKey === 'dark' ? 0.32 : 0.28;
+  const hoverShadowAlpha = shadowAlpha + 0.04;
+  return {
+    '--button-bg': formatRgba(accentRgb, baseAlpha),
+    '--button-hover': formatRgba(hoverStart, hoverAlpha),
+    '--glass-button-bg-start': formatRgba(start, variantKey === 'dark' ? 0.94 : 0.95),
+    '--glass-button-bg-end': formatRgba(accentRgb, variantKey === 'dark' ? 0.88 : 0.85),
+    '--glass-button-hover-start': formatRgba(hoverStart, 0.98),
+    '--glass-button-hover-end': formatRgba(hoverEnd, 0.92),
+    '--glass-button-border': formatRgba(strongLight, variantKey === 'dark' ? 0.45 : 0.58),
+    '--glass-button-shadow': `0 20px 36px rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, ${Number(shadowAlpha.toFixed(3))}), 0 12px 24px rgba(15, 35, 22, 0.2)` ,
+    '--glass-button-hover-shadow': `0 26px 44px rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, ${Number(hoverShadowAlpha.toFixed(3))}), 0 14px 28px rgba(15, 35, 22, 0.22)` ,
+    '--glass-focus-ring': formatRgba(accentRgb, variantKey === 'dark' ? 0.6 : 0.52),
+    '--glow-color': formatRgba(glowBase, lightGlowAlpha),
+  };
+}
+
+function resolveThemeSelection(selection, presets) {
+  const preset = findThemePreset(presets, selection.presetId) || presets[0];
+  const warnings = [];
+  const resolved = {};
+  const accentHex = selection.custom?.accentColor;
+  let accentRgb = null;
+  if (accentHex) {
+    const parsed = parseHexColor(accentHex);
+    if (parsed) {
+      const contrast = contrastRatio(parsed, { r: 255, g: 255, b: 255 });
+      if (contrast >= 4.5) {
+        accentRgb = parsed;
+      } else {
+        warnings.push('Akzentfarbe wurde zurückgesetzt, da der Kontrast zu gering war.');
+      }
+    }
+  }
+  const backgroundOverride = selection.custom?.backgroundImage || null;
+
+  Object.entries(preset.variants).forEach(([variantKey, variantConfig]) => {
+    const variables = { ...variantConfig.variables };
+    const assets = {
+      backgroundImage: null,
+      presetBackgroundImage: variantConfig.variables['--bg-image'] || null,
+    };
+    if (accentRgb) {
+      Object.assign(variables, buildAccentOverrides(accentRgb, variantKey));
+    }
+    if (backgroundOverride && backgroundOverride.value) {
+      const cssUrl = toCssUrl(backgroundOverride.value);
+      if (cssUrl) {
+        variables['--bg-image'] = cssUrl;
+        assets.backgroundImage = {
+          type: backgroundOverride.type || 'custom',
+          source: backgroundOverride.value,
+        };
+      }
+    }
+    resolved[variantKey] = { variables, assets };
+  });
+
+  if (!resolved[selection.variant]) {
+    const fallbackVariant = Object.keys(resolved)[0];
+    selection.variant = fallbackVariant || selection.variant;
+  }
+
+  return { preset, resolved, warnings };
+}
+
+async function getThemeState(context) {
+  const presets = await loadThemePresets();
+  const stored = await getSetting(context, THEME_SELECTION_KEY);
+  const { selection, warnings: normalizeWarnings } = normalizeThemeSelection(stored, presets.presets);
+  const { preset, resolved, warnings: resolveWarnings } = resolveThemeSelection(selection, presets.presets);
+  return {
+    presetsVersion: presets.version,
+    preset: preset ? { id: preset.id, name: preset.name, description: preset.description, preview: preset.preview } : null,
+    selection,
+    resolved,
+    warnings: [...normalizeWarnings, ...resolveWarnings],
+  };
+}
+
+async function saveThemeSelection(context, selection) {
+  const payload = { ...selection, updatedAt: new Date().toISOString() };
+  await setSetting(context, THEME_SELECTION_KEY, payload);
+  return payload;
+}
+
+async function applyThemeUpdate(context, update) {
+  const presets = await loadThemePresets();
+  const stored = await getSetting(context, THEME_SELECTION_KEY);
+  const { selection: baseSelection } = normalizeThemeSelection(stored, presets.presets);
+  const { selection, warnings: mergeWarnings } = mergeThemeSelection(baseSelection, update, presets.presets);
+  const persisted = await saveThemeSelection(context, selection);
+  const { preset, resolved, warnings: resolveWarnings } = resolveThemeSelection(persisted, presets.presets);
+  return {
+    presetsVersion: presets.version,
+    preset: preset ? { id: preset.id, name: preset.name, description: preset.description, preview: preset.preview } : null,
+    selection: persisted,
+    resolved,
+    warnings: [...mergeWarnings, ...resolveWarnings],
+  };
 }
 
 function generateJoinCode(length = 8) {
@@ -548,10 +1225,12 @@ async function resolveLobbyContext(req, { requireWriteAccess = false } = {}) {
   }
 
   const rawHeader = req.headers?.[LOBBY_HEADER] || req.headers?.[LOBBY_HEADER.toUpperCase()] || '';
+  const rawQueryLobby = typeof req.query?.lobby === 'string' ? req.query.lobby : '';
+  const lobbySelector = rawHeader || rawQueryLobby;
   let lobby;
 
-  if (rawHeader && rawHeader.toLowerCase() !== 'personal') {
-    const parsed = Number(rawHeader);
+  if (lobbySelector && lobbySelector.toLowerCase() !== 'personal') {
+    const parsed = Number(lobbySelector);
     if (!Number.isInteger(parsed) || parsed <= 0) {
       throw new HttpError(400, 'Ungültige Lobby-Auswahl.');
     }
@@ -836,17 +1515,6 @@ function requireAuthForApi(req, res, next) {
     return res.status(401).json({ error: 'Bitte melde dich an.' });
   }
   return next();
-}
-
-function normalizeTheme(theme) {
-  if (typeof theme !== 'string') {
-    return null;
-  }
-  const trimmed = theme.trim().toLowerCase();
-  if (trimmed === 'dark' || trimmed === 'light') {
-    return trimmed;
-  }
-  return null;
 }
 
 async function getSetting(context, key) {
@@ -1378,11 +2046,20 @@ app.delete('/api/lobbies/:lobbyId/members/:memberId', async (req, res) => {
   }
 });
 
+app.get('/api/themes', async (req, res) => {
+  try {
+    const presets = await loadThemePresets();
+    res.json(presets);
+  } catch (error) {
+    handleApiError(res, error, 'Theme-Presets konnten nicht geladen werden.');
+  }
+});
+
 app.get('/api/theme', async (req, res) => {
   try {
     const context = await resolveLobbyContext(req);
-    const value = await getSetting(context, 'theme');
-    res.json({ theme: typeof value === 'string' ? value : null });
+    const state = await getThemeState(context);
+    res.json(state);
   } catch (error) {
     handleApiError(res, error, 'Theme konnte nicht geladen werden.');
   }
@@ -1391,14 +2068,46 @@ app.get('/api/theme', async (req, res) => {
 app.put('/api/theme', async (req, res) => {
   try {
     const context = await resolveLobbyContext(req, { requireWriteAccess: true });
-    const theme = normalizeTheme(req.body?.theme);
-    if (!theme) {
-      throw new HttpError(400, 'Ungültiges Theme.');
+    let update = req.body?.selection ?? req.body?.theme ?? req.body;
+    if (typeof update === 'string') {
+      update = { variant: update };
     }
-    await setSetting(context, 'theme', theme);
-    res.json({ theme });
+    const state = await applyThemeUpdate(context, update || {});
+    res.json(state);
+    broadcastSseEvent(context.lobbyId, 'theme', state);
   } catch (error) {
     handleApiError(res, error, 'Theme konnte nicht gespeichert werden.');
+  }
+});
+
+app.get('/api/realtime', async (req, res) => {
+  let client = null;
+  try {
+    const context = await resolveLobbyContext(req);
+    res.set({
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    if (typeof res.flushHeaders === 'function') {
+      res.flushHeaders();
+    }
+    client = registerSseClient(context.lobbyId, res);
+    sendSseEvent(client, 'connected', { lobbyId: context.lobbyId });
+    const state = await getThemeState(context);
+    sendSseEvent(client, 'theme', state);
+  } catch (error) {
+    if (!res.headersSent) {
+      handleApiError(res, error, 'Echtzeitkanal konnte nicht geöffnet werden.');
+    } else {
+      try {
+        sendSseEvent(client || { res, lobbyId: null }, 'error', { error: error?.message || 'Verbindung getrennt.' });
+      } catch (sendError) {
+        // ignore secondary errors
+      }
+      res.end();
+    }
   }
 });
 
