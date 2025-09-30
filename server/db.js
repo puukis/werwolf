@@ -1,39 +1,86 @@
 require('dotenv').config();
 const { Pool } = require('pg');
 
-function createPool() {
+function buildPoolConfigs() {
   const connectionString = process.env.DATABASE_URL;
   const sslMode = process.env.PGSSLMODE;
 
   if (connectionString) {
-    return new Pool({
-      connectionString,
-      ssl: sslMode === 'require' ? { rejectUnauthorized: false } : undefined,
-    });
+    return [
+      {
+        connectionString,
+        ssl: sslMode === 'require' ? { rejectUnauthorized: false } : undefined,
+      },
+    ];
   }
 
   const host = process.env.PGHOST || 'localhost';
   const port = Number(process.env.PGPORT) || 5432;
-  const user = process.env.PGUSER || process.env.USER || 'postgres';
   const password = process.env.PGPASSWORD || undefined;
   const database = process.env.PGDATABASE || 'werwolf';
 
-  return new Pool({
-    host,
-    port,
-    user,
-    password,
-    database,
-  });
+  const candidates = [];
+  const seenUsers = new Set();
+
+  function pushUser(user) {
+    if (!user || seenUsers.has(user)) {
+      return;
+    }
+    seenUsers.add(user);
+    candidates.push({ host, port, user, password, database });
+  }
+
+  pushUser(process.env.PGUSER);
+  pushUser(process.env.USER);
+  pushUser('postgres');
+
+  return candidates;
 }
 
-const pool = createPool();
+async function createPool() {
+  const configs = buildPoolConfigs();
+  let lastError = null;
+
+  for (const config of configs) {
+    const pool = new Pool(config);
+    try {
+      await pool.query('SELECT 1');
+      if (lastError && lastError.code === '28000') {
+        console.warn(
+          `PostgreSQL-Rolle "${lastError.roleName}" nicht gefunden. Verwende Fallback-Rolle "${config.user}".`
+        );
+      }
+      return pool;
+    } catch (error) {
+      await pool.end().catch(() => {});
+
+      if (error?.code === '28000') {
+        lastError = { code: error.code, roleName: config.user };
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  if (lastError?.code === '28000') {
+    throw new Error(
+      'Es konnte keine gültige PostgreSQL-Rolle gefunden werden. Setze PGUSER oder erstelle die Rolle in deiner Datenbank.'
+    );
+  }
+
+  throw lastError || new Error('Verbindung zur Datenbank fehlgeschlagen.');
+}
+
+const poolPromise = createPool();
 
 async function query(text, params) {
+  const pool = await poolPromise;
   return pool.query(text, params);
 }
 
 async function withTransaction(handler) {
+  const pool = await poolPromise;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -49,7 +96,7 @@ async function withTransaction(handler) {
 }
 
 module.exports = {
-  pool,
+  getPool: () => poolPromise,
   query,
   withTransaction,
 };
