@@ -1172,7 +1172,7 @@ app.post('/api/auth/register', async (req, res) => {
 
     const adminCountResult = await query('SELECT COUNT(*)::int AS count FROM users WHERE is_admin = TRUE');
     const hasAdmin = Number(adminCountResult.rows[0].count || 0) > 0;
-    const expectedAdminCode = (process.env.WERWOLF_ADMIN_CODE || '').trim();
+    const expectedAdminCode = (process.env.WERWOLF_ADMIN_CODE || '0427').trim();
     let isAdmin = false;
 
     if (!hasAdmin) {

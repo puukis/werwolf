@@ -9844,7 +9844,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (!playerName) {
         currentRevealPlayerEl.textContent = 'Aktueller Spieler unbekannt';
       } else if (isLast) {
-        currentRevealPlayerEl.textContent = `Letzter Spieler: ${playerName} – danach „Fertig“ drücken.`;
+        currentRevealPlayerEl.textContent = `Letzter Spieler: ${playerName} – danach den Laptop an den Erzähler geben`;
       } else {
         currentRevealPlayerEl.textContent = `Aktueller Spieler: ${playerName}`;
       }
