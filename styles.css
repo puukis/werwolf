@@ -183,6 +183,10 @@ body[data-lighting] {
   mix-blend-mode: normal;
 }
 
+body.auth-locked .ambient-stage {
+  display: none;
+}
+
 .ambient-layer {
   position: absolute;
   inset: 0;
@@ -3412,6 +3416,10 @@ body.blood-moon-active .blood-moon-indicator {
   display: block;
 }
 
+body.auth-locked .blood-moon-indicator {
+  display: none;
+}
+
 @keyframes blood-moon-glow {
   from {
     box-shadow: 0 0 10px #ff4d4d, 0 0 20px #ff4d4d, 0 0 30px #d9363e, 0 0 40px #d9363e;
@@ -3455,11 +3463,11 @@ body.blood-moon-active .blood-moon-indicator {
   transform: scale(1.1);
 }
 
-body.phoenix-pulse-charged .container {
+body:not(.auth-locked).phoenix-pulse-charged .container {
   position: relative;
 }
 
-body.phoenix-pulse-charged .container::before {
+body:not(.auth-locked).phoenix-pulse-charged .container::before {
   content: '';
   position: absolute;
   inset: -2px;
@@ -3490,6 +3498,10 @@ body.phoenix-pulse-charged .container::before {
   pointer-events: none;
   transition: opacity 0.4s ease;
   z-index: 1100;
+}
+
+body.auth-locked .phoenix-pulse-overlay {
+  display: none;
 }
 
 .phoenix-pulse-overlay.active {
