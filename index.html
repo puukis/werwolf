@@ -324,6 +324,56 @@ Carla
                     </div>
                 </div>
             </div>
+            <div class="config-section" id="theme-config-section">
+                <h4 data-i18n-key="settings.theme.heading">Themen &amp; Kulissen</h4>
+                <p class="config-description" data-i18n-key="settings.theme.description">Passe Hintergrund, Akzentfarbe und Lichtstimmung für deine Lobby an. Änderungen werden sofort in allen verbundenen Ansichten sichtbar.</p>
+                <div class="theme-config-row">
+                    <div class="theme-config-controls">
+                        <label class="config-select" for="theme-preset-select">
+                            <span data-i18n-key="settings.theme.presetLabel">Voreinstellung</span>
+                            <select id="theme-preset-select"></select>
+                        </label>
+                        <label class="config-select" for="theme-variant-select">
+                            <span data-i18n-key="settings.theme.variantLabel">Variante</span>
+                            <select id="theme-variant-select"></select>
+                        </label>
+                        <label class="config-input" for="theme-accent-input">
+                            <span data-i18n-key="settings.theme.accentLabel">Akzentfarbe</span>
+                            <input type="color" id="theme-accent-input" value="#22c55e">
+                        </label>
+                        <label class="config-input" for="theme-background-url">
+                            <span data-i18n-key="settings.theme.backgroundUrlLabel">Hintergrund-URL</span>
+                            <input type="url" id="theme-background-url" placeholder="https://example.com/bild.jpg">
+                            <small data-i18n-key="settings.theme.backgroundUrlHint">Nutze HTTPS-Bilder. Leere Eingaben verwenden das Preset.</small>
+                        </label>
+                        <label class="config-input" for="theme-background-upload">
+                            <span data-i18n-key="settings.theme.backgroundUploadLabel">Eigenes Bild hochladen</span>
+                            <input type="file" id="theme-background-upload" accept="image/*">
+                            <small data-i18n-key="settings.theme.backgroundUploadHint">Bis 1,5&nbsp;MB, wird direkt in der Lobby gespeichert.</small>
+                        </label>
+                        <span id="theme-background-status" class="config-hint" data-i18n-key="settings.theme.backgroundStatus.preset">Preset-Hintergrund aktiv</span>
+                        <div class="theme-config-actions">
+                            <button type="button" id="theme-save-btn" class="primary-btn" data-i18n-key="settings.theme.save">Speichern</button>
+                            <button type="button" id="theme-reset-btn" class="secondary-btn" data-i18n-key="settings.theme.reset">Zurücksetzen</button>
+                        </div>
+                    </div>
+                    <div class="theme-preview-panel">
+                        <div id="theme-preview-card" class="theme-preview-card" aria-hidden="true">
+                            <div class="theme-preview-overlay">
+                                <div class="theme-preview-title" data-i18n-key="settings.theme.preview.title">Live-Vorschau</div>
+                                <div class="theme-preview-buttons">
+                                    <span class="theme-preview-primary" data-i18n-key="settings.theme.preview.primary">Primärer Button</span>
+                                    <span class="theme-preview-secondary" data-i18n-key="settings.theme.preview.secondary">Sekundärer Button</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="theme-warning-container" class="theme-warnings hidden" role="alert">
+                            <strong data-i18n-key="settings.theme.warnings.title">Hinweise zur Barrierefreiheit</strong>
+                            <ul id="theme-warning-list"></ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <div class="config-section">
                 <h4 data-i18n-key="settings.gameInfo.heading">Spielinformationen</h4>
                 <label class="config-toggle" for="reveal-dead-roles">

@@ -222,15 +222,31 @@ const apiClient = (() => {
     theme: {
       async get() {
         const data = await request('/theme');
-        return typeof data?.theme === 'string' ? data.theme : null;
+        cacheValue('themeState', data);
+        return data;
       },
-      async set(theme) {
-        await request('/theme', {
+      async set(update) {
+        const payload = typeof update === 'string' ? { variant: update } : (update || {});
+        const data = await request('/theme', {
           method: 'PUT',
-          body: JSON.stringify({ theme }),
+          body: JSON.stringify({ selection: payload }),
         });
-        cacheValue('theme', theme);
-        return theme;
+        cacheValue('themeState', data);
+        return data;
+      },
+      async presets() {
+        const data = await request('/themes');
+        cacheValue('themePresets', data);
+        return data;
+      },
+      getCachedState() {
+        return getCachedValue('themeState');
+      },
+      setCachedState(state, lobby = activeLobby) {
+        cacheValue('themeState', state, lobby);
+      },
+      getCachedPresets() {
+        return getCachedValue('themePresets');
       },
     },
     locale: {
@@ -1415,52 +1431,714 @@ function createAuthManager() {
   };
 }
 
-let currentTheme = 'light';
+let currentThemeVariant = 'light';
 let themePreferenceStored = false;
+let themeState = { selection: null, resolved: {}, preset: null, presetsVersion: null };
+let themePresets = [];
+let latestThemeWarnings = [];
+let themeConfiguratorInitialized = false;
+const appliedThemeVariables = new Set();
+let activeBackgroundCheck = null;
+let themeRealtimeSource = null;
+let pendingThemePreview = null;
+const MAX_THEME_UPLOAD_BYTES = 1024 * 1024 * 1.5;
+const THEME_HEX_COLOR_REGEX = /^#([0-9a-fA-F]{6})$/;
+let configuratorPreviewWarnings = [];
+const previewAppliedVariables = new Set();
+let themePresetSelect = null;
+let themeVariantSelect = null;
+let themeAccentInput = null;
+let themeBackgroundUrlInput = null;
+let themeBackgroundUploadInput = null;
+let themeBackgroundStatus = null;
+let themeSaveBtn = null;
+let themeResetBtn = null;
+let themePreviewCard = null;
+let themeRealtimeReconnectTimer = null;
+let themeRealtimeRetryCount = 0;
+let themeRealtimeLastLobby = null;
 
-async function setTheme(theme, { persist = true, markPreference = true } = {}) {
-  currentTheme = theme;
-  document.documentElement.setAttribute('data-theme', theme);
+const THEME_REALTIME_RETRY_BASE_MS = 2000;
+const THEME_REALTIME_RETRY_MAX_MS = 30000;
 
-  if (!persist) {
-    return theme;
+function clearThemeRealtimeTimer() {
+  if (themeRealtimeReconnectTimer) {
+    clearTimeout(themeRealtimeReconnectTimer);
+    themeRealtimeReconnectTimer = null;
+  }
+}
+
+function disconnectThemeRealtime(options = {}) {
+  if (themeRealtimeSource) {
+    try {
+      themeRealtimeSource.close();
+    } catch (error) {
+      // ignore disconnect errors
+    }
+    themeRealtimeSource = null;
+  }
+  if (!options.keepTimer) {
+    clearThemeRealtimeTimer();
+  }
+  if (!options.preserveAttempts) {
+    themeRealtimeRetryCount = 0;
+  }
+}
+
+function normalizeThemeLobby(lobby) {
+  if (lobby && typeof lobby === 'object' && typeof lobby.id === 'number' && !lobby.isPersonal) {
+    return { id: lobby.id, isPersonal: false };
+  }
+  return { id: null, isPersonal: true };
+}
+
+function scheduleThemeRealtimeReconnect() {
+  if (!themeRealtimeLastLobby || themeRealtimeReconnectTimer) {
+    return;
+  }
+  const attempt = Math.max(0, themeRealtimeRetryCount);
+  const delay = Math.min(
+    THEME_REALTIME_RETRY_MAX_MS,
+    THEME_REALTIME_RETRY_BASE_MS * Math.max(1, 2 ** attempt),
+  );
+  themeRealtimeReconnectTimer = setTimeout(() => {
+    themeRealtimeReconnectTimer = null;
+    connectThemeRealtime(themeRealtimeLastLobby, { fromRetry: true });
+  }, delay);
+  themeRealtimeRetryCount = attempt + 1;
+}
+
+function connectThemeRealtime(lobby, options = {}) {
+  if (typeof EventSource !== 'function') {
+    return;
+  }
+  const { fromRetry = false } = options;
+  const normalizedLobby = normalizeThemeLobby(lobby);
+  themeRealtimeLastLobby = normalizedLobby;
+  if (!fromRetry) {
+    themeRealtimeRetryCount = 0;
+  }
+  clearThemeRealtimeTimer();
+  disconnectThemeRealtime({ keepTimer: true, preserveAttempts: true });
+  const params = new URLSearchParams();
+  if (normalizedLobby.isPersonal) {
+    params.set('lobby', 'personal');
+  } else {
+    params.set('lobby', String(normalizedLobby.id));
+  }
+  const url = `/api/realtime?${params.toString()}`;
+  try {
+    const source = new EventSource(url, { withCredentials: true });
+    source.addEventListener('open', () => {
+      themeRealtimeRetryCount = 0;
+      clearThemeRealtimeTimer();
+    });
+    source.addEventListener('theme', (event) => {
+      try {
+        const data = JSON.parse(event.data || '{}');
+        updateThemeState(data, { markPreference: true });
+      } catch (error) {
+        console.error('Theme-Update konnte nicht verarbeitet werden.', error);
+      }
+    });
+    source.addEventListener('error', () => {
+      // allow EventSource to retry, but drop reference if closed
+      if (source.readyState === EventSource.CLOSED) {
+        disconnectThemeRealtime({ preserveAttempts: true });
+        scheduleThemeRealtimeReconnect();
+      }
+    });
+    themeRealtimeSource = source;
+  } catch (error) {
+    console.error('Echtzeitkanal konnte nicht geöffnet werden.', error);
+    scheduleThemeRealtimeReconnect();
+  }
+}
+
+function cloneThemeJson(value) {
+  if (value === null || value === undefined) {
+    return value;
+  }
+  if (typeof structuredClone === 'function') {
+    try {
+      return structuredClone(value);
+    } catch (error) {
+      // fallback
+    }
+  }
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (error) {
+    return value;
+  }
+}
+
+function sanitizeThemeVariant(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'dark' || normalized === 'light') {
+    return normalized;
+  }
+  return null;
+}
+
+function setThemeVariable(name, value) {
+  if (typeof name !== 'string' || !name.startsWith('--')) {
+    return;
+  }
+  const themedName = `--theme-${name.slice(2)}`;
+  if (value === undefined || value === null) {
+    document.documentElement.style.removeProperty(themedName);
+    appliedThemeVariables.delete(themedName);
+    return;
+  }
+  document.documentElement.style.setProperty(themedName, value);
+  appliedThemeVariables.add(themedName);
+}
+
+function clearAppliedThemeVariables() {
+  appliedThemeVariables.forEach((name) => {
+    document.documentElement.style.removeProperty(name);
+  });
+  appliedThemeVariables.clear();
+}
+
+function extractUrlFromCss(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const match = value.match(/url\((?:"([^\"]*)"|'([^']*)'|([^)]*))\)/);
+  if (!match) {
+    return null;
+  }
+  return match[1] || match[2] || match[3] || null;
+}
+
+function toCssUrl(value) {
+  if (typeof value !== 'string' || !value.trim()) {
+    return null;
+  }
+  const sanitized = value.replace(/"/g, '\\"');
+  return `url("${sanitized}")`;
+}
+
+function parseThemeHexColor(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const match = value.trim().match(THEME_HEX_COLOR_REGEX);
+  if (!match) {
+    return null;
+  }
+  const hex = match[1];
+  return {
+    r: parseInt(hex.slice(0, 2), 16),
+    g: parseInt(hex.slice(2, 4), 16),
+    b: parseInt(hex.slice(4, 6), 16),
+  };
+}
+
+function formatThemeRgba(color, alpha = 1) {
+  const normalized = Math.min(1, Math.max(0, alpha));
+  return `rgba(${color.r}, ${color.g}, ${color.b}, ${Number(normalized.toFixed(3))})`;
+}
+
+function adjustThemeColor(color, amount) {
+  const ratio = Math.min(1, Math.max(-1, amount));
+  const adjustChannel = (channel) => {
+    if (ratio >= 0) {
+      return Math.round(channel + (255 - channel) * ratio);
+    }
+    return Math.round(channel + channel * ratio);
+  };
+  return {
+    r: Math.min(255, Math.max(0, adjustChannel(color.r))),
+    g: Math.min(255, Math.max(0, adjustChannel(color.g))),
+    b: Math.min(255, Math.max(0, adjustChannel(color.b))),
+  };
+}
+
+function mixThemeColors(color, target, amount) {
+  const ratio = Math.min(1, Math.max(0, amount));
+  return {
+    r: Math.round(color.r + (target.r - color.r) * ratio),
+    g: Math.round(color.g + (target.g - color.g) * ratio),
+    b: Math.round(color.b + (target.b - color.b) * ratio),
+  };
+}
+
+function srgbChannelToLinearTheme(value) {
+  const channel = value / 255;
+  if (channel <= 0.04045) {
+    return channel / 12.92;
+  }
+  return ((channel + 0.055) / 1.055) ** 2.4;
+}
+
+function themeContrastRatio(colorA, colorB) {
+  const lumA = 0.2126 * srgbChannelToLinearTheme(colorA.r)
+    + 0.7152 * srgbChannelToLinearTheme(colorA.g)
+    + 0.0722 * srgbChannelToLinearTheme(colorA.b);
+  const lumB = 0.2126 * srgbChannelToLinearTheme(colorB.r)
+    + 0.7152 * srgbChannelToLinearTheme(colorB.g)
+    + 0.0722 * srgbChannelToLinearTheme(colorB.b);
+  const lighter = Math.max(lumA, lumB);
+  const darker = Math.min(lumA, lumB);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function sanitizeAccentInput(value) {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!THEME_HEX_COLOR_REGEX.test(trimmed)) {
+    return null;
+  }
+  return `#${trimmed.slice(1).toLowerCase()}`;
+}
+
+function sanitizeBackgroundInputClient(value) {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    if (trimmed.startsWith('data:image/')) {
+      if (trimmed.length > MAX_THEME_UPLOAD_BYTES) {
+        return null;
+      }
+      return { type: 'upload', value: trimmed };
+    }
+    const normalized = trimmed.replace(/\s+/g, '');
+    if (!/^https?:\/\//i.test(normalized)) {
+      return null;
+    }
+    return { type: 'url', value: normalized };
+  }
+  if (value && typeof value === 'object') {
+    if (value.type === 'upload' && typeof value.value === 'string') {
+      return sanitizeBackgroundInputClient(value.value);
+    }
+    if (value.type === 'url' && typeof value.value === 'string') {
+      return sanitizeBackgroundInputClient(value.value);
+    }
+  }
+  return null;
+}
+
+function buildPreviewAccentOverrides(accentRgb, variantKey) {
+  const baseAlpha = variantKey === 'dark' ? 0.88 : 0.88;
+  const hoverAlpha = variantKey === 'dark' ? 0.9 : 0.92;
+  const start = adjustThemeColor(accentRgb, 0.12);
+  const strongLight = mixThemeColors(accentRgb, { r: 255, g: 255, b: 255 }, 0.45);
+  const hoverStart = adjustThemeColor(accentRgb, -0.08);
+  const hoverEnd = adjustThemeColor(accentRgb, -0.2);
+  const glowBase = mixThemeColors(accentRgb, { r: 255, g: 255, b: 255 }, 0.35);
+  const lightGlowAlpha = variantKey === 'dark' ? 0.28 : 0.24;
+  const shadowAlpha = variantKey === 'dark' ? 0.32 : 0.28;
+  const hoverShadowAlpha = shadowAlpha + 0.04;
+  return {
+    '--button-bg': formatThemeRgba(accentRgb, baseAlpha),
+    '--button-hover': formatThemeRgba(hoverStart, hoverAlpha),
+    '--glass-button-bg-start': formatThemeRgba(start, variantKey === 'dark' ? 0.94 : 0.95),
+    '--glass-button-bg-end': formatThemeRgba(accentRgb, variantKey === 'dark' ? 0.88 : 0.85),
+    '--glass-button-hover-start': formatThemeRgba(hoverStart, 0.98),
+    '--glass-button-hover-end': formatThemeRgba(hoverEnd, 0.92),
+    '--glass-button-border': formatThemeRgba(strongLight, variantKey === 'dark' ? 0.45 : 0.58),
+    '--glass-button-shadow': `0 20px 36px rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, ${Number(shadowAlpha.toFixed(3))}), 0 12px 24px rgba(15, 35, 22, 0.2)` ,
+    '--glass-button-hover-shadow': `0 26px 44px rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, ${Number(hoverShadowAlpha.toFixed(3))}), 0 14px 28px rgba(15, 35, 22, 0.22)` ,
+    '--glass-focus-ring': formatThemeRgba(accentRgb, variantKey === 'dark' ? 0.6 : 0.52),
+    '--glow-color': formatThemeRgba(glowBase, lightGlowAlpha),
+  };
+}
+
+function getPresetById(presetId) {
+  if (!Array.isArray(themePresets) || themePresets.length === 0) {
+    return null;
+  }
+  return themePresets.find((preset) => preset.id === presetId) || themePresets[0];
+}
+
+function resolvePreviewTheme(selection) {
+  const preset = getPresetById(selection.presetId);
+  if (!preset) {
+    return { preset: null, resolved: {}, warnings: [] };
+  }
+  const resolved = {};
+  const warnings = [];
+  const accentHex = sanitizeAccentInput(selection.custom?.accentColor);
+  let accentRgb = accentHex ? parseThemeHexColor(accentHex) : null;
+  if (accentRgb) {
+    const contrast = themeContrastRatio(accentRgb, { r: 255, g: 255, b: 255 });
+    if (contrast < 4.5) {
+      warnings.push('Akzentfarbe wurde nicht übernommen, da der Kontrast zu gering ist.');
+      accentRgb = null;
+    }
+  }
+  const background = sanitizeBackgroundInputClient(selection.custom?.backgroundImage || null);
+  Object.entries(preset.variants).forEach(([variantKey, variantConfig]) => {
+    const variables = { ...variantConfig.variables };
+    const assets = {
+      presetBackgroundImage: variantConfig.variables['--bg-image'] || null,
+      backgroundImage: null,
+    };
+    if (accentRgb) {
+      Object.assign(variables, buildPreviewAccentOverrides(accentRgb, variantKey));
+    }
+    if (background && background.value) {
+      const cssUrl = toCssUrl(background.value);
+      if (cssUrl) {
+        variables['--bg-image'] = cssUrl;
+        assets.backgroundImage = { type: background.type || 'custom', source: background.value };
+      }
+    }
+    resolved[variantKey] = { variables, assets };
+  });
+  return { preset, resolved, warnings };
+}
+
+function buildConfiguratorSelectionFromState() {
+  const baseSelection = themeState?.selection ? cloneThemeJson(themeState.selection) : null;
+  if (baseSelection) {
+    baseSelection.custom = baseSelection.custom ? { ...baseSelection.custom } : {};
+    return baseSelection;
+  }
+  const preset = themePresets?.[0];
+  return {
+    presetId: preset?.id || null,
+    variant: 'light',
+    custom: {},
+  };
+}
+
+function setThemeBackgroundStatus(key) {
+  if (!themeBackgroundStatus) {
+    return;
+  }
+  if (localization && typeof localization.setNodeTranslation === 'function') {
+    localization.setNodeTranslation(themeBackgroundStatus, key);
+    return;
+  }
+  if (themeBackgroundStatus.setAttribute) {
+    themeBackgroundStatus.setAttribute('data-i18n-key', key);
+  }
+  if (localization && typeof localization.t === 'function') {
+    const message = localization.t(key);
+    if (typeof message === 'string' && message) {
+      themeBackgroundStatus.textContent = message;
+      return;
+    }
+  }
+  themeBackgroundStatus.textContent = key;
+}
+
+function refreshThemeConfigurator() {
+  if (!themePresetSelect || !themeVariantSelect) {
+    return;
+  }
+  if (!Array.isArray(themePresets) || themePresets.length === 0) {
+    themePresetSelect.innerHTML = '<option>Keine Presets verfügbar</option>';
+    themePresetSelect.disabled = true;
+    themeVariantSelect.innerHTML = '';
+    configuratorPreviewWarnings = [];
+    updateThemeWarningsBanner();
+    return;
+  }
+  themePresetSelect.disabled = false;
+  if (!pendingThemePreview) {
+    pendingThemePreview = buildConfiguratorSelectionFromState();
+  }
+  let activePreset = getPresetById(pendingThemePreview.presetId);
+  if (!activePreset) {
+    activePreset = getPresetById(null);
+  }
+  themePresetSelect.innerHTML = '';
+  themePresets.forEach((preset) => {
+    const option = document.createElement('option');
+    option.value = preset.id;
+    option.textContent = preset.name || preset.id;
+    if (preset.id === activePreset?.id) {
+      option.selected = true;
+    }
+    themePresetSelect.appendChild(option);
+  });
+  if (activePreset) {
+    pendingThemePreview.presetId = activePreset.id;
   }
 
+  themeVariantSelect.innerHTML = '';
+  if (activePreset && activePreset.variants) {
+    Object.entries(activePreset.variants).forEach(([variantKey, variantConfig]) => {
+      const option = document.createElement('option');
+      option.value = variantKey;
+      option.textContent = variantConfig?.label || (variantKey === 'dark' ? 'Nacht' : 'Tag');
+      themeVariantSelect.appendChild(option);
+    });
+    if (!activePreset.variants[pendingThemePreview.variant]) {
+      pendingThemePreview.variant = Object.keys(activePreset.variants)[0] || 'light';
+    }
+  }
+  themeVariantSelect.value = sanitizeThemeVariant(pendingThemePreview.variant) || 'light';
+
+  if (themeAccentInput) {
+    const accent = sanitizeAccentInput(pendingThemePreview.custom?.accentColor)
+      || activePreset?.preview?.accent
+      || '#22c55e';
+    themeAccentInput.value = accent;
+  }
+
+  if (themeBackgroundUrlInput) {
+    if (pendingThemePreview.custom?.backgroundImage?.type === 'url') {
+      themeBackgroundUrlInput.value = pendingThemePreview.custom.backgroundImage.value;
+    } else {
+      themeBackgroundUrlInput.value = '';
+    }
+  }
+  if (themeBackgroundUploadInput) {
+    themeBackgroundUploadInput.value = '';
+  }
+  if (themeBackgroundStatus) {
+    if (!pendingThemePreview.custom?.backgroundImage) {
+      setThemeBackgroundStatus('settings.theme.backgroundStatus.preset');
+    } else if (pendingThemePreview.custom.backgroundImage.type === 'upload') {
+      setThemeBackgroundStatus('settings.theme.backgroundStatus.upload');
+    } else {
+      setThemeBackgroundStatus('settings.theme.backgroundStatus.url');
+    }
+  }
+
+  themeConfiguratorInitialized = true;
+  updateThemeConfiguratorPreview();
+}
+
+function updateThemeConfiguratorPreview() {
+  if (!themePreviewCard) {
+    configuratorPreviewWarnings = [];
+    updateThemeWarningsBanner();
+    return;
+  }
+  if (!pendingThemePreview) {
+    pendingThemePreview = buildConfiguratorSelectionFromState();
+  }
+  const selection = cloneThemeJson(pendingThemePreview);
+  selection.custom = selection.custom ? { ...selection.custom } : {};
+  const preview = resolvePreviewTheme(selection);
+  configuratorPreviewWarnings = preview.warnings || [];
+  const variantKey = sanitizeThemeVariant(selection.variant) || 'light';
+  const resolvedVariant = preview.resolved?.[variantKey] || preview.resolved?.light || null;
+
+  previewAppliedVariables.forEach((name) => {
+    themePreviewCard.style.removeProperty(name);
+  });
+  previewAppliedVariables.clear();
+
+  if (resolvedVariant && resolvedVariant.variables) {
+    Object.entries(resolvedVariant.variables).forEach(([key, value]) => {
+      if (typeof value === 'string') {
+        const themedName = `--theme-${key.slice(2)}`;
+        themePreviewCard.style.setProperty(themedName, value);
+        previewAppliedVariables.add(themedName);
+      }
+    });
+  }
+
+  updateThemeWarningsBanner();
+}
+
+function applyThemeVariables(resolvedVariant) {
+  if (!resolvedVariant || typeof resolvedVariant !== 'object') {
+    return;
+  }
+  clearAppliedThemeVariables();
+  const variables = resolvedVariant.variables || {};
+  Object.entries(variables).forEach(([key, value]) => {
+    if (typeof value === 'string') {
+      setThemeVariable(key, value);
+    }
+  });
+}
+
+function verifyThemeBackground(variantKey, resolvedVariant) {
+  if (activeBackgroundCheck && typeof activeBackgroundCheck.loader?.removeAttribute === 'function') {
+    // nothing to clean explicitly; we'll simply allow GC to collect
+  }
+  activeBackgroundCheck = null;
+  const asset = resolvedVariant?.assets?.backgroundImage;
+  const presetBackground = resolvedVariant?.assets?.presetBackgroundImage || null;
+  const cssValue = resolvedVariant?.variables?.['--bg-image'];
+  const url = extractUrlFromCss(cssValue);
+  if (!asset || !asset.source || !url || url.startsWith('data:')) {
+    return;
+  }
+  const loader = new Image();
+  activeBackgroundCheck = { loader, variant: variantKey, preset: presetBackground };
+  loader.onload = () => {
+    if (activeBackgroundCheck?.loader === loader) {
+      activeBackgroundCheck = null;
+    }
+  };
+  loader.onerror = () => {
+    if (activeBackgroundCheck?.loader !== loader) {
+      return;
+    }
+    const fallback = activeBackgroundCheck.preset;
+    activeBackgroundCheck = null;
+    if (currentThemeVariant === variantKey && typeof fallback === 'string') {
+      setThemeVariable('--bg-image', fallback);
+    }
+  };
   try {
-    await apiClient.theme.set(theme);
+    loader.src = url;
+  } catch (error) {
+    if (activeBackgroundCheck?.loader === loader) {
+      activeBackgroundCheck = null;
+    }
+  }
+}
+
+function getResolvedThemeVariant(variant) {
+  if (!themeState || !themeState.resolved) {
+    return null;
+  }
+  return themeState.resolved[variant] || null;
+}
+
+function applyThemeVariant(variant) {
+  const sanitized = sanitizeThemeVariant(variant) || 'light';
+  const resolved = getResolvedThemeVariant(sanitized);
+  if (resolved) {
+    applyThemeVariables(resolved);
+    verifyThemeBackground(sanitized, resolved);
+  }
+  document.documentElement.setAttribute('data-theme', sanitized);
+  currentThemeVariant = sanitized;
+  updateThemeConfiguratorPreview();
+}
+
+function updateThemeWarningsBanner() {
+  if (!themeConfiguratorInitialized) {
+    return;
+  }
+  const warningContainer = document.getElementById('theme-warning-list');
+  const warningWrapper = document.getElementById('theme-warning-container');
+  if (!warningContainer || !warningWrapper) {
+    return;
+  }
+  warningContainer.innerHTML = '';
+  const combinedWarnings = [...new Set([...(latestThemeWarnings || []), ...(configuratorPreviewWarnings || [])])]
+    .filter((warning) => typeof warning === 'string' && warning.trim().length > 0);
+  if (combinedWarnings.length === 0) {
+    warningWrapper.classList.add('hidden');
+    return;
+  }
+  combinedWarnings.forEach((warning) => {
+    const item = document.createElement('li');
+    item.textContent = typeof warning === 'string' ? warning : 'Theme-Hinweis verfügbar.';
+    warningContainer.appendChild(item);
+  });
+  warningWrapper.classList.remove('hidden');
+}
+
+function updateThemeState(newState, { markPreference = true, silent = false } = {}) {
+  if (!newState || typeof newState !== 'object') {
+    return;
+  }
+  pendingThemePreview = null;
+  themeState = {
+    selection: newState.selection ? cloneThemeJson(newState.selection) : null,
+    resolved: newState.resolved ? cloneThemeJson(newState.resolved) : {},
+    preset: newState.preset ? cloneThemeJson(newState.preset) : null,
+    presetsVersion: typeof newState.presetsVersion === 'number' ? newState.presetsVersion : (themeState?.presetsVersion || null),
+  };
+  latestThemeWarnings = Array.isArray(newState.warnings) ? [...newState.warnings] : [];
+  const variant = sanitizeThemeVariant(themeState.selection?.variant) || currentThemeVariant;
+  applyThemeVariant(variant);
+  themePreferenceStored = Boolean(themeState.selection?.updatedAt);
+  if (!silent) {
+    try {
+      apiClient.theme.setCachedState(themeState);
+    } catch (error) {
+      // cache update failures are non-critical
+    }
+  }
+  refreshThemeConfigurator();
+  updateThemeWarningsBanner();
+}
+
+async function setTheme(variant, { persist = true, markPreference = true } = {}) {
+  const sanitized = sanitizeThemeVariant(variant) || 'light';
+  const previousVariant = currentThemeVariant;
+  applyThemeVariant(sanitized);
+  if (!persist) {
+    if (themeState.selection) {
+      themeState.selection.variant = sanitized;
+    }
     if (markPreference) {
       themePreferenceStored = true;
     }
+    return sanitized;
+  }
+
+  try {
+    const state = await apiClient.theme.set({ variant: sanitized });
+    updateThemeState(state, { markPreference });
+    return sanitized;
   } catch (error) {
+    applyThemeVariant(previousVariant);
     themePreferenceStored = false;
     throw error;
   }
-
-  return theme;
 }
 
-// Initialize theme from the backend or system preference
 async function initTheme() {
   try {
-    const savedTheme = await apiClient.theme.get();
-    if (typeof savedTheme === 'string' && savedTheme.trim().length > 0) {
-      currentTheme = savedTheme;
-      themePreferenceStored = true;
-      document.documentElement.setAttribute('data-theme', savedTheme);
-      return savedTheme;
+    const presetResponse = await apiClient.theme.presets();
+    if (presetResponse && Array.isArray(presetResponse.presets)) {
+      themePresets = presetResponse.presets;
     }
+  } catch (error) {
+    console.error('Theme-Presets konnten nicht geladen werden.', error);
+    const cached = apiClient.theme.getCachedPresets();
+    if (cached && Array.isArray(cached.presets)) {
+      themePresets = cached.presets;
+    }
+  }
+
+  const cachedState = apiClient.theme.getCachedState();
+  if (cachedState && cachedState.selection) {
+    updateThemeState(cachedState, { silent: true });
+  }
+
+  try {
+    const state = await apiClient.theme.get();
+    updateThemeState(state, { markPreference: true });
+    return currentThemeVariant;
   } catch (error) {
     console.error('Theme konnte nicht geladen werden.', error);
   }
 
+  if (themeState.selection) {
+    return currentThemeVariant;
+  }
+
   themePreferenceStored = false;
   const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const fallbackVariant = prefersDark ? 'dark' : 'light';
   try {
-    await setTheme(prefersDark ? 'dark' : 'light', { markPreference: false });
+    await setTheme(fallbackVariant, { persist: false, markPreference: false });
   } catch (error) {
     console.error('Theme konnte nicht gespeichert werden.', error);
   }
-  return currentTheme;
+  return currentThemeVariant;
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -1579,6 +2257,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     updateWriteControlsState();
+    if (latestLobbySnapshot) {
+      connectThemeRealtime(latestLobbySnapshot);
+    } else {
+      disconnectThemeRealtime();
+    }
   }
 
   lobbyManager.onChange((lobby) => {
@@ -2223,13 +2906,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   const themeToggle = document.getElementById('theme-toggle');
   if (themeToggle) {
     themeToggle.addEventListener('click', async () => {
-      const previousTheme = currentTheme;
+      const previousTheme = currentThemeVariant;
       const newTheme = previousTheme === 'dark' ? 'light' : 'dark';
       try {
         await setTheme(newTheme);
       } catch (error) {
-        document.documentElement.setAttribute('data-theme', previousTheme);
-        currentTheme = previousTheme;
+        applyThemeVariant(previousTheme);
         showInfoMessage({
           title: 'Theme konnte nicht gespeichert werden',
           text: 'Die Verbindung zum Speicher-Backend ist fehlgeschlagen.',
@@ -2288,6 +2970,150 @@ document.addEventListener("DOMContentLoaded", async () => {
   const configModal = document.getElementById('config-modal');
   const closeConfigBtn = document.getElementById('close-config-btn');
   const closeConfigFooterBtn = document.getElementById('close-config-footer-btn');
+  themePresetSelect = document.getElementById('theme-preset-select');
+  themeVariantSelect = document.getElementById('theme-variant-select');
+  themeAccentInput = document.getElementById('theme-accent-input');
+  themeBackgroundUrlInput = document.getElementById('theme-background-url');
+  themeBackgroundUploadInput = document.getElementById('theme-background-upload');
+  themeBackgroundStatus = document.getElementById('theme-background-status');
+  themeSaveBtn = document.getElementById('theme-save-btn');
+  themeResetBtn = document.getElementById('theme-reset-btn');
+  themePreviewCard = document.getElementById('theme-preview-card');
+
+  if (themePresetSelect) {
+    themePresetSelect.addEventListener('change', () => {
+      const newPresetId = themePresetSelect.value;
+      pendingThemePreview = {
+        presetId: newPresetId,
+        variant: sanitizeThemeVariant(themeVariantSelect?.value) || 'light',
+        custom: {},
+      };
+      refreshThemeConfigurator();
+    });
+  }
+
+  if (themeVariantSelect) {
+    themeVariantSelect.addEventListener('change', () => {
+      if (!pendingThemePreview) {
+        pendingThemePreview = buildConfiguratorSelectionFromState();
+      }
+      pendingThemePreview.variant = sanitizeThemeVariant(themeVariantSelect.value) || 'light';
+      updateThemeConfiguratorPreview();
+    });
+  }
+
+  if (themeAccentInput) {
+    themeAccentInput.addEventListener('input', () => {
+      if (!pendingThemePreview) {
+        pendingThemePreview = buildConfiguratorSelectionFromState();
+      }
+      const accent = sanitizeAccentInput(themeAccentInput.value);
+      if (accent) {
+        pendingThemePreview.custom = pendingThemePreview.custom || {};
+        pendingThemePreview.custom.accentColor = accent;
+      } else if (pendingThemePreview.custom) {
+        delete pendingThemePreview.custom.accentColor;
+      }
+      updateThemeConfiguratorPreview();
+    });
+  }
+
+  if (themeBackgroundUrlInput) {
+    themeBackgroundUrlInput.addEventListener('change', () => {
+      if (!pendingThemePreview) {
+        pendingThemePreview = buildConfiguratorSelectionFromState();
+      }
+      const sanitized = sanitizeBackgroundInputClient(themeBackgroundUrlInput.value);
+      if (sanitized) {
+        pendingThemePreview.custom = pendingThemePreview.custom || {};
+        pendingThemePreview.custom.backgroundImage = sanitized;
+        setThemeBackgroundStatus('settings.theme.backgroundStatus.url');
+      } else if (pendingThemePreview.custom) {
+        delete pendingThemePreview.custom.backgroundImage;
+        setThemeBackgroundStatus('settings.theme.backgroundStatus.preset');
+      }
+      updateThemeConfiguratorPreview();
+    });
+  }
+
+  if (themeBackgroundUploadInput) {
+    themeBackgroundUploadInput.addEventListener('change', () => {
+      const [file] = themeBackgroundUploadInput.files || [];
+      if (!file) {
+        return;
+      }
+      if (file.size > MAX_THEME_UPLOAD_BYTES) {
+        showInfoMessage({
+          title: 'Datei zu groß',
+          text: 'Bitte wähle eine Bilddatei mit höchstens 1,5 MB.',
+          confirmText: 'Okay',
+        });
+        themeBackgroundUploadInput.value = '';
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (!pendingThemePreview) {
+          pendingThemePreview = buildConfiguratorSelectionFromState();
+        }
+        pendingThemePreview.custom = pendingThemePreview.custom || {};
+        pendingThemePreview.custom.backgroundImage = { type: 'upload', value: reader.result };
+        setThemeBackgroundStatus('settings.theme.backgroundStatus.upload');
+        if (themeBackgroundUrlInput) {
+          themeBackgroundUrlInput.value = '';
+        }
+        updateThemeConfiguratorPreview();
+      };
+      reader.onerror = () => {
+        showInfoMessage({
+          title: 'Upload fehlgeschlagen',
+          text: 'Die Bilddatei konnte nicht gelesen werden.',
+          confirmText: 'Okay',
+        });
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  if (themeResetBtn) {
+    themeResetBtn.addEventListener('click', () => {
+      pendingThemePreview = buildConfiguratorSelectionFromState();
+      setThemeBackgroundStatus('settings.theme.backgroundStatus.preset');
+      refreshThemeConfigurator();
+    });
+  }
+
+  if (themeSaveBtn) {
+    themeSaveBtn.addEventListener('click', () => withButtonLoading(themeSaveBtn, 'Speichern...', async () => {
+      const selection = cloneThemeJson(pendingThemePreview || buildConfiguratorSelectionFromState());
+      selection.custom = selection.custom ? { ...selection.custom } : {};
+      if (selection.custom.accentColor) {
+        selection.custom.accentColor = sanitizeAccentInput(selection.custom.accentColor);
+      }
+      if (selection.custom.backgroundImage) {
+        selection.custom.backgroundImage = sanitizeBackgroundInputClient(selection.custom.backgroundImage);
+      }
+      const state = await apiClient.theme.set(selection);
+      pendingThemePreview = null;
+      updateThemeState(state, { markPreference: true });
+      showInfoMessage({
+        title: 'Theme aktualisiert',
+        text: 'Theme-Einstellungen wurden gespeichert.',
+        confirmText: 'Okay',
+        log: { type: 'info', label: 'Theme aktualisiert' }
+      });
+    }).catch((error) => {
+      console.error('Theme konnte nicht gespeichert werden.', error);
+      showInfoMessage({
+        title: 'Theme speichern fehlgeschlagen',
+        text: error?.message || 'Das Theme konnte nicht gespeichert werden.',
+        confirmText: 'Okay',
+        log: { type: 'error', label: 'Theme speichern fehlgeschlagen', detail: error?.message || 'Unbekannter Fehler.' }
+      });
+    }));
+  }
+
+  refreshThemeConfigurator();
   const JOB_CONFIG_STORAGE_KEY = 'werwolfJobConfig';
   const EVENT_CONFIG_STORAGE_KEY = 'werwolfEventConfig';
   const BLOOD_MOON_CONFIG_STORAGE_KEY = 'werwolfBloodMoonConfig';
