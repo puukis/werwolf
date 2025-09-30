@@ -1286,6 +1286,9 @@ body.lobby-readonly .lobby-toolbar {
   width: calc(100% - 2rem);
   padding: 2.5rem 2.5rem 2rem;
   text-align: left;
+  max-height: min(90vh, 720px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .modal-close-btn {
