@@ -2,9 +2,11 @@ const fs = require('fs');
 const path = require('path');
 const { withTransaction, query } = require('./db');
 
+const MIGRATIONS_TABLE = 'werwolf_schema_migrations';
+
 async function ensureMigrationsTable() {
   await query(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
+    CREATE TABLE IF NOT EXISTS ${MIGRATIONS_TABLE} (
       name TEXT PRIMARY KEY,
       run_on TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
@@ -12,14 +14,14 @@ async function ensureMigrationsTable() {
 }
 
 async function hasMigration(name) {
-  const result = await query('SELECT 1 FROM schema_migrations WHERE name = $1', [name]);
+  const result = await query(`SELECT 1 FROM ${MIGRATIONS_TABLE} WHERE name = $1`, [name]);
   return result.rowCount > 0;
 }
 
 async function applyMigration(name, sql) {
   await withTransaction(async (client) => {
     await client.query(sql);
-    await client.query('INSERT INTO schema_migrations (name) VALUES ($1)', [name]);
+    await client.query(`INSERT INTO ${MIGRATIONS_TABLE} (name) VALUES ($1)`, [name]);
   });
 }
 
