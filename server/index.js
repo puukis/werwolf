@@ -59,6 +59,8 @@ const SUPPORTED_LOCALES = new Set(['de', 'en']);
 let ensureUserLocaleColumnPromise = null;
 let userLocaleColumnEnsured = false;
 let hasLoggedSessionPermissionWarning = false;
+let hasLoggedSessionTableMissingWarning = false;
+let sessionsDisabledDueToPermissions = false;
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -152,6 +154,45 @@ async function ensureUserLocaleColumnExists() {
   } catch (error) {
     // Fehler wurden bereits geloggt – Anfrage darf dennoch weiterlaufen.
   }
+}
+
+function logSessionTableMissingWarning() {
+  if (hasLoggedSessionTableMissingWarning) {
+    return;
+  }
+  console.warn('Sitzungstabelle ist noch nicht vorhanden. Bitte führe die Migrationen aus, um Sitzungen zu aktivieren.');
+  hasLoggedSessionTableMissingWarning = true;
+}
+
+function logSessionPermissionWarning() {
+  if (hasLoggedSessionPermissionWarning) {
+    return;
+  }
+  console.warn('Es fehlen Berechtigungen für den Zugriff auf Sitzungstabellen. Sitzungsfunktionen sind deaktiviert.');
+  hasLoggedSessionPermissionWarning = true;
+}
+
+function disableSessionsDueToPermissions() {
+  if (sessionsDisabledDueToPermissions) {
+    return;
+  }
+  sessionsDisabledDueToPermissions = true;
+  logSessionPermissionWarning();
+}
+
+function convertSessionStorageError(error) {
+  if (error?.code === '42P01') {
+    logSessionTableMissingWarning();
+    return new HttpError(503, 'Sitzungen sind derzeit nicht verfügbar. Bitte führe die Datenbankmigrationen aus.');
+  }
+  if (error?.code === '42501') {
+    disableSessionsDueToPermissions();
+    return new HttpError(
+      503,
+      'Sitzungen sind aufgrund fehlender Datenbankberechtigungen deaktiviert. Bitte passe die Rolle oder Verbindungsdaten an.'
+    );
+  }
+  return null;
 }
 
 function handleApiError(res, error, fallbackMessage) {
@@ -636,11 +677,28 @@ function formatUser(row) {
 }
 
 async function cleanupExpiredSessions() {
-  await query('DELETE FROM user_sessions WHERE expires_at <= NOW()');
+  if (sessionsDisabledDueToPermissions) {
+    return;
+  }
+  try {
+    await query('DELETE FROM user_sessions WHERE expires_at <= NOW()');
+  } catch (error) {
+    const converted = convertSessionStorageError(error);
+    if (converted) {
+      throw converted;
+    }
+    throw error;
+  }
 }
 
 async function createSession(userId) {
   await cleanupExpiredSessions();
+  if (sessionsDisabledDueToPermissions) {
+    throw new HttpError(
+      503,
+      'Sitzungen sind aufgrund fehlender Datenbankberechtigungen deaktiviert. Bitte passe die Rolle oder Verbindungsdaten an.'
+    );
+  }
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -656,6 +714,10 @@ async function createSession(userId) {
       if (error?.code === '23505') {
         continue;
       }
+      const converted = convertSessionStorageError(error);
+      if (converted) {
+        throw converted;
+      }
       throw error;
     }
   }
@@ -668,7 +730,18 @@ async function destroySessionByToken(token) {
     return;
   }
   const tokenHash = hashToken(token);
-  await query('DELETE FROM user_sessions WHERE token_hash = $1', [tokenHash]);
+  if (sessionsDisabledDueToPermissions) {
+    return;
+  }
+  try {
+    await query('DELETE FROM user_sessions WHERE token_hash = $1', [tokenHash]);
+  } catch (error) {
+    const converted = convertSessionStorageError(error);
+    if (converted) {
+      return;
+    }
+    throw error;
+  }
 }
 
 async function loadSession(token) {
@@ -687,22 +760,8 @@ async function loadSession(token) {
       [tokenHash]
     );
   } catch (error) {
-    if (error?.code === '42P01') {
-      if (!hasLoggedSessionPermissionWarning) {
-        console.warn(
-          'Sitzungstabelle ist noch nicht vorhanden. Bitte führe die Migrationen aus, um Sitzungen zu aktivieren.'
-        );
-        hasLoggedSessionPermissionWarning = true;
-      }
-      return null;
-    }
-    if (error?.code === '42501') {
-      if (!hasLoggedSessionPermissionWarning) {
-        console.warn(
-          'Es fehlen Berechtigungen für den Zugriff auf Sitzungstabellen. Sitzungsfunktionen sind deaktiviert.'
-        );
-        hasLoggedSessionPermissionWarning = true;
-      }
+    const converted = convertSessionStorageError(error);
+    if (converted) {
       return null;
     }
     throw error;
@@ -737,7 +796,7 @@ function setSessionCookie(res, token, expiresAt) {
 }
 
 function clearSessionCookie(res) {
-  res.clearCookie(SESSION_COOKIE_NAME, { ...baseCookieOptions, expires: new Date(0) });
+  res.clearCookie(SESSION_COOKIE_NAME, { ...baseCookieOptions });
 }
 
 let hasLoggedSessionLoadError = false;
@@ -1038,8 +1097,7 @@ app.post('/api/auth/logout', async (req, res) => {
     clearSessionCookie(res);
     return res.status(204).end();
   } catch (error) {
-    console.error('Abmelden fehlgeschlagen:', error);
-    return res.status(500).json({ error: 'Abmelden fehlgeschlagen.' });
+    return handleApiError(res, error, 'Abmelden fehlgeschlagen.');
   }
 });
 
@@ -1077,8 +1135,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     return res.json({ user: formatUser(userRow) });
   } catch (error) {
-    console.error('Anmeldung fehlgeschlagen:', error);
-    return res.status(500).json({ error: 'Anmeldung fehlgeschlagen.' });
+    return handleApiError(res, error, 'Anmeldung fehlgeschlagen.');
   }
 });
 
@@ -1142,8 +1199,7 @@ app.post('/api/auth/register', async (req, res) => {
 
     return res.status(201).json({ user: formatUser(userRow) });
   } catch (error) {
-    console.error('Registrierung fehlgeschlagen:', error);
-    return res.status(500).json({ error: 'Registrierung fehlgeschlagen.' });
+    return handleApiError(res, error, 'Registrierung fehlgeschlagen.');
   }
 });
 
