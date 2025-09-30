@@ -92,6 +92,35 @@ async function ensureUserLocaleColumnExists() {
   if (!ensureUserLocaleColumnPromise) {
     ensureUserLocaleColumnPromise = (async () => {
       try {
+        const columnCheck = await query(
+          `SELECT 1
+             FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'users'
+              AND column_name = 'locale'
+            LIMIT 1`
+        );
+        if (columnCheck.rowCount > 0) {
+          userLocaleColumnEnsured = true;
+          return;
+        }
+      } catch (error) {
+        if (error?.code === '42P01') {
+          // Tabelle "users" existiert noch nicht – Migrationen laufen vermutlich noch.
+          return;
+        }
+        if (error?.code === '42501') {
+          console.warn(
+            'Berechtigung reicht nicht aus, um die Locale-Spalte zu prüfen. Bitte Migrationen mit ausreichenden Rechten ausführen.'
+          );
+          userLocaleColumnEnsured = true;
+          return;
+        }
+        console.error('Locale-Spalte konnte nicht geprüft werden:', error);
+        return;
+      }
+
+      try {
         await query('ALTER TABLE users ADD COLUMN IF NOT EXISTS locale TEXT');
         userLocaleColumnEnsured = true;
       } catch (error) {
@@ -99,11 +128,22 @@ async function ensureUserLocaleColumnExists() {
           // Tabelle "users" existiert noch nicht – Migrationen laufen vermutlich noch.
           return;
         }
+        if (error?.code === '42501') {
+          console.warn(
+            'Locale-Spalte konnte nicht automatisch hinzugefügt werden (fehlende Berechtigung). Bitte Migrationen mit ausreichenden Rechten ausführen.'
+          );
+          userLocaleColumnEnsured = true;
+          return;
+        }
         console.error('Locale-Spalte konnte nicht geprüft werden:', error);
-      } finally {
-        ensureUserLocaleColumnPromise = null;
       }
-    })();
+    })()
+      .catch(() => {
+        // Fehler wurden bereits geloggt.
+      })
+      .finally(() => {
+        ensureUserLocaleColumnPromise = null;
+      });
   }
 
   try {
