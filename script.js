@@ -2854,6 +2854,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   const analyticsMetaEl = document.getElementById('analytics-meta');
   const analyticsHighlightsEl = document.getElementById('analytics-highlights');
   const analyticsPlayerTableBody = document.getElementById('analytics-player-table-body');
+  const analyticsModal = document.getElementById('analytics-modal');
+  const openAnalyticsBtn = document.getElementById('open-analytics-btn');
+  const closeAnalyticsBtn = document.getElementById('analytics-close-btn');
+  const analyticsRefreshBtn = document.getElementById('analytics-refresh-btn');
+  const analyticsMetricSessionsEl = document.getElementById('analytics-metric-sessions');
+  const analyticsMetricTrackedEl = document.getElementById('analytics-metric-tracked');
+  const analyticsMetricPlayersEl = document.getElementById('analytics-metric-players');
+  const analyticsMetricAveragePlayersEl = document.getElementById('analytics-metric-average-players');
+  const analyticsMetricAverageActionsEl = document.getElementById('analytics-metric-average-actions');
+  const analyticsMetricDurationEl = document.getElementById('analytics-metric-duration');
+  const analyticsRefreshBtnDefaultText = analyticsRefreshBtn ? analyticsRefreshBtn.textContent : 'Aktualisieren';
+  let lastAnalyticsTrigger = null;
 
   let replayTimeline = null;
   let replayPointer = -1;
@@ -4066,9 +4078,92 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  function setAnalyticsModalVisibility(isOpen) {
+    if (!analyticsModal) {
+      return;
+    }
+    analyticsModal.style.display = isOpen ? 'flex' : 'none';
+    analyticsModal.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+  }
+
+  function focusFirstAnalyticsElement() {
+    if (!analyticsModal) {
+      return;
+    }
+    const focusable = analyticsModal.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    if (focusable && typeof focusable.focus === 'function') {
+      focusable.focus();
+    }
+  }
+
+  function openAnalyticsModal() {
+    if (!analyticsModal) {
+      return;
+    }
+    lastAnalyticsTrigger = document.activeElement && typeof document.activeElement.focus === 'function'
+      ? document.activeElement
+      : null;
+    setAnalyticsModalVisibility(true);
+    focusFirstAnalyticsElement();
+    loadAnalytics({ showLoading: false });
+  }
+
+  function closeAnalyticsModal() {
+    if (!analyticsModal) {
+      return;
+    }
+    setAnalyticsModalVisibility(false);
+    if (lastAnalyticsTrigger) {
+      lastAnalyticsTrigger.focus();
+    } else if (openAnalyticsBtn && typeof openAnalyticsBtn.focus === 'function') {
+      openAnalyticsBtn.focus();
+    }
+  }
+
+  function setAnalyticsLoadingState(isLoading, { showLoadingText = true } = {}) {
+    if (analyticsRefreshBtn) {
+      analyticsRefreshBtn.disabled = isLoading;
+      if (showLoadingText) {
+        analyticsRefreshBtn.textContent = isLoading ? 'Aktualisiere…' : analyticsRefreshBtnDefaultText;
+      }
+    }
+  }
+
+  if (analyticsModal) {
+    setAnalyticsModalVisibility(false);
+    analyticsModal.addEventListener('click', (event) => {
+      if (event.target === analyticsModal) {
+        closeAnalyticsModal();
+      }
+    });
+  }
+
+  if (openAnalyticsBtn && analyticsModal) {
+    openAnalyticsBtn.addEventListener('click', () => {
+      openAnalyticsModal();
+    });
+  }
+
+  if (closeAnalyticsBtn) {
+    closeAnalyticsBtn.addEventListener('click', () => {
+      closeAnalyticsModal();
+    });
+  }
+
+  if (analyticsRefreshBtn) {
+    analyticsRefreshBtn.addEventListener('click', () => {
+      loadAnalytics({ showLoading: true });
+    });
+  }
+
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && configModal?.style.display === 'flex') {
-      closeConfigModal();
+    if (event.key === 'Escape') {
+      if (configModal?.style.display === 'flex') {
+        closeConfigModal();
+      }
+      if (analyticsModal?.style.display === 'flex') {
+        closeAnalyticsModal();
+      }
     }
   });
 
@@ -5159,6 +5254,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       message,
       timestamp: Date.now()
     };
+    queueMicrotask(() => {
+      if (typeof loadAnalytics === 'function') {
+        loadAnalytics({ showLoading: false });
+      }
+    });
   }
 
   // State tracking
@@ -10817,18 +10917,87 @@ document.addEventListener("DOMContentLoaded", async () => {
     const averagePlayers = Number.isFinite(summary.averagePlayerCount)
       ? summary.averagePlayerCount
       : Number(summary.average_player_count);
+    const trackedSessions = Number.isFinite(playerAnalytics.trackedSessions)
+      ? playerAnalytics.trackedSessions
+      : Number(playerAnalytics.sessionCount);
+    const distinctPlayers = Number.isFinite(playerAnalytics.totalCount)
+      ? playerAnalytics.totalCount
+      : Number(playerAnalytics.distinctPlayers);
+    const meta = data?.meta || {};
+    const averageNights = Number.isFinite(meta.averageNightCount)
+      ? meta.averageNightCount
+      : Number(meta.average_night_count);
+    const averageDays = Number.isFinite(meta.averageDayCount)
+      ? meta.averageDayCount
+      : Number(meta.average_day_count);
 
-    const summaryParts = [`Gespeicherte Spiele: ${sessionCount}`];
-    if (Number.isFinite(averagePlayers)) {
-      summaryParts.push(`Ø Spieler:innen: ${averagePlayers.toFixed(1)}`);
+    const formatLocaleNumber = (value, { fractionDigits = 0 } = {}) => {
+      if (!Number.isFinite(value)) {
+        return '–';
+      }
+      return value.toLocaleString('de-DE', {
+        minimumFractionDigits: fractionDigits,
+        maximumFractionDigits: fractionDigits
+      });
+    };
+
+    const formatDuration = (ms) => {
+      if (!Number.isFinite(ms) || ms <= 0) {
+        return '–';
+      }
+      const totalSeconds = Math.round(ms / 1000);
+      if (totalSeconds < 60) {
+        return `${totalSeconds}s`;
+      }
+      const totalMinutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      if (totalMinutes >= 60) {
+        const hours = Math.floor(totalMinutes / 60);
+        const minutes = totalMinutes % 60;
+        if (minutes === 0) {
+          return `${hours}h`;
+        }
+        return `${hours}h ${minutes}m`;
+      }
+      if (seconds === 0) {
+        return `${totalMinutes}m`;
+      }
+      return `${totalMinutes}m ${seconds}s`;
+    };
+
+    const summaryParts = [`Spiele: ${formatLocaleNumber(sessionCount)}`];
+    if (Number.isFinite(distinctPlayers)) {
+      summaryParts.push(`Spieler:innen: ${formatLocaleNumber(distinctPlayers)}`);
     }
-    if (Number.isFinite(averageActions)) {
-      summaryParts.push(`Ø Aktionen: ${averageActions.toFixed(1)}`);
-    }
-    if (Number.isFinite(averageLengthMs)) {
-      summaryParts.push(`Ø Spieldauer: ${formatMillisecondsToSeconds(averageLengthMs)}`);
-    }
+    summaryParts.push(`Stand: ${new Date().toLocaleString('de-DE')}`);
     analyticsSummaryEl.textContent = summaryParts.join(' • ');
+
+    if (analyticsMetricSessionsEl) {
+      analyticsMetricSessionsEl.textContent = formatLocaleNumber(sessionCount);
+    }
+    if (analyticsMetricTrackedEl) {
+      analyticsMetricTrackedEl.textContent = Number.isFinite(trackedSessions)
+        ? formatLocaleNumber(trackedSessions)
+        : '0';
+    }
+    if (analyticsMetricPlayersEl) {
+      analyticsMetricPlayersEl.textContent = Number.isFinite(distinctPlayers)
+        ? formatLocaleNumber(distinctPlayers)
+        : '0';
+    }
+    if (analyticsMetricAveragePlayersEl) {
+      analyticsMetricAveragePlayersEl.textContent = Number.isFinite(averagePlayers)
+        ? formatLocaleNumber(averagePlayers, { fractionDigits: 1 })
+        : '–';
+    }
+    if (analyticsMetricAverageActionsEl) {
+      analyticsMetricAverageActionsEl.textContent = Number.isFinite(averageActions)
+        ? formatLocaleNumber(averageActions, { fractionDigits: 1 })
+        : '–';
+    }
+    if (analyticsMetricDurationEl) {
+      analyticsMetricDurationEl.textContent = formatDuration(averageLengthMs);
+    }
 
     if (analyticsWinratesEl) {
       analyticsWinratesEl.innerHTML = '';
@@ -10845,13 +11014,27 @@ document.addEventListener("DOMContentLoaded", async () => {
           const rateValue = Number.isFinite(entry.rate) ? entry.rate : Number(entry.percentage) / 100;
           const countValueRaw = Number.isFinite(entry.count) ? entry.count : Number(entry.total) || 0;
           const countValue = Number.isFinite(countValueRaw) ? countValueRaw : 0;
+          const headerRow = document.createElement('div');
+          headerRow.className = 'analytics-winrate-row';
           const winnerEl = document.createElement('strong');
           winnerEl.textContent = winnerName;
-          item.appendChild(winnerEl);
+          headerRow.appendChild(winnerEl);
 
           const detailSpan = document.createElement('span');
+          detailSpan.className = 'analytics-winrate-value';
           detailSpan.textContent = `${formatPercentage(rateValue, { defaultText: '–', fractionDigits: 0 })} (${countValue.toLocaleString('de-DE')})`;
-          item.appendChild(detailSpan);
+          headerRow.appendChild(detailSpan);
+          item.appendChild(headerRow);
+
+          const progress = document.createElement('div');
+          progress.className = 'analytics-progress';
+          const progressFill = document.createElement('div');
+          progressFill.className = 'analytics-progress-fill';
+          if (Number.isFinite(rateValue)) {
+            progressFill.style.width = `${Math.max(0, Math.min(100, rateValue * 100))}%`;
+          }
+          progress.appendChild(progressFill);
+          item.appendChild(progress);
 
           analyticsWinratesEl.appendChild(item);
         });
@@ -10859,19 +11042,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     if (analyticsMetaEl) {
-      const meta = data?.meta || {};
-      const averageNights = Number.isFinite(meta.averageNightCount)
-        ? meta.averageNightCount
-        : Number(meta.average_night_count);
-      const averageDays = Number.isFinite(meta.averageDayCount)
-        ? meta.averageDayCount
-        : Number(meta.average_day_count);
-      const trackedSessions = Number.isFinite(playerAnalytics.trackedSessions)
-        ? playerAnalytics.trackedSessions
-        : Number(playerAnalytics.sessionCount);
-      const distinctPlayers = Number.isFinite(playerAnalytics.totalCount)
-        ? playerAnalytics.totalCount
-        : Number(playerAnalytics.distinctPlayers);
       const metaParts = [];
       if (Number.isFinite(averageNights)) {
         metaParts.push(`Ø Nächte: ${averageNights.toFixed(1)}`);
@@ -10885,17 +11055,42 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (Number.isFinite(distinctPlayers) && distinctPlayers > 0) {
         metaParts.push(`Spieler:innen: ${distinctPlayers.toLocaleString('de-DE')}`);
       }
-      analyticsMetaEl.textContent = metaParts.join(' • ');
+      if (metaParts.length === 0) {
+        analyticsMetaEl.innerHTML = '<p class="analytics-meta-empty">Noch keine Metadaten vorhanden.</p>';
+      } else {
+        analyticsMetaEl.innerHTML = metaParts
+          .map(part => `<span class="analytics-meta-chip">${escapeHtml(part)}</span>`)
+          .join('');
+      }
     }
 
     if (analyticsHighlightsEl) {
       analyticsHighlightsEl.innerHTML = '';
       const formatNumber = (value) => (Number.isFinite(value) ? value.toLocaleString('de-DE') : null);
+      const stats = Array.isArray(playerAnalytics.stats) ? playerAnalytics.stats : [];
+      const globalRoleUsage = stats.reduce((acc, stat) => {
+        const roles = Array.isArray(stat.topRoles) ? stat.topRoles : [];
+        roles.forEach(roleEntry => {
+          const roleName = roleEntry?.role;
+          const count = Number(roleEntry?.count);
+          if (!roleName || !Number.isFinite(count)) {
+            return;
+          }
+          acc.set(roleName, (acc.get(roleName) || 0) + count);
+        });
+        return acc;
+      }, new Map());
+      const globalRoleHighlights = Array.from(globalRoleUsage.entries())
+        .map(([role, count]) => ({ role, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5);
+
       const highlightConfigs = [
         {
           key: 'topWinners',
           title: 'Top Sieger:innen',
           description: 'Meiste Siege insgesamt',
+          icon: '🏆',
           items: Array.isArray(playerAnalytics.topWinners) ? playerAnalytics.topWinners : [],
           format(entry) {
             const wins = formatNumber(entry.wins);
@@ -10916,8 +11111,9 @@ document.addEventListener("DOMContentLoaded", async () => {
         },
         {
           key: 'mostDeaths',
-          title: 'Meist gestorben',
-          description: 'Häufigste Opfer des Spiels',
+          title: 'Dramatischstes Ende',
+          description: 'Wer stirbt am häufigsten?',
+          icon: '💀',
           items: Array.isArray(playerAnalytics.mostDeaths) ? playerAnalytics.mostDeaths : [],
           format(entry) {
             const deaths = formatNumber(entry.deaths);
@@ -10939,14 +11135,14 @@ document.addEventListener("DOMContentLoaded", async () => {
         {
           key: 'bestSurvivors',
           title: 'Überlebenskünstler:innen',
-          description: 'Höchste Überlebensquote (mind. 2 Spiele)',
+          description: 'Beste Überlebensquote ab 2 Spielen',
+          icon: '🛡️',
           items: Array.isArray(playerAnalytics.bestSurvivors) ? playerAnalytics.bestSurvivors : [],
           format(entry) {
-            const survivalCount = Number.isFinite(entry.survivals) ? entry.survivals : null;
-            const survivals = survivalCount !== null ? formatNumber(entry.survivals) : null;
+            const survivals = formatNumber(entry.survivals);
             const games = formatNumber(entry.games);
             const parts = [];
-            if (survivalCount !== null && survivals !== null) {
+            if (survivals !== null) {
               parts.push(`${survivals}× überlebt`);
             }
             if (games !== null) {
@@ -10958,38 +11154,67 @@ document.addEventListener("DOMContentLoaded", async () => {
             }
             return parts.join(' • ') || 'Keine Daten';
           }
+        },
+        {
+          key: 'favoriteRoles',
+          title: 'Beliebteste Rollen',
+          description: 'Rollen mit den meisten Einsätzen insgesamt',
+          icon: '🎭',
+          items: globalRoleHighlights,
+          format(entry) {
+            const count = formatNumber(entry.count);
+            if (count !== null) {
+              return `${count} Einsätze`;
+            }
+            return 'Keine Daten';
+          },
+          getName(entry) {
+            return entry.role || 'Unbekannt';
+          }
         }
       ];
 
       highlightConfigs.forEach(config => {
-        const card = document.createElement('div');
-        card.className = 'analytics-card card';
+        const card = document.createElement('article');
+        card.className = 'analytics-card';
         const titleEl = document.createElement('h6');
-        titleEl.textContent = config.title;
+        const iconEl = document.createElement('span');
+        iconEl.className = 'analytics-card-icon';
+        iconEl.textContent = config.icon || '⭐';
+        titleEl.appendChild(iconEl);
+        titleEl.appendChild(document.createTextNode(config.title));
         card.appendChild(titleEl);
         if (config.description) {
           const descEl = document.createElement('p');
           descEl.textContent = config.description;
           card.appendChild(descEl);
         }
-        const list = document.createElement('ul');
-        if (!config.items || config.items.length === 0) {
-          const emptyItem = document.createElement('li');
-          emptyItem.textContent = 'Noch keine Daten vorhanden.';
-          list.appendChild(emptyItem);
+        const items = Array.isArray(config.items) ? config.items : [];
+        if (items.length === 0) {
+          const emptyState = document.createElement('p');
+          emptyState.className = 'analytics-empty-state';
+          emptyState.textContent = 'Noch keine Daten vorhanden.';
+          card.appendChild(emptyState);
         } else {
-          config.items.forEach(entry => {
+          const list = document.createElement('ul');
+          items.slice(0, 5).forEach(entry => {
             const item = document.createElement('li');
             const nameEl = document.createElement('strong');
-            nameEl.textContent = entry.name || 'Unbekannt';
+            const entryName = typeof config.getName === 'function'
+              ? config.getName(entry)
+              : entry.name || entry.player || entry.role || 'Unbekannt';
+            nameEl.textContent = entryName;
             item.appendChild(nameEl);
-            const detailEl = document.createElement('span');
-            detailEl.textContent = config.format(entry);
-            item.appendChild(detailEl);
+            const detailText = config.format(entry);
+            if (detailText) {
+              const detailEl = document.createElement('span');
+              detailEl.textContent = detailText;
+              item.appendChild(detailEl);
+            }
             list.appendChild(item);
           });
+          card.appendChild(list);
         }
-        card.appendChild(list);
         analyticsHighlightsEl.appendChild(card);
       });
     }
@@ -11002,73 +11227,106 @@ document.addEventListener("DOMContentLoaded", async () => {
         const row = document.createElement('tr');
         row.className = 'empty';
         const cell = document.createElement('td');
-        cell.colSpan = 7;
+        cell.colSpan = 8;
         cell.textContent = 'Noch keine Spielerstatistiken verfügbar.';
         row.appendChild(cell);
         analyticsPlayerTableBody.appendChild(row);
       } else {
         stats.forEach(stat => {
           const row = document.createElement('tr');
+
+          const nameCell = document.createElement('td');
+          nameCell.textContent = stat.name || 'Unbekannt';
+          row.appendChild(nameCell);
+
+          const gamesCell = document.createElement('td');
+          gamesCell.textContent = formatCount(stat.games);
+          row.appendChild(gamesCell);
+
+          const winsCell = document.createElement('td');
+          winsCell.textContent = formatCount(stat.wins);
+          row.appendChild(winsCell);
+
+          const winRateCell = document.createElement('td');
+          winRateCell.textContent = formatPercentage(stat.winRate, { defaultText: '–', fractionDigits: 0 });
+          row.appendChild(winRateCell);
+
+          const deathsCell = document.createElement('td');
+          deathsCell.textContent = formatCount(stat.deaths);
+          row.appendChild(deathsCell);
+
+          const survivalCell = document.createElement('td');
+          survivalCell.textContent = formatPercentage(stat.survivalRate, { defaultText: '–', fractionDigits: 0 });
+          row.appendChild(survivalCell);
+
+          const favoriteCell = document.createElement('td');
           const favoriteRole = stat.favoriteRole && typeof stat.favoriteRole.role === 'string'
-            ? stat.favoriteRole.role
+            ? stat.favoriteRole
             : null;
-          const favoriteCount = stat.favoriteRole && Number.isFinite(stat.favoriteRole.count)
-            ? stat.favoriteRole.count
-            : null;
-          const favoriteRoleLabel = favoriteRole && favoriteCount !== null
-            ? `${favoriteRole} (${favoriteCount.toLocaleString('de-DE')}×)`
-            : '–';
-          const columns = [
-            stat.name || 'Unbekannt',
-            formatCount(stat.games),
-            formatCount(stat.wins),
-            formatPercentage(stat.winRate, { defaultText: '–', fractionDigits: 0 }),
-            formatCount(stat.deaths),
-            formatPercentage(stat.survivalRate, { defaultText: '–', fractionDigits: 0 }),
-            favoriteRoleLabel
-          ];
-          columns.forEach((value, index) => {
-            const cell = document.createElement('td');
-            cell.textContent = value;
-            if (index === 6 && Array.isArray(stat.topRoles) && stat.topRoles.length > 0) {
-              const tooltipEntries = stat.topRoles
-                .map(roleEntry => {
-                  if (!roleEntry || typeof roleEntry.role !== 'string') {
-                    return null;
-                  }
-                  const count = Number.isFinite(roleEntry.count) ? roleEntry.count : null;
-                  if (count === null) {
-                    return roleEntry.role;
-                  }
-                  return `${roleEntry.role} (${count.toLocaleString('de-DE')}×)`;
-                })
-                .filter(Boolean);
-              if (tooltipEntries.length > 0) {
-                cell.title = tooltipEntries.join(', ');
+          if (favoriteRole) {
+            const label = document.createElement('div');
+            const countText = Number.isFinite(favoriteRole.count)
+              ? ` (${favoriteRole.count.toLocaleString('de-DE')}×)`
+              : '';
+            label.textContent = `${favoriteRole.role}${countText}`;
+            favoriteCell.appendChild(label);
+          } else {
+            favoriteCell.textContent = '–';
+          }
+
+          const roleChips = Array.isArray(stat.topRoles) ? stat.topRoles.slice(0, 3) : [];
+          if (roleChips.length > 0) {
+            const roleList = document.createElement('div');
+            roleList.className = 'analytics-role-list';
+            roleChips.forEach(roleEntry => {
+              if (!roleEntry || typeof roleEntry.role !== 'string') {
+                return;
               }
-            }
-            row.appendChild(cell);
-          });
+              const chip = document.createElement('span');
+              chip.className = 'analytics-role-chip';
+              const countText = Number.isFinite(roleEntry.count)
+                ? ` ${roleEntry.count.toLocaleString('de-DE')}×`
+                : '';
+              chip.textContent = `${roleEntry.role}${countText}`;
+              roleList.appendChild(chip);
+            });
+            favoriteCell.appendChild(roleList);
+          }
+          row.appendChild(favoriteCell);
+
+          const lastPlayedCell = document.createElement('td');
+          if (Number.isFinite(stat.lastPlayedAt) && stat.lastPlayedAt > 0) {
+            const lastPlayedDate = new Date(stat.lastPlayedAt);
+            lastPlayedCell.innerHTML = `<span class="analytics-last-played">${escapeHtml(lastPlayedDate.toLocaleDateString('de-DE', { dateStyle: 'medium' }))}</span>`;
+          } else {
+            lastPlayedCell.textContent = '–';
+          }
+          row.appendChild(lastPlayedCell);
+
           analyticsPlayerTableBody.appendChild(row);
         });
       }
     }
   }
 
-  async function loadAnalytics() {
+  async function loadAnalytics(options = {}) {
+    const { showLoading = true } = options;
     if (!analyticsSummaryEl) {
       return null;
     }
 
-    analyticsSummaryEl.textContent = 'Lade Statistiken…';
+    if (showLoading) {
+      analyticsSummaryEl.textContent = 'Lade Statistiken…';
+    }
     if (analyticsWinratesEl) {
       analyticsWinratesEl.innerHTML = '';
     }
     if (analyticsMetaEl) {
-      analyticsMetaEl.textContent = '';
+      analyticsMetaEl.innerHTML = '';
     }
 
     try {
+      setAnalyticsLoadingState(true, { showLoadingText: showLoading });
       const data = await apiClient.analytics.get();
       renderAnalytics(data);
       return data;
@@ -11076,6 +11334,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       analyticsSummaryEl.textContent = 'Statistiken konnten nicht geladen werden.';
       console.error('Analytics konnten nicht geladen werden.', error);
       return null;
+    } finally {
+      setAnalyticsLoadingState(false, { showLoadingText: showLoading });
     }
   }
 
@@ -11177,9 +11437,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     await apiClient.sessions.create(session);
     await loadSessions();
-    if (typeof loadAnalytics === 'function') {
-      loadAnalytics();
-    }
+    await loadAnalytics({ showLoading: false });
     return session;
   }
 
