@@ -643,6 +643,8 @@ function clearSessionCookie(res) {
   res.clearCookie(SESSION_COOKIE_NAME, { ...baseCookieOptions, expires: new Date(0) });
 }
 
+let hasLoggedSessionLoadError = false;
+
 async function loadUserFromSession(req, res, next) {
   const token = req.cookies?.[SESSION_COOKIE_NAME];
   req.user = null;
@@ -662,7 +664,11 @@ async function loadUserFromSession(req, res, next) {
     req.sessionTokenHash = session.tokenHash;
     return next();
   } catch (error) {
-    return next(error);
+    if (!hasLoggedSessionLoadError) {
+      console.error('Sitzung konnte nicht geladen werden:', error);
+      hasLoggedSessionLoadError = true;
+    }
+    return next();
   }
 }
 
