@@ -74,9 +74,55 @@ async function createPool() {
 
 const poolPromise = createPool();
 
+let hasLoggedPermissionDeniedHint = false;
+
+function resolveConfiguredRole() {
+  if (process.env.PGUSER) {
+    return process.env.PGUSER;
+  }
+
+  if (process.env.DATABASE_URL) {
+    try {
+      const parsed = new URL(process.env.DATABASE_URL);
+      if (parsed.username) {
+        return decodeURIComponent(parsed.username);
+      }
+    } catch (error) {
+      // Ungültige URL ignorieren – Hinweis erfolgt unten dennoch.
+    }
+  }
+
+  return null;
+}
+
+function maybeLogPermissionDeniedHint(error) {
+  if (hasLoggedPermissionDeniedHint || error?.code !== '42501') {
+    return;
+  }
+
+  hasLoggedPermissionDeniedHint = true;
+
+  const configuredUser = resolveConfiguredRole();
+  const effectiveUser = configuredUser || process.env.USER || '<unbekannt>';
+
+  console.error(
+    [
+      'PostgreSQL-Zugriff verweigert (Fehler 42501).',
+      'Bitte stelle sicher, dass die verwendete Rolle ausreichende Rechte auf das Schema besitzt.',
+      `Aktuelle Rolle laut Konfiguration: ${effectiveUser}.`,
+      'Tipp: Setze PGUSER/PGPASSWORD in deiner .env-Datei oder gewähre der Rolle SELECT/INSERT/UPDATE/DELETE auf die Tabellen.',
+    ].join(' ')
+  );
+}
+
 async function query(text, params) {
   const pool = await poolPromise;
-  return pool.query(text, params);
+  try {
+    return await pool.query(text, params);
+  } catch (error) {
+    maybeLogPermissionDeniedHint(error);
+    throw error;
+  }
 }
 
 async function withTransaction(handler) {

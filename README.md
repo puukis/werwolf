@@ -255,6 +255,18 @@ npm run migrate
 
 Das Script legt Tabellen für Einstellungen (`kv_store`), Spielstände (`sessions`), Benutzer (`users`) sowie Session-Tokens (`user_sessions`) an und protokolliert ausgeführte Migrationen in `schema_migrations`.
 
+> ❗️ **Fehler "permission denied for table …"?**
+> Stelle sicher, dass die Rolle aus `PGUSER` (bzw. aus deiner `DATABASE_URL`) Besitzerin des Schemas ist oder mindestens Lese-/Schreibrechte besitzt.
+> Du kannst fehlende Rechte beispielsweise so vergeben:
+>
+> ```sql
+> GRANT USAGE ON SCHEMA public TO werwolf_user;
+> GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO werwolf_user;
+> ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO werwolf_user;
+> ```
+>
+> Ersetze `werwolf_user` durch deine Rolle. Anschließend den Server neu starten.
+
 ### 4. API-Server starten
 
 Starte den Express-Server im Projektstamm:
