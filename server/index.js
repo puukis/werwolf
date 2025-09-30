@@ -2546,22 +2546,27 @@ function ensurePlayerAggregate(map, name) {
 
 app.get('/api/analytics', async (req, res) => {
   try {
+    const context = await resolveLobbyContext(req);
+
     const summaryResult = await query(
       `SELECT
          COUNT(*)::int AS session_count,
          AVG(game_length_ms)::bigint AS average_game_length_ms,
          AVG(action_count)::numeric AS average_action_count,
          AVG(player_count)::numeric AS average_player_count
-        FROM session_metrics`
+        FROM session_metrics
+       WHERE lobby_id = $1`,
+      [context.lobbyId]
     );
     const summaryRow = summaryResult.rows[0] || {};
 
     const winRateResult = await query(
       `SELECT winner, COUNT(*)::int AS count
          FROM session_metrics
-        WHERE winner IS NOT NULL AND winner <> ''
+        WHERE lobby_id = $1 AND winner IS NOT NULL AND winner <> ''
         GROUP BY winner
-        ORDER BY count DESC`
+        ORDER BY count DESC`,
+      [context.lobbyId]
     );
     const totalWins = winRateResult.rows.reduce((acc, row) => acc + Number(row.count || 0), 0);
     const winRates = winRateResult.rows.map((row) => ({
@@ -2575,14 +2580,17 @@ app.get('/api/analytics', async (req, res) => {
          AVG((data->'metadata'->>'dayCount')::numeric) AS average_day_count,
          AVG((data->'metadata'->>'nightCount')::numeric) AS average_night_count
         FROM sessions
-       WHERE data ? 'metadata'`
+       WHERE lobby_id = $1 AND data ? 'metadata'`,
+      [context.lobbyId]
     );
     const metaRow = metaResult.rows[0] || {};
 
     const sessionResult = await query(
       `SELECT timestamp, data
          FROM sessions
-        ORDER BY timestamp DESC`
+        WHERE lobby_id = $1
+        ORDER BY timestamp DESC`,
+      [context.lobbyId]
     );
 
     const playerAggregates = new Map();
