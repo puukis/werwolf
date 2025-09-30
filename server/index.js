@@ -56,6 +56,9 @@ const LOBBY_HEADER = 'x-werwolf-lobby';
 const LOBBY_JOIN_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const SUPPORTED_LOCALES = new Set(['de', 'en']);
 
+let ensureUserLocaleColumnPromise = null;
+let userLocaleColumnEnsured = false;
+
 class HttpError extends Error {
   constructor(status, message) {
     super(message);
@@ -79,6 +82,35 @@ function normalizeLocaleInput(value) {
     return base;
   }
   return null;
+}
+
+async function ensureUserLocaleColumnExists() {
+  if (userLocaleColumnEnsured) {
+    return;
+  }
+
+  if (!ensureUserLocaleColumnPromise) {
+    ensureUserLocaleColumnPromise = (async () => {
+      try {
+        await query('ALTER TABLE users ADD COLUMN IF NOT EXISTS locale TEXT');
+        userLocaleColumnEnsured = true;
+      } catch (error) {
+        if (error?.code === '42P01') {
+          // Tabelle "users" existiert noch nicht – Migrationen laufen vermutlich noch.
+          return;
+        }
+        console.error('Locale-Spalte konnte nicht geprüft werden:', error);
+      } finally {
+        ensureUserLocaleColumnPromise = null;
+      }
+    })();
+  }
+
+  try {
+    await ensureUserLocaleColumnPromise;
+  } catch (error) {
+    // Fehler wurden bereits geloggt – Anfrage darf dennoch weiterlaufen.
+  }
 }
 
 function handleApiError(res, error, fallbackMessage) {
@@ -602,6 +634,7 @@ async function loadSession(token) {
   if (!token) {
     return null;
   }
+  await ensureUserLocaleColumnExists();
   const tokenHash = hashToken(token);
   const result = await query(
     `SELECT s.token_hash, s.expires_at, u.id, u.email, u.display_name, u.is_admin, u.locale
@@ -954,10 +987,11 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(400).json({ error: 'E-Mail oder Passwort ist ungültig.' });
     }
 
+    await ensureUserLocaleColumnExists();
     const result = await query(
-    `SELECT id, email, display_name, is_admin, password_hash, locale
-       FROM users
-      WHERE LOWER(email) = LOWER($1)
+      `SELECT id, email, display_name, is_admin, password_hash, locale
+         FROM users
+        WHERE LOWER(email) = LOWER($1)
       LIMIT 1`,
       [normalizedEmail]
     );
@@ -1009,6 +1043,7 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(400).json({ error: 'Das Passwort muss mindestens 8 Zeichen haben.' });
     }
 
+    await ensureUserLocaleColumnExists();
     const existing = await query('SELECT 1 FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [normalizedEmail]);
     if (existing.rowCount > 0) {
       return res.status(409).json({ error: 'Diese E-Mail-Adresse wird bereits verwendet.' });
@@ -1076,6 +1111,7 @@ app.put('/api/locale', async (req, res) => {
   const storeValue = (!trimmedPreference || trimmedPreference === 'system') ? null : normalized;
 
   try {
+    await ensureUserLocaleColumnExists();
     await query('UPDATE users SET locale = $1 WHERE id = $2', [storeValue, req.user.id]);
     req.user.locale = storeValue;
     const effective = normalizeLocaleInput(storeValue) || 'de';
