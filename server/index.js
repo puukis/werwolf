@@ -58,6 +58,7 @@ const SUPPORTED_LOCALES = new Set(['de', 'en']);
 
 let ensureUserLocaleColumnPromise = null;
 let userLocaleColumnEnsured = false;
+let hasLoggedSessionPermissionWarning = false;
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -676,13 +677,36 @@ async function loadSession(token) {
   }
   await ensureUserLocaleColumnExists();
   const tokenHash = hashToken(token);
-  const result = await query(
-    `SELECT s.token_hash, s.expires_at, u.id, u.email, u.display_name, u.is_admin, u.locale
-       FROM user_sessions s
-       JOIN users u ON u.id = s.user_id
-      WHERE s.token_hash = $1`,
-    [tokenHash]
-  );
+  let result;
+  try {
+    result = await query(
+      `SELECT s.token_hash, s.expires_at, u.id, u.email, u.display_name, u.is_admin, u.locale
+         FROM user_sessions s
+         JOIN users u ON u.id = s.user_id
+        WHERE s.token_hash = $1`,
+      [tokenHash]
+    );
+  } catch (error) {
+    if (error?.code === '42P01') {
+      if (!hasLoggedSessionPermissionWarning) {
+        console.warn(
+          'Sitzungstabelle ist noch nicht vorhanden. Bitte führe die Migrationen aus, um Sitzungen zu aktivieren.'
+        );
+        hasLoggedSessionPermissionWarning = true;
+      }
+      return null;
+    }
+    if (error?.code === '42501') {
+      if (!hasLoggedSessionPermissionWarning) {
+        console.warn(
+          'Es fehlen Berechtigungen für den Zugriff auf Sitzungstabellen. Sitzungsfunktionen sind deaktiviert.'
+        );
+        hasLoggedSessionPermissionWarning = true;
+      }
+      return null;
+    }
+    throw error;
+  }
 
   if (result.rowCount === 0) {
     return null;
