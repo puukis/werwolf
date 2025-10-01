@@ -376,7 +376,7 @@ function disableSessionsDueToPermissions() {
 }
 
 function convertSessionStorageError(error) {
-  if (error?.code === '42P01') {
+  if (error?.code === '42P01' || error?.code === '42703') {
     logSessionTableMissingWarning();
     return new HttpError(503, SESSION_MIGRATION_MESSAGE);
   }
