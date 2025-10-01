@@ -3157,6 +3157,35 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
+  function coerceBoolean(value, defaultValue = false) {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (!normalized) {
+        return defaultValue;
+      }
+      if (['true', '1', 'yes', 'ja', 'on', 'an'].includes(normalized)) {
+        return true;
+      }
+      if (['false', '0', 'no', 'nein', 'off', 'aus', 'null'].includes(normalized)) {
+        return false;
+      }
+      return defaultValue;
+    }
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value)) {
+        return defaultValue;
+      }
+      return value !== 0;
+    }
+    if (value == null) {
+      return defaultValue;
+    }
+    return Boolean(value);
+  }
+
   async function withButtonLoading(button, loadingText, task) {
     if (!button) {
       return task();
@@ -11880,9 +11909,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     silencedPlayer = session.silencedPlayer || null;
     healRemaining = session.healRemaining !== undefined ? session.healRemaining : 1;
     poisonRemaining = session.poisonRemaining !== undefined ? session.poisonRemaining : 1;
-    setBloodMoonState(!!session.bloodMoonActive);
-    phoenixPulsePending = !!session.phoenixPulsePending;
-    phoenixPulseJustResolved = !!session.phoenixPulseJustResolved;
+    const nextBloodMoonActive = coerceBoolean(session.bloodMoonActive);
+    setBloodMoonState(nextBloodMoonActive);
+    phoenixPulsePending = coerceBoolean(session.phoenixPulsePending);
+    phoenixPulseJustResolved = coerceBoolean(session.phoenixPulseJustResolved);
     phoenixPulseRevivedPlayers = Array.isArray(session.phoenixPulseRevivedPlayers)
       ? session.phoenixPulseRevivedPlayers.slice()
       : [];
@@ -11890,7 +11920,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       firstNightShieldUsed = session.firstNightShieldUsed;
     } else {
       const legacyNightCounter = Number.isFinite(session.nightCounter) ? session.nightCounter : 0;
-      const legacyNightMode = !!session.nightMode;
+      const legacyNightMode = coerceBoolean(session.nightMode);
       const legacyDayCount = Number.isFinite(session.dayCount) ? session.dayCount : 0;
       const nightFinished = legacyNightCounter > 1 || (legacyNightCounter === 1 && !legacyNightMode);
       firstNightShieldUsed = nightFinished || legacyDayCount > 0;
@@ -11900,8 +11930,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     dayCount = session.dayCount || 0;
     mayor = session.mayor || null;
     accused = Array.isArray(session.accused) ? session.accused.slice() : [];
-    nightMode = session.nightMode || false;
-    dayMode = session.dayMode || false;
+    nightMode = coerceBoolean(session.nightMode);
+    dayMode = coerceBoolean(session.dayMode);
     nightSteps = session.nightSteps || [];
     nightIndex = session.nightIndex || 0;
     nightCounter = session.nightCounter || 0;
@@ -12587,9 +12617,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     silencedPlayer = snapshot.silencedPlayer;
     healRemaining = snapshot.healRemaining;
     poisonRemaining = snapshot.poisonRemaining;
-    setBloodMoonState(!!snapshot.bloodMoonActive);
-    phoenixPulsePending = !!snapshot.phoenixPulsePending;
-    phoenixPulseJustResolved = !!snapshot.phoenixPulseJustResolved;
+    const snapshotBloodMoonActive = coerceBoolean(snapshot.bloodMoonActive);
+    setBloodMoonState(snapshotBloodMoonActive);
+    phoenixPulsePending = coerceBoolean(snapshot.phoenixPulsePending);
+    phoenixPulseJustResolved = coerceBoolean(snapshot.phoenixPulseJustResolved);
     phoenixPulseRevivedPlayers = Array.isArray(snapshot.phoenixPulseRevivedPlayers)
       ? snapshot.phoenixPulseRevivedPlayers.slice()
       : [];
@@ -12606,8 +12637,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     dayCount = snapshot.dayCount;
     mayor = snapshot.mayor;
     accused = snapshot.accused.slice();
-    nightMode = snapshot.nightMode;
-    dayMode = snapshot.dayMode;
+    nightMode = coerceBoolean(snapshot.nightMode);
+    dayMode = coerceBoolean(snapshot.dayMode);
     nightSteps = snapshot.nightSteps.slice();
     nightIndex = snapshot.nightIndex;
     currentNightVictims = snapshot.currentNightVictims.slice();
@@ -12616,7 +12647,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     geschwister = snapshot.geschwister.slice();
     geist = snapshot.geist ? { ...snapshot.geist } : { player: null, messageSent: false };
     peaceDays = typeof snapshot.peaceDays === 'number' ? snapshot.peaceDays : 0;
-    jagerShotUsed = !!snapshot.jagerShotUsed;
+    jagerShotUsed = coerceBoolean(snapshot.jagerShotUsed);
     jagerDiedLastNight = snapshot.jagerDiedLastNight || null;
     nightCounter = snapshot.nightCounter || 0;
     updateBodyguardPlayers();
@@ -13876,14 +13907,15 @@ document.addEventListener("DOMContentLoaded", async () => {
           poisonRemaining = partial.poisonRemaining;
         }
         if ('bloodMoonActive' in partial) {
-          setBloodMoonState(!!partial.bloodMoonActive);
+          const nextBloodMoon = coerceBoolean(partial.bloodMoonActive);
+          setBloodMoonState(nextBloodMoon);
         }
         if ('phoenixPulsePending' in partial) {
-          phoenixPulsePending = !!partial.phoenixPulsePending;
+          phoenixPulsePending = coerceBoolean(partial.phoenixPulsePending);
           phoenixStateChanged = true;
         }
         if ('phoenixPulseJustResolved' in partial) {
-          phoenixPulseJustResolved = !!partial.phoenixPulseJustResolved;
+          phoenixPulseJustResolved = coerceBoolean(partial.phoenixPulseJustResolved);
           phoenixStateChanged = true;
         }
         if (Array.isArray(partial.phoenixPulseRevivedPlayers)) {
@@ -13894,7 +13926,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           restoreEventEngineState(partial.eventEngineState);
         }
         if ('firstNightShieldUsed' in partial) {
-          firstNightShieldUsed = !!partial.firstNightShieldUsed;
+          firstNightShieldUsed = coerceBoolean(partial.firstNightShieldUsed);
         }
         if ('dayCount' in partial) {
           dayCount = partial.dayCount;
@@ -13903,10 +13935,10 @@ document.addEventListener("DOMContentLoaded", async () => {
           mayor = partial.mayor;
         }
         if ('nightMode' in partial) {
-          nightMode = partial.nightMode;
+          nightMode = coerceBoolean(partial.nightMode);
         }
         if ('dayMode' in partial) {
-          dayMode = partial.dayMode;
+          dayMode = coerceBoolean(partial.dayMode);
         }
         if (Array.isArray(partial.nightSteps)) {
           nightSteps = partial.nightSteps.slice();
