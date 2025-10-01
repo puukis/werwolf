@@ -5287,6 +5287,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (typeof loadAnalytics === 'function') {
         loadAnalytics({ showLoading: false });
       }
+      if (typeof autoPersistSessionAfterWin === 'function') {
+        autoPersistSessionAfterWin();
+      }
     });
   }
 
@@ -5313,6 +5316,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   let doctorLastHealedTarget = null;
   let doctorLastHealedNight = null;
   let lastWinner = null;
+  let autoSaveSessionPromise = null;
+  let lastAutoSavedWinnerTimestamp = null;
 
   function setBloodMoonState(isActive) {
     bloodMoonActive = !!isActive;
@@ -11468,6 +11473,36 @@ document.addEventListener("DOMContentLoaded", async () => {
     await loadSessions();
     await loadAnalytics({ showLoading: false });
     return session;
+  }
+
+  async function autoPersistSessionAfterWin() {
+    if (autoSaveSessionPromise) {
+      return autoSaveSessionPromise;
+    }
+    if (!canEditActiveLobby) {
+      return null;
+    }
+    const winnerTimestamp = lastWinner?.timestamp ?? null;
+    if (winnerTimestamp && lastAutoSavedWinnerTimestamp === winnerTimestamp) {
+      return null;
+    }
+
+    autoSaveSessionPromise = (async () => {
+      try {
+        const session = await saveSession();
+        if (winnerTimestamp) {
+          lastAutoSavedWinnerTimestamp = winnerTimestamp;
+        }
+        return session;
+      } catch (error) {
+        console.error('Automatisches Speichern der Session nach Sieg fehlgeschlagen.', error);
+        return null;
+      } finally {
+        autoSaveSessionPromise = null;
+      }
+    })();
+
+    return autoSaveSessionPromise;
   }
 
   async function loadSessions() {

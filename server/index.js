@@ -2318,6 +2318,9 @@ async function upsertSessionMetrics(context, session) {
   const playerCount = Number.isFinite(metadata.playerCount) ? metadata.playerCount : Array.isArray(session.players) ? session.players.length : null;
   const actionCount = Number.isFinite(metadata.actionCount) ? metadata.actionCount : actions.length;
   const checkpointCount = Number.isFinite(metadata.checkpointCount) ? metadata.checkpointCount : checkpoints.length;
+  const winningInfo = deriveWinningInfoFromSession(session);
+  const winnerFaction = winningInfo.faction || null;
+  const winningPlayers = Array.isArray(winningInfo.winners) ? winningInfo.winners : [];
 
   let gameLengthMs = Number.isFinite(metadata.gameDurationMs) ? metadata.gameDurationMs : null;
   if (!Number.isFinite(gameLengthMs) && actions.length > 1) {
@@ -2331,17 +2334,30 @@ async function upsertSessionMetrics(context, session) {
 
   await runSessionStorageQuery(() =>
     query(
-      `INSERT INTO session_metrics (session_timestamp, winner, player_count, action_count, checkpoint_count, game_length_ms, created_at, owner_id, lobby_id)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, $8)
+      `INSERT INTO session_metrics (session_timestamp, winner, winner_faction, winning_players, player_count, action_count, checkpoint_count, game_length_ms, created_at, owner_id, lobby_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, $10)
        ON CONFLICT (lobby_id, session_timestamp)
        DO UPDATE SET winner = EXCLUDED.winner,
+                     winner_faction = EXCLUDED.winner_faction,
+                     winning_players = EXCLUDED.winning_players,
                      player_count = EXCLUDED.player_count,
                      action_count = EXCLUDED.action_count,
                      checkpoint_count = EXCLUDED.checkpoint_count,
                      game_length_ms = EXCLUDED.game_length_ms,
                      owner_id = EXCLUDED.owner_id,
                      updated_at = NOW()`,
-      [session.timestamp, winnerTitle, playerCount, actionCount, checkpointCount, gameLengthMs, context.ownerId, context.lobbyId]
+      [
+        session.timestamp,
+        winnerTitle,
+        winnerFaction,
+        JSON.stringify(winningPlayers),
+        playerCount,
+        actionCount,
+        checkpointCount,
+        gameLengthMs,
+        context.ownerId,
+        context.lobbyId,
+      ]
     )
   );
 }
@@ -2567,6 +2583,23 @@ function deriveWinningInfoFromSession(session) {
   return { faction, winners: Array.from(winners) };
 }
 
+function mapWinnerFactionToLabel(faction) {
+  switch (faction) {
+    case 'werwolf':
+      return 'Werwölfe gewinnen!';
+    case 'village':
+      return 'Dorfbewohner gewinnen!';
+    case 'lovers':
+      return 'Die Liebenden gewinnen!';
+    case 'henker':
+      return 'Der Henker gewinnt!';
+    case 'friedenstifter':
+      return 'Der Friedenstifter gewinnt!';
+    default:
+      return null;
+  }
+}
+
 function ensurePlayerAggregate(map, name) {
   if (!map.has(name)) {
     map.set(name, {
@@ -2598,19 +2631,27 @@ app.get('/api/analytics', async (req, res) => {
     const summaryRow = summaryResult.rows[0] || {};
 
     const winRateResult = await query(
-      `SELECT winner, COUNT(*)::int AS count
-         FROM session_metrics
-        WHERE lobby_id = $1 AND winner IS NOT NULL AND winner <> ''
-        GROUP BY winner
-        ORDER BY count DESC`,
+      `SELECT
+         winner,
+         winner_faction,
+         COUNT(*)::int AS count
+        FROM session_metrics
+       WHERE lobby_id = $1
+         AND (COALESCE(winner, '') <> '' OR COALESCE(winner_faction, '') <> '')
+       GROUP BY winner, winner_faction
+       ORDER BY count DESC`,
       [context.lobbyId]
     );
     const totalWins = winRateResult.rows.reduce((acc, row) => acc + Number(row.count || 0), 0);
-    const winRates = winRateResult.rows.map((row) => ({
-      winner: row.winner,
-      count: row.count,
-      rate: totalWins > 0 ? Number(row.count) / totalWins : null,
-    }));
+    const winRates = winRateResult.rows.map((row) => {
+      const winnerLabel = row.winner || mapWinnerFactionToLabel(row.winner_faction);
+      return {
+        winner: winnerLabel || 'Unbekannt',
+        faction: row.winner_faction || null,
+        count: row.count,
+        rate: totalWins > 0 ? Number(row.count) / totalWins : null,
+      };
+    });
 
     const metaResult = await query(
       `SELECT
