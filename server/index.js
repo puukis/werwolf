@@ -57,6 +57,9 @@ const defaultThemePresetPath = path.join(__dirname, '..', 'data', 'themes.json')
 let defaultThemePresetCache = null;
 const SSE_KEEPALIVE_INTERVAL_MS = 25000;
 const MAX_THEME_UPLOAD_BYTES = 1024 * 1024 * 1.5;
+const SESSION_MIGRATION_MESSAGE = 'Sitzungen sind derzeit nicht verfügbar. Bitte führe die Datenbankmigrationen aus.';
+const SESSION_PERMISSION_MESSAGE =
+  'Sitzungen sind aufgrund fehlender Datenbankberechtigungen deaktiviert. Bitte passe die Rolle oder Verbindungsdaten an.';
 
 const sseClientsByLobby = new Map();
 const EMBEDDED_THEME_PRESETS = Object.freeze({
@@ -375,16 +378,28 @@ function disableSessionsDueToPermissions() {
 function convertSessionStorageError(error) {
   if (error?.code === '42P01') {
     logSessionTableMissingWarning();
-    return new HttpError(503, 'Sitzungen sind derzeit nicht verfügbar. Bitte führe die Datenbankmigrationen aus.');
+    return new HttpError(503, SESSION_MIGRATION_MESSAGE);
   }
   if (error?.code === '42501') {
     disableSessionsDueToPermissions();
-    return new HttpError(
-      503,
-      'Sitzungen sind aufgrund fehlender Datenbankberechtigungen deaktiviert. Bitte passe die Rolle oder Verbindungsdaten an.'
-    );
+    return new HttpError(503, SESSION_PERMISSION_MESSAGE);
   }
   return null;
+}
+
+async function runSessionStorageQuery(operation) {
+  if (sessionsDisabledDueToPermissions) {
+    throw new HttpError(503, SESSION_PERMISSION_MESSAGE);
+  }
+  try {
+    return await operation();
+  } catch (error) {
+    const converted = convertSessionStorageError(error);
+    if (converted) {
+      throw converted;
+    }
+    throw error;
+  }
 }
 
 function handleApiError(res, error, fallbackMessage) {
@@ -2251,24 +2266,28 @@ app.delete('/api/storage/:key', async (req, res) => {
 });
 
 async function listSessions(context) {
-  const result = await query(
-    `SELECT timestamp, data
-       FROM sessions
-      WHERE lobby_id = $1
-      ORDER BY timestamp DESC
-      LIMIT 20`,
-    [context.lobbyId]
+  const result = await runSessionStorageQuery(() =>
+    query(
+      `SELECT timestamp, data
+         FROM sessions
+        WHERE lobby_id = $1
+        ORDER BY timestamp DESC
+        LIMIT 20`,
+      [context.lobbyId]
+    )
   );
   return result.rows.map((row) => ({ ...row.data, timestamp: Number(row.timestamp) }));
 }
 
 async function upsertSession(context, session) {
-  await query(
-    `INSERT INTO sessions (timestamp, data, created_at, owner_id, lobby_id)
-     VALUES ($1, $2, NOW(), $3, $4)
-     ON CONFLICT (lobby_id, timestamp)
-     DO UPDATE SET data = EXCLUDED.data, owner_id = EXCLUDED.owner_id, updated_at = NOW()`,
-    [session.timestamp, session, context.ownerId, context.lobbyId]
+  await runSessionStorageQuery(() =>
+    query(
+      `INSERT INTO sessions (timestamp, data, created_at, owner_id, lobby_id)
+       VALUES ($1, $2, NOW(), $3, $4)
+       ON CONFLICT (lobby_id, timestamp)
+       DO UPDATE SET data = EXCLUDED.data, owner_id = EXCLUDED.owner_id, updated_at = NOW()`,
+      [session.timestamp, session, context.ownerId, context.lobbyId]
+    )
   );
 
   await pruneSessionStorage(context, 20);
@@ -2279,12 +2298,14 @@ async function upsertSessionTimeline(context, session) {
     return;
   }
 
-  await query(
-    `INSERT INTO session_timelines (session_timestamp, timeline, created_at, owner_id, lobby_id)
-     VALUES ($1, $2, NOW(), $3, $4)
-     ON CONFLICT (lobby_id, session_timestamp)
-     DO UPDATE SET timeline = EXCLUDED.timeline, owner_id = EXCLUDED.owner_id, updated_at = NOW()`,
-    [session.timestamp, session.timeline, context.ownerId, context.lobbyId]
+  await runSessionStorageQuery(() =>
+    query(
+      `INSERT INTO session_timelines (session_timestamp, timeline, created_at, owner_id, lobby_id)
+       VALUES ($1, $2, NOW(), $3, $4)
+       ON CONFLICT (lobby_id, session_timestamp)
+       DO UPDATE SET timeline = EXCLUDED.timeline, owner_id = EXCLUDED.owner_id, updated_at = NOW()`,
+      [session.timestamp, session.timeline, context.ownerId, context.lobbyId]
+    )
   );
 }
 
@@ -2308,47 +2329,55 @@ async function upsertSessionMetrics(context, session) {
     }
   }
 
-  await query(
-    `INSERT INTO session_metrics (session_timestamp, winner, player_count, action_count, checkpoint_count, game_length_ms, created_at, owner_id, lobby_id)
-     VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, $8)
-     ON CONFLICT (lobby_id, session_timestamp)
-     DO UPDATE SET winner = EXCLUDED.winner,
-                   player_count = EXCLUDED.player_count,
-                   action_count = EXCLUDED.action_count,
-                   checkpoint_count = EXCLUDED.checkpoint_count,
-                   game_length_ms = EXCLUDED.game_length_ms,
-                   owner_id = EXCLUDED.owner_id,
-                   updated_at = NOW()`,
-    [session.timestamp, winnerTitle, playerCount, actionCount, checkpointCount, gameLengthMs, context.ownerId, context.lobbyId]
+  await runSessionStorageQuery(() =>
+    query(
+      `INSERT INTO session_metrics (session_timestamp, winner, player_count, action_count, checkpoint_count, game_length_ms, created_at, owner_id, lobby_id)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, $8)
+       ON CONFLICT (lobby_id, session_timestamp)
+       DO UPDATE SET winner = EXCLUDED.winner,
+                     player_count = EXCLUDED.player_count,
+                     action_count = EXCLUDED.action_count,
+                     checkpoint_count = EXCLUDED.checkpoint_count,
+                     game_length_ms = EXCLUDED.game_length_ms,
+                     owner_id = EXCLUDED.owner_id,
+                     updated_at = NOW()`,
+      [session.timestamp, winnerTitle, playerCount, actionCount, checkpointCount, gameLengthMs, context.ownerId, context.lobbyId]
+    )
   );
 }
 
 async function pruneSessionStorage(context, limit = 20) {
-  await query(
-    `DELETE FROM sessions
-      WHERE lobby_id = $1
-        AND timestamp NOT IN (
-        SELECT timestamp FROM sessions WHERE lobby_id = $1 ORDER BY timestamp DESC LIMIT $2
-      )`,
-    [context.lobbyId, limit]
+  await runSessionStorageQuery(() =>
+    query(
+      `DELETE FROM sessions
+        WHERE lobby_id = $1
+          AND timestamp NOT IN (
+          SELECT timestamp FROM sessions WHERE lobby_id = $1 ORDER BY timestamp DESC LIMIT $2
+        )`,
+      [context.lobbyId, limit]
+    )
   );
 
-  await query(
-    `DELETE FROM session_timelines
-      WHERE lobby_id = $1
-        AND session_timestamp NOT IN (
-        SELECT timestamp FROM sessions WHERE lobby_id = $1 ORDER BY timestamp DESC LIMIT $2
-      )`,
-    [context.lobbyId, limit]
+  await runSessionStorageQuery(() =>
+    query(
+      `DELETE FROM session_timelines
+        WHERE lobby_id = $1
+          AND session_timestamp NOT IN (
+          SELECT timestamp FROM sessions WHERE lobby_id = $1 ORDER BY timestamp DESC LIMIT $2
+        )`,
+      [context.lobbyId, limit]
+    )
   );
 
-  await query(
-    `DELETE FROM session_metrics
-      WHERE lobby_id = $1
-        AND session_timestamp NOT IN (
-        SELECT timestamp FROM sessions WHERE lobby_id = $1 ORDER BY timestamp DESC LIMIT $2
-      )`,
-    [context.lobbyId, limit]
+  await runSessionStorageQuery(() =>
+    query(
+      `DELETE FROM session_metrics
+        WHERE lobby_id = $1
+          AND session_timestamp NOT IN (
+          SELECT timestamp FROM sessions WHERE lobby_id = $1 ORDER BY timestamp DESC LIMIT $2
+        )`,
+      [context.lobbyId, limit]
+    )
   );
 }
 
@@ -2388,12 +2417,14 @@ app.get('/api/sessions/:timestamp/timeline', async (req, res) => {
     if (!Number.isFinite(timestamp)) {
       throw new HttpError(400, 'Ungültiger Zeitstempel.');
     }
-    const result = await query(
-      `SELECT timeline
-         FROM session_timelines
-        WHERE lobby_id = $1 AND session_timestamp = $2
-        LIMIT 1`,
-      [context.lobbyId, timestamp]
+    const result = await runSessionStorageQuery(() =>
+      query(
+        `SELECT timeline
+           FROM session_timelines
+          WHERE lobby_id = $1 AND session_timestamp = $2
+          LIMIT 1`,
+        [context.lobbyId, timestamp]
+      )
     );
     if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Keine Timeline für diese Session gefunden.' });
@@ -2411,9 +2442,15 @@ app.delete('/api/sessions/:timestamp', async (req, res) => {
     if (!Number.isFinite(timestamp)) {
       throw new HttpError(400, 'Ungültiger Zeitstempel.');
     }
-    await query('DELETE FROM sessions WHERE lobby_id = $1 AND timestamp = $2', [context.lobbyId, timestamp]);
-    await query('DELETE FROM session_timelines WHERE lobby_id = $1 AND session_timestamp = $2', [context.lobbyId, timestamp]);
-    await query('DELETE FROM session_metrics WHERE lobby_id = $1 AND session_timestamp = $2', [context.lobbyId, timestamp]);
+    await runSessionStorageQuery(() =>
+      query('DELETE FROM sessions WHERE lobby_id = $1 AND timestamp = $2', [context.lobbyId, timestamp])
+    );
+    await runSessionStorageQuery(() =>
+      query('DELETE FROM session_timelines WHERE lobby_id = $1 AND session_timestamp = $2', [context.lobbyId, timestamp])
+    );
+    await runSessionStorageQuery(() =>
+      query('DELETE FROM session_metrics WHERE lobby_id = $1 AND session_timestamp = $2', [context.lobbyId, timestamp])
+    );
     res.status(204).end();
   } catch (error) {
     handleApiError(res, error, 'Session konnte nicht gelöscht werden.');
