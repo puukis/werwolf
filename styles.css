@@ -41,6 +41,8 @@
   --glow-color: var(--theme-glow-color, rgba(146, 200, 152, 0.24));
   --lighting-wash-color: var(--theme-lighting-wash-color, rgba(233, 249, 238, 0.32));
   --lighting-wash-opacity: var(--theme-lighting-wash-opacity, 0);
+  --lighting-wash-origin-x: var(--theme-lighting-wash-origin-x, 50%);
+  --lighting-wash-origin-y: var(--theme-lighting-wash-origin-y, 25%);
   --lighting-vignette-color: var(--theme-lighting-vignette-color, rgba(12, 24, 18, 0.75));
   --lighting-vignette-opacity: var(--theme-lighting-vignette-opacity, 0);
   --lighting-spotlight-color: var(--theme-lighting-spotlight-color, rgba(255, 255, 245, 0.3));
@@ -126,6 +128,8 @@
   --glow-color: var(--theme-glow-color, rgba(74, 222, 128, 0.28));
   --lighting-wash-color: var(--theme-lighting-wash-color, rgba(45, 72, 56, 0.48));
   --lighting-wash-opacity: var(--theme-lighting-wash-opacity, 0);
+  --lighting-wash-origin-x: var(--theme-lighting-wash-origin-x, 50%);
+  --lighting-wash-origin-y: var(--theme-lighting-wash-origin-y, 25%);
   --lighting-vignette-color: var(--theme-lighting-vignette-color, rgba(2, 6, 4, 0.85));
   --lighting-vignette-opacity: var(--theme-lighting-vignette-opacity, 0);
   --lighting-spotlight-color: var(--theme-lighting-spotlight-color, rgba(255, 204, 158, 0.32));
@@ -194,7 +198,11 @@ body.auth-locked .ambient-stage {
 }
 
 .ambient-color-wash {
-  background: radial-gradient(120% 120% at 50% 25%, var(--lighting-wash-color) 0%, transparent 70%);
+  background: radial-gradient(
+    120% 120% at var(--lighting-wash-origin-x, 50%) var(--lighting-wash-origin-y, 25%),
+    var(--lighting-wash-color) 0%,
+    transparent 70%
+  );
   opacity: var(--lighting-wash-opacity);
   transform: scale(1.05);
   mix-blend-mode: screen;
@@ -376,12 +384,13 @@ body[data-lighting="hunter"] {
 }
 
 body[data-lighting="blood-moon"] {
-  --lighting-wash-color: rgba(212, 32, 32, 0.85);
-  --lighting-wash-opacity: 0.95;
+  --lighting-wash-color: rgba(212, 44, 44, 0.72);
+  --lighting-wash-opacity: 0.78;
+  --lighting-wash-origin-y: 45%;
   --lighting-vignette-color: rgba(34, 0, 0, 0.96);
   --lighting-vignette-opacity: 0.88;
   --lighting-spotlight-color: rgba(255, 96, 64, 0.48);
-  --lighting-spotlight-opacity: 0.45;
+  --lighting-spotlight-opacity: 0.38;
   --lighting-spotlight-scale: 1.18;
   --particles-opacity: 0.5;
   --particles-color: rgba(255, 120, 120, 0.48);
