@@ -2977,6 +2977,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const campaignSelectEl = document.getElementById('campaign-select');
   const campaignPreviewListEl = document.getElementById('campaign-preview-list');
   const eventCardPreviewListEl = document.getElementById('event-card-preview');
+  const printEventCardsBtn = document.getElementById('print-event-cards-btn');
   localeSelect = document.getElementById('locale-select');
   const openConfigBtn = document.getElementById('open-config-btn');
   const configModal = document.getElementById('config-modal');
@@ -3084,6 +3085,20 @@ document.addEventListener("DOMContentLoaded", async () => {
         });
       };
       reader.readAsDataURL(file);
+    });
+  }
+
+  if (printEventCardsBtn) {
+    printEventCardsBtn.addEventListener('click', () => {
+      const cards = getActiveEventCards();
+      if (!cards.length) {
+        showInfoMessage({
+          title: localization.t('settings.events.printCards.emptyTitle') || 'Keine Karten aktiviert',
+          text: localization.t('settings.events.printCards.emptyBody') || 'Aktiviere mindestens ein Ereignisdeck, um Karten zu drucken.',
+        });
+        return;
+      }
+      openEventCardsPrintView(cards);
     });
   }
 
@@ -5742,6 +5757,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       .map(([deckId]) => deckId);
   }
 
+  function getActiveEventCards() {
+    const activeDecks = new Set(getActiveDeckIds());
+    return eventCardDefinitions.filter(card => !card.deckId || activeDecks.has(card.deckId));
+  }
+
   function renderEventDeckControls() {
     if (!eventDeckListEl) {
       return;
@@ -5855,20 +5875,189 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
     eventCardPreviewListEl.innerHTML = '';
-    const activeDecks = new Set(getActiveDeckIds());
-    const cards = eventCardDefinitions.filter(card => !card.deckId || activeDecks.has(card.deckId));
+    const cards = getActiveEventCards();
+    if (printEventCardsBtn) {
+      printEventCardsBtn.disabled = cards.length === 0;
+    }
     if (cards.length === 0) {
       const li = document.createElement('li');
-      li.textContent = 'Keine Karten aktiviert.';
+      li.textContent = localization.t('settings.events.printCards.emptyList') || 'Keine Karten aktiviert.';
       eventCardPreviewListEl.appendChild(li);
       return;
     }
     cards.forEach(card => {
       const li = document.createElement('li');
+      const label = card.label || card.id;
       const description = card.description || '';
-      li.innerHTML = `<strong>${card.label || card.id}</strong>${description ? ` – ${description}` : ''}`;
+      li.innerHTML = `<strong>${escapeHtml(label)}</strong>${description ? ` – ${escapeHtml(description)}` : ''}`;
       eventCardPreviewListEl.appendChild(li);
     });
+  }
+
+  function resolveEventCardPreviewText(card) {
+    if (!card) {
+      return '';
+    }
+    try {
+      if (typeof card.preview === 'function') {
+        const result = card.preview();
+        return typeof result === 'string' ? result : '';
+      }
+      if (typeof card.preview === 'string') {
+        return card.preview;
+      }
+    } catch (error) {
+      console.error(`Karten-Vorschau für ${card.id || 'unbekannt'} konnte nicht erzeugt werden.`, error);
+    }
+    return '';
+  }
+
+  function openEventCardsPrintView(cards) {
+    if (!Array.isArray(cards) || cards.length === 0) {
+      return;
+    }
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      showInfoMessage({
+        title: localization.t('settings.events.printCards.popupBlockedTitle') || 'Druckfenster blockiert',
+        text: localization.t('settings.events.printCards.popupBlockedBody') || 'Erlaube Pop-ups in deinem Browser, um die Karten zu drucken.',
+      });
+      return;
+    }
+
+    const lang = typeof localization.getLocale === 'function' ? (localization.getLocale() || 'de') : 'de';
+    const title = localization.t('settings.events.printCards.windowTitle') || 'Ereigniskarten';
+    const hint = localization.t('settings.events.printCards.printHint') || 'Nutze die Druckfunktion deines Browsers, um ein PDF zu erzeugen.';
+    const cardMarkup = cards
+      .map((card) => {
+        const label = card.label || card.id || '';
+        const description = card.description || '';
+        const previewText = resolveEventCardPreviewText(card);
+        const deck = card.deckId ? eventDeckMetadata.find((entry) => entry.id === card.deckId) : null;
+        const deckNameKey = deck ? `events.decks.${deck.id}.name` : null;
+        const deckLabel = deckNameKey ? (localization.t(deckNameKey) || deck?.name || '') : '';
+        const deckBadge = deckLabel ? `<span class="print-card__deck">${escapeHtml(deckLabel)}</span>` : '';
+        const descriptionHtml = description ? `<p class="print-card__description">${escapeHtml(description)}</p>` : '';
+        const previewHtml = previewText ? `<p class="print-card__preview">${escapeHtml(previewText)}</p>` : '';
+        return `<article class="print-card">${deckBadge}<h2 class="print-card__title">${escapeHtml(label)}</h2>${descriptionHtml}${previewHtml}</article>`;
+      })
+      .join('');
+
+    const documentHtml = `<!DOCTYPE html>
+<html lang="${escapeHtml(lang)}">
+<head>
+  <meta charset="UTF-8">
+  <title>${escapeHtml(title)}</title>
+  <style>
+    :root {
+      color-scheme: light;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font-family: "Inter", "Segoe UI", Roboto, -apple-system, BlinkMacSystemFont, sans-serif;
+      margin: 0;
+      padding: 2rem;
+      background: #f5f7f9;
+      color: #0f172a;
+    }
+    .print-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .print-title {
+      font-size: 1.6rem;
+      margin: 0;
+    }
+    .print-hint {
+      margin: 0;
+      color: #475569;
+      font-size: 0.95rem;
+    }
+    .print-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+    }
+    .print-card {
+      background: #ffffff;
+      border: 1px solid rgba(15, 23, 42, 0.1);
+      border-radius: 16px;
+      padding: 1.25rem;
+      min-height: 180px;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+    }
+    .print-card__deck {
+      align-self: flex-start;
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      background: rgba(59, 130, 246, 0.12);
+      color: #1d4ed8;
+      padding: 0.2rem 0.6rem;
+      border-radius: 999px;
+    }
+    .print-card__title {
+      margin: 0;
+      font-size: 1.25rem;
+      line-height: 1.35;
+    }
+    .print-card__description {
+      margin: 0;
+      font-size: 1rem;
+      line-height: 1.5;
+    }
+    .print-card__preview {
+      margin: 0;
+      font-size: 0.95rem;
+      line-height: 1.4;
+      color: #475569;
+      font-style: italic;
+    }
+    @media print {
+      body {
+        padding: 0.75cm;
+        background: #ffffff;
+      }
+      .print-hint {
+        display: none;
+      }
+      .print-card {
+        box-shadow: none;
+        break-inside: avoid;
+        border-color: rgba(15, 23, 42, 0.2);
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="print-header">
+    <h1 class="print-title">${escapeHtml(title)}</h1>
+    <p class="print-hint">${escapeHtml(hint)}</p>
+  </header>
+  <section class="print-grid">${cardMarkup}</section>
+</body>
+</html>`;
+
+    printWindow.document.open();
+    printWindow.document.write(documentHtml);
+    printWindow.document.close();
+
+    setTimeout(() => {
+      try {
+        printWindow.focus();
+        printWindow.print();
+      } catch (error) {
+        console.error('Drucken der Ereigniskarten fehlgeschlagen.', error);
+      }
+    }, 250);
   }
 
   function renderCampaignSelect() {

@@ -1345,6 +1345,16 @@ body.lobby-readonly .lobby-toolbar {
   line-height: 1.5;
 }
 
+.event-card-actions {
+  margin-top: 0.75rem;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.event-card-actions .secondary-btn {
+  font-size: 0.85rem;
+}
+
 .config-hint {
   font-size: 0.85rem;
   color: var(--text-light);
