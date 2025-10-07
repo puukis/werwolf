@@ -2978,6 +2978,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const campaignPreviewListEl = document.getElementById('campaign-preview-list');
   const eventCardPreviewListEl = document.getElementById('event-card-preview');
   const printEventCardsBtn = document.getElementById('print-event-cards-btn');
+  const printRoleCardsBtn = document.getElementById('print-role-cards-btn');
   localeSelect = document.getElementById('locale-select');
   const openConfigBtn = document.getElementById('open-config-btn');
   const configModal = document.getElementById('config-modal');
@@ -3099,6 +3100,20 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
       }
       openEventCardsPrintView(cards);
+    });
+  }
+
+  if (printRoleCardsBtn) {
+    printRoleCardsBtn.addEventListener('click', () => {
+      const cards = collectRoleCardsForPrint();
+      if (!cards.length) {
+        showInfoMessage({
+          title: localization.t('settings.roles.printCards.emptyTitle') || 'Keine Rollen geplant',
+          text: localization.t('settings.roles.printCards.emptyBody') || 'Füge mindestens eine Rolle mit Anzahl größer als null hinzu, um Karten zu drucken.',
+        });
+        return;
+      }
+      openRoleCardsPrintView(cards);
     });
   }
 
@@ -6060,6 +6075,234 @@ document.addEventListener("DOMContentLoaded", async () => {
     }, 250);
   }
 
+  function collectRoleCardsForPrint() {
+    const snapshot = getRoleLayoutSnapshot();
+    const categories = [
+      { key: 'village', labelKey: 'settings.roles.printCards.category.village', fallback: 'Dorfbewohner' },
+      { key: 'werwolf', labelKey: 'settings.roles.printCards.category.werwolf', fallback: 'Werwölfe' },
+      { key: 'special', labelKey: 'settings.roles.printCards.category.special', fallback: 'Spezialrollen' },
+    ];
+
+    const cards = [];
+
+    categories.forEach(({ key, labelKey, fallback }) => {
+      const entries = snapshot[key] || {};
+      const categoryLabel = localization.t(labelKey) || fallback;
+
+      Object.entries(entries).forEach(([roleName, qtyRaw]) => {
+        const trimmedRoleName = typeof roleName === 'string' ? roleName.trim() : '';
+        if (!trimmedRoleName) {
+          return;
+        }
+        const quantity = Math.max(0, Math.floor(Number(qtyRaw) || 0));
+        if (quantity === 0) {
+          return;
+        }
+
+        const displayName = localization.getRoleDisplayName(trimmedRoleName) || trimmedRoleName;
+        const description = localization.getRoleDescription(trimmedRoleName)
+          || roleDescriptions[trimmedRoleName]
+          || '';
+        const localizedAbilities = localization.getRoleAbilities(trimmedRoleName);
+        const abilitySource = Array.isArray(localizedAbilities) && localizedAbilities.length > 0
+          ? localizedAbilities
+          : getRoleAbilities(trimmedRoleName);
+        const abilities = Array.isArray(abilitySource)
+          ? abilitySource
+              .map((ability) => (typeof ability === 'string' ? ability.trim() : ''))
+              .filter((ability) => ability.length > 0)
+          : [];
+
+        for (let index = 0; index < quantity; index += 1) {
+          cards.push({
+            roleName: trimmedRoleName,
+            displayName,
+            categoryLabel,
+            description,
+            abilities,
+            copyIndex: index,
+            totalCopies: quantity,
+          });
+        }
+      });
+    });
+
+    return cards;
+  }
+
+  function openRoleCardsPrintView(cards) {
+    if (!Array.isArray(cards) || cards.length === 0) {
+      return;
+    }
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      showInfoMessage({
+        title: localization.t('settings.roles.printCards.popupBlockedTitle') || 'Druckfenster blockiert',
+        text: localization.t('settings.roles.printCards.popupBlockedBody') || 'Erlaube Pop-ups in deinem Browser, um die Karten zu drucken.',
+      });
+      return;
+    }
+
+    const title = localization.t('settings.roles.printCards.windowTitle') || 'Rollenkarten';
+    const hint = localization.t('settings.roles.printCards.printHint') || 'Nutze die Druckfunktion deines Browsers, um ein PDF zu erzeugen.';
+    const abilityTitle = localization.t('roles.info.abilitiesTitle') || 'Fähigkeiten';
+    const copyLabelFor = (current, total) => localization.t('settings.roles.printCards.copyLabel', { current, total })
+      || `Karte ${current} von ${total}`;
+
+    const cardMarkup = cards.map((card) => {
+      const categoryBadge = card.categoryLabel
+        ? `<span class="print-card__deck">${escapeHtml(card.categoryLabel)}</span>`
+        : '';
+      const copyBadge = card.totalCopies > 1
+        ? `<span class="print-card__copy">${escapeHtml(copyLabelFor(card.copyIndex + 1, card.totalCopies))}</span>`
+        : '';
+      const metaHtml = categoryBadge || copyBadge
+        ? `<div class="print-card__meta">${categoryBadge}${copyBadge}</div>`
+        : '';
+      const descriptionHtml = card.description
+        ? `<p class="print-card__description">${escapeHtml(card.description)}</p>`
+        : '';
+      const abilitiesHtml = Array.isArray(card.abilities) && card.abilities.length > 0
+        ? `<div class="print-card__abilities"><span class="print-card__abilities-title">${escapeHtml(abilityTitle)}</span><ul class="print-card__abilities-list">${card.abilities
+            .map((ability) => `<li>${escapeHtml(ability)}</li>`)
+            .join('')}</ul></div>`
+        : '';
+      return `<article class="print-card">${metaHtml}<h2 class="print-card__title">${escapeHtml(card.displayName)}</h2>${descriptionHtml}${abilitiesHtml}</article>`;
+    }).join('');
+
+    const documentHtml = `<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>${escapeHtml(title)}</title>
+  <style>
+    :root {
+      color-scheme: light;
+    }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      margin: 0;
+      padding: 1.5rem;
+      background: #f1f5f9;
+      color: #0f172a;
+    }
+    .print-header {
+      margin-bottom: 1.5rem;
+    }
+    .print-title {
+      font-size: 2rem;
+      margin: 0 0 0.25rem;
+    }
+    .print-hint {
+      margin: 0;
+      color: #475569;
+      font-size: 0.95rem;
+    }
+    .print-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+    }
+    .print-card {
+      background: #ffffff;
+      border: 1px solid rgba(15, 23, 42, 0.1);
+      border-radius: 16px;
+      padding: 1.25rem;
+      min-height: 180px;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+    }
+    .print-card__meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .print-card__deck {
+      align-self: flex-start;
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      background: rgba(59, 130, 246, 0.12);
+      color: #1d4ed8;
+      padding: 0.2rem 0.6rem;
+      border-radius: 999px;
+    }
+    .print-card__copy {
+      font-size: 0.8rem;
+      color: #64748b;
+    }
+    .print-card__title {
+      margin: 0;
+      font-size: 1.25rem;
+      line-height: 1.35;
+    }
+    .print-card__description {
+      margin: 0;
+      font-size: 1rem;
+      line-height: 1.5;
+    }
+    .print-card__abilities {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .print-card__abilities-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #1f2937;
+    }
+    .print-card__abilities-list {
+      margin: 0;
+      padding-left: 1.1rem;
+      font-size: 0.95rem;
+      color: #1f2937;
+    }
+    .print-card__abilities-list li {
+      margin-bottom: 0.3rem;
+    }
+    @media print {
+      body {
+        padding: 0.75cm;
+        background: #ffffff;
+      }
+      .print-hint {
+        display: none;
+      }
+      .print-card {
+        box-shadow: none;
+        break-inside: avoid;
+        border-color: rgba(15, 23, 42, 0.2);
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="print-header">
+    <h1 class="print-title">${escapeHtml(title)}</h1>
+    <p class="print-hint">${escapeHtml(hint)}</p>
+  </header>
+  <section class="print-grid">${cardMarkup}</section>
+</body>
+</html>`;
+
+    printWindow.document.open();
+    printWindow.document.write(documentHtml);
+    printWindow.document.close();
+
+    setTimeout(() => {
+      try {
+        printWindow.focus();
+        printWindow.print();
+      } catch (error) {
+        console.error('Drucken der Rollenkarten fehlgeschlagen.', error);
+      }
+    }, 250);
+  }
+
   function renderCampaignSelect() {
     if (!campaignSelectEl) {
       return;
@@ -6688,6 +6931,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (display) {
       display.textContent = qty;
     }
+    updateRoleCardsPrintState();
   }
 
   function findRoleRow(container, roleName) {
@@ -6721,6 +6965,24 @@ document.addEventListener("DOMContentLoaded", async () => {
       werwolf: readContainer(rolesContainerWerwolf),
       special: readContainer(rolesContainerSpecial)
     };
+  }
+
+  function countPlannedRoleCards(snapshot = getRoleLayoutSnapshot()) {
+    return ['village', 'werwolf', 'special'].reduce((total, categoryKey) => {
+      const entries = snapshot[categoryKey] || {};
+      return total + Object.values(entries).reduce((sum, qty) => {
+        const parsed = Math.floor(Number(qty) || 0);
+        return parsed > 0 ? sum + parsed : sum;
+      }, 0);
+    }, 0);
+  }
+
+  function updateRoleCardsPrintState() {
+    if (!printRoleCardsBtn) {
+      return;
+    }
+    const plannedCount = countPlannedRoleCards();
+    printRoleCardsBtn.disabled = plannedCount === 0;
   }
 
   function buildSuggestionSnapshot(suggestion) {
@@ -6795,22 +7057,22 @@ document.addEventListener("DOMContentLoaded", async () => {
     plusBtn.className = "qty-btn";
 
     minusBtn.addEventListener("click", () => {
-      let current = parseInt(qtyDisplay.textContent, 10);
+      const current = parseInt(qtyDisplay.textContent, 10) || 0;
       if (current > 0) {
-        current -= 1;
-        qtyDisplay.textContent = current;
+        setRowQuantity(row, current - 1);
         markLayoutCustomized();
       }
     });
 
     plusBtn.addEventListener("click", () => {
-      let current = parseInt(qtyDisplay.textContent, 10);
-      qtyDisplay.textContent = current + 1;
+      const current = parseInt(qtyDisplay.textContent, 10) || 0;
+      setRowQuantity(row, current + 1);
       markLayoutCustomized();
     });
 
     input.addEventListener("input", () => {
       markLayoutCustomized();
+      updateRoleCardsPrintState();
     });
 
     qtyControls.appendChild(minusBtn);
@@ -6832,6 +7094,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     removeBtn.addEventListener("click", () => {
       container.removeChild(row);
       markLayoutCustomized();
+      updateRoleCardsPrintState();
     });
 
     row.appendChild(infoBtn);
@@ -6839,6 +7102,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     row.appendChild(qtyControls);
     row.appendChild(removeBtn);
     container.appendChild(row);
+    updateRoleCardsPrintState();
   }
 
   const AUDIO_BASE64 = {
@@ -9167,6 +9431,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         });
       });
     }
+
+    updateRoleCardsPrintState();
   }
 
   roleEditorStatusEl = document.getElementById('role-editor-status');
