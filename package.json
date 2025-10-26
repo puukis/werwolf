@@ -8,6 +8,7 @@
     "migrate": "node server/migrate.js"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.9.0",
     "dotenv": "^17.2.2",
     "express": "^4.19.2",
     "pg": "^8.11.5"
