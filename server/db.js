@@ -16,8 +16,15 @@ function buildPoolConfigs() {
 
   const host = process.env.PGHOST || 'localhost';
   const port = Number(process.env.PGPORT) || 5432;
-  const password = process.env.PGPASSWORD || undefined;
   const database = process.env.PGDATABASE || 'werwolf';
+  const baseConfig = { host, port, database };
+
+  if (Object.prototype.hasOwnProperty.call(process.env, 'PGPASSWORD')) {
+    const password = process.env.PGPASSWORD;
+    if (password !== undefined && password !== null) {
+      baseConfig.password = String(password);
+    }
+  }
 
   const candidates = [];
   const seenUsers = new Set();
@@ -27,7 +34,7 @@ function buildPoolConfigs() {
       return;
     }
     seenUsers.add(user);
-    candidates.push({ host, port, user, password, database });
+    candidates.push({ ...baseConfig, user });
   }
 
   pushUser(process.env.PGUSER);
