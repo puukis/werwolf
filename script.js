@@ -2951,6 +2951,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const revealControlsEl = document.getElementById('reveal-controls');
   const currentRevealPlayerEl = document.getElementById('current-player-display');
   const revealNextBtn = document.getElementById('reveal-next-btn');
+  const reshuffleRolesBtn = document.getElementById('reshuffle-roles-btn');
   const nextBtn = document.getElementById("next-btn");
   const finishBtn = document.getElementById("finish-btn");
   const startNightBtn = document.getElementById("start-night-btn");
@@ -2973,6 +2974,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const bodyguardJobChanceDisplay = document.getElementById('bodyguard-job-chance-display');
   const doctorJobChanceInput = document.getElementById('doctor-job-chance');
   const doctorJobChanceDisplay = document.getElementById('doctor-job-chance-display');
+  const showRolesOverviewBtn = document.getElementById('show-roles-overview-btn');
   const eventDeckListEl = document.getElementById('event-deck-list');
   const campaignSelectEl = document.getElementById('campaign-select');
   const campaignPreviewListEl = document.getElementById('campaign-preview-list');
@@ -10801,6 +10803,223 @@ document.addEventListener("DOMContentLoaded", async () => {
     markLayoutCustomized();
   });
 
+  function applyRoleAssignment(newPlayers, newRoles) {
+    if (!Array.isArray(newPlayers) || !Array.isArray(newRoles) || newPlayers.length === 0 || newPlayers.length !== newRoles.length) {
+      console.error('Ungültige Rollenzuteilung', { newPlayers, newRoles });
+      return;
+    }
+
+    phaseTimerManager.cancelAll();
+    phaseTimerManager.resetHistory();
+    resetTimerEventHistory();
+    actionLog.length = 0;
+    undoStack.length = 0;
+    redoStack.length = 0;
+    actionSequenceCounter = 0;
+    checkpointCounter = 0;
+    updateTimelineUI();
+    updateUndoHistoryUI();
+    lastWinner = null;
+
+    players = newPlayers.slice();
+    rolesAssigned = newRoles.slice();
+    jobsAssigned = players.map(() => []);
+    currentIndex = 0;
+
+    const legacyBodyguardIndices = [];
+    rolesAssigned.forEach((role, index) => {
+      if (role === 'Bodyguard') {
+        legacyBodyguardIndices.push(index);
+        rolesAssigned[index] = 'Dorfbewohner';
+      }
+    });
+    if (legacyBodyguardIndices.length > 0) {
+      assignBodyguardJobToIndex(legacyBodyguardIndices[0]);
+    }
+
+    henker = null;
+    geschwister = [];
+    geist.player = null;
+    geist.messageSent = false;
+    peaceDays = 0;
+    jagerShotUsed = false;
+    jagerDiedLastNight = null;
+    bodyguardProtectionTarget = null;
+    bodyguardProtectionNight = null;
+    bodyguardSavedTarget = null;
+    doctorPlayers = [];
+    doctorPendingTargets = [];
+    doctorPendingNight = null;
+    doctorTriggerSourceNight = null;
+    doctorLastHealedTarget = null;
+    doctorLastHealedNight = null;
+    firstNightShieldUsed = false;
+    initializeMichaelJacksonAccusations();
+
+    assignBodyguardJobByChance();
+    assignDoctorJobByChance();
+
+    const villageTeamRoles = [
+      'Dorfbewohner',
+      'Seer',
+      'Jäger',
+      'Hexe',
+      'Stumme Jule',
+      'Inquisitor',
+      'Verfluchte',
+      'Sündenbock',
+      'Geschwister',
+      'Geist',
+      'Michael Jackson'
+    ];
+    const villagersForHenkerTarget = [];
+
+    players.forEach((playerName, playerIndex) => {
+      if (villageTeamRoles.includes(rolesAssigned[playerIndex])) {
+        villagersForHenkerTarget.push(playerName);
+      }
+      if (rolesAssigned[playerIndex] === 'Henker') {
+        henker = { player: playerName, target: null };
+      }
+      if (rolesAssigned[playerIndex] === 'Geschwister') {
+        geschwister.push(playerName);
+      }
+      if (rolesAssigned[playerIndex] === 'Geist') {
+        geist.player = playerName;
+      }
+    });
+
+    updateBodyguardPlayers();
+    updateDoctorPlayers();
+
+    if (henker) {
+      const possibleTargets = villagersForHenkerTarget.filter((p) => p !== henker.player);
+      if (possibleTargets.length > 0) {
+        henker.target = possibleTargets[Math.floor(Math.random() * possibleTargets.length)];
+        console.log(`Henker is ${henker.player}, target is ${henker.target}`);
+      } else {
+        console.log('No valid target for Henker!');
+      }
+    }
+
+    const revealGrid = document.getElementById('reveal-grid');
+    if (!revealGrid) {
+      console.error('Reveal-Grid nicht gefunden.');
+      return;
+    }
+
+    hideRevealControls();
+    revealGrid.innerHTML = '';
+    revealCards = new Array(players.length);
+    revealCurrentPlayerHasFlipped = false;
+    currentlyFlippedCard = null;
+
+    players.forEach((player, index) => {
+      const card = document.createElement('div');
+      card.className = 'reveal-card';
+      card.dataset.playerIndex = String(index);
+      card.style.animationDelay = `${index * 0.05}s`;
+      if (deadPlayers.includes(player)) {
+        card.classList.add('dead');
+      }
+      card.onclick = () => {
+        if (revealTurnIndex < 0 || revealTurnOrder[revealTurnIndex] !== index) {
+          return;
+        }
+        if (currentlyFlippedCard && currentlyFlippedCard !== card) {
+          currentlyFlippedCard.classList.remove('flipped');
+        }
+        card.classList.toggle('flipped');
+        const isFlipped = card.classList.contains('flipped');
+        currentlyFlippedCard = isFlipped ? card : null;
+        revealCurrentPlayerHasFlipped = isFlipped;
+        refreshRevealControls();
+      };
+
+      const inner = document.createElement('div');
+      inner.className = 'reveal-card-inner';
+
+      const front = document.createElement('div');
+      front.className = 'reveal-card-front';
+      front.textContent = player;
+
+      const back = document.createElement('div');
+      back.className = 'reveal-card-back';
+      const role = rolesAssigned[index];
+      const jobs = getPlayerJobs(index);
+      const roleNameEl = document.createElement('span');
+      roleNameEl.className = 'role-name';
+      if (role === 'Dorfbewohner' && (!Array.isArray(jobs) || jobs.length === 0)) {
+        roleNameEl.classList.add('long-text');
+      }
+      renderRoleWithJobs(roleNameEl, role, jobs);
+      back.innerHTML = `<span class="player-name">${player}</span>`;
+      back.prepend(roleNameEl);
+
+      const infoBtn = document.createElement('button');
+      infoBtn.className = 'info-btn';
+      infoBtn.textContent = 'Info';
+      infoBtn.onclick = (e) => {
+        e.stopPropagation();
+        showRoleInfo(role, { jobs });
+      };
+      back.appendChild(infoBtn);
+
+      inner.appendChild(front);
+      inner.appendChild(back);
+      card.appendChild(inner);
+      revealGrid.appendChild(card);
+      revealCards[index] = card;
+    });
+
+    const revealOrder = players.map((_, idx) => idx);
+    shuffleArray(revealOrder);
+    setRevealTurnOrder(revealOrder);
+
+    nightCounter = 0;
+    gameCheckpoints.length = 0;
+    captureGameCheckpoint('Spielstart: Rollen verteilt');
+
+    if (henker && henker.target) {
+      const cards = revealGrid.querySelectorAll('.reveal-card');
+      cards.forEach((card) => {
+        const playerNameOnCard = card.querySelector('.player-name').textContent;
+        if (playerNameOnCard === henker.player) {
+          const backOfCard = card.querySelector('.reveal-card-back');
+          const targetEl = document.createElement('span');
+          targetEl.className = 'henker-target';
+          targetEl.innerHTML = `Dein Ziel ist: <strong>${henker.target}</strong>`;
+          backOfCard.appendChild(targetEl);
+        }
+      });
+    }
+
+    saveSession();
+
+    const setupContainer = document.querySelector('.setup-container');
+    if (setupContainer) {
+      setupContainer.style.display = 'none';
+    }
+    if (assignBtn) {
+      assignBtn.style.display = 'none';
+    }
+    if (loadLastUsedBtn) {
+      loadLastUsedBtn.style.display = 'none';
+    }
+    const ergebnisseTitle = document.getElementById('ergebnisse-title');
+    if (ergebnisseTitle) {
+      ergebnisseTitle.style.display = 'block';
+    }
+    const navigationButtons = document.querySelector('.navigation-buttons');
+    if (navigationButtons) {
+      navigationButtons.style.display = 'flex';
+    }
+    if (showRolesOverviewBtn) {
+      showRolesOverviewBtn.style.display = 'inline-block';
+    }
+    revealGrid.style.display = 'grid';
+  }
+
   assignBtn.addEventListener("click", () => {
     const playersRaw = document.getElementById("players").value
       .split(/\n|\r/)
@@ -10856,193 +11075,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     const finalizeAssignment = () => {
-        phaseTimerManager.cancelAll();
-        phaseTimerManager.resetHistory();
-        resetTimerEventHistory();
-        actionLog.length = 0;
-        undoStack.length = 0;
-        redoStack.length = 0;
-        actionSequenceCounter = 0;
-        checkpointCounter = 0;
-        updateTimelineUI();
-        updateUndoHistoryUI();
-        lastWinner = null;
-
-        // Shuffle roles
-        shuffleArray(roles);
-
-        // Map roles to players
-        players = playersRaw;
-        rolesAssigned = roles;
-        jobsAssigned = players.map(() => []);
-        currentIndex = 0;
-
-        const legacyBodyguardIndices = [];
-        rolesAssigned.forEach((role, index) => {
-          if (role === 'Bodyguard') {
-            legacyBodyguardIndices.push(index);
-            rolesAssigned[index] = 'Dorfbewohner';
-          }
-        });
-        if (legacyBodyguardIndices.length > 0) {
-          assignBodyguardJobToIndex(legacyBodyguardIndices[0]);
-        }
-
-        // Reset and set up special roles
-        henker = null;
-        geschwister = [];
-        geist.player = null;
-        geist.messageSent = false;
-        peaceDays = 0;
-        jagerShotUsed = false;
-        jagerDiedLastNight = null;
-        bodyguardProtectionTarget = null;
-        bodyguardProtectionNight = null;
-        bodyguardSavedTarget = null;
-        doctorPlayers = [];
-        doctorPendingTargets = [];
-        doctorPendingNight = null;
-        doctorTriggerSourceNight = null;
-        doctorLastHealedTarget = null;
-        doctorLastHealedNight = null;
-        firstNightShieldUsed = false;
-        initializeMichaelJacksonAccusations();
-
-        assignBodyguardJobByChance();
-        assignDoctorJobByChance();
-
-        const villageTeamRoles = ["Dorfbewohner", "Seer", "Jäger", "Hexe", "Stumme Jule", "Inquisitor", "Verfluchte", "Sündenbock", "Geschwister", "Geist", "Michael Jackson"];
-        const villagersForHenkerTarget = [];
-
-        players.forEach((p, i) => {
-            if (villageTeamRoles.includes(rolesAssigned[i])) {
-                villagersForHenkerTarget.push(p);
-            }
-            if (rolesAssigned[i] === 'Henker') {
-                henker = { player: p, target: null };
-            }
-            if (rolesAssigned[i] === 'Geschwister') {
-                geschwister.push(p);
-            }
-            if (rolesAssigned[i] === 'Geist') {
-                geist.player = p;
-            }
-        });
-
-        updateBodyguardPlayers();
-        updateDoctorPlayers();
-
-        // Assign a target to the Henker (must not be the Henker themselves)
-        if (henker) {
-          const possibleTargets = villagersForHenkerTarget.filter(p => p !== henker.player);
-          if (possibleTargets.length > 0) {
-            henker.target = possibleTargets[Math.floor(Math.random() * possibleTargets.length)];
-            console.log(`Henker is ${henker.player}, target is ${henker.target}`);
-          } else {
-            console.log("No valid target for Henker!");
-          }
-        }
-
-        // Create and display reveal cards
-        const revealGrid = document.getElementById('reveal-grid');
-        hideRevealControls();
-        revealGrid.innerHTML = ''; // Clear previous cards
-        revealCards = new Array(players.length);
-        revealCurrentPlayerHasFlipped = false;
-        currentlyFlippedCard = null;
-
-        players.forEach((player, index) => {
-          const card = document.createElement('div');
-          card.className = 'reveal-card';
-          card.dataset.playerIndex = String(index);
-          card.style.animationDelay = `${index * 0.05}s`;
-          if (deadPlayers.includes(player)) {
-            card.classList.add('dead');
-          }
-          card.onclick = () => {
-            if (revealTurnIndex < 0 || revealTurnOrder[revealTurnIndex] !== index) {
-              return;
-            }
-            if (currentlyFlippedCard && currentlyFlippedCard !== card) {
-              currentlyFlippedCard.classList.remove('flipped');
-            }
-            card.classList.toggle('flipped');
-            const isFlipped = card.classList.contains('flipped');
-            currentlyFlippedCard = isFlipped ? card : null;
-            revealCurrentPlayerHasFlipped = isFlipped;
-            refreshRevealControls();
-          };
-
-          const inner = document.createElement('div');
-          inner.className = 'reveal-card-inner';
-
-          const front = document.createElement('div');
-          front.className = 'reveal-card-front';
-          front.textContent = player;
-
-          const back = document.createElement('div');
-          back.className = 'reveal-card-back';
-          const role = rolesAssigned[index];
-          const jobs = getPlayerJobs(index);
-          const roleNameEl = document.createElement('span');
-          roleNameEl.className = 'role-name';
-          if (role === 'Dorfbewohner' && (!Array.isArray(jobs) || jobs.length === 0)) {
-            roleNameEl.classList.add('long-text');
-          }
-          renderRoleWithJobs(roleNameEl, role, jobs);
-          back.innerHTML = `<span class="player-name">${player}</span>`;
-          back.prepend(roleNameEl);
-
-          const infoBtn = document.createElement('button');
-          infoBtn.className = 'info-btn';
-          infoBtn.textContent = 'Info';
-          infoBtn.onclick = (e) => {
-            e.stopPropagation(); // Prevent card from flipping back
-            showRoleInfo(role, { jobs });
-          };
-          back.appendChild(infoBtn);
-
-          inner.appendChild(front);
-          inner.appendChild(back);
-          card.appendChild(inner);
-          revealGrid.appendChild(card);
-          revealCards[index] = card;
-        });
-
-        const revealOrder = players.map((_, idx) => idx);
-        shuffleArray(revealOrder);
-        setRevealTurnOrder(revealOrder);
-
-        nightCounter = 0;
-        gameCheckpoints.length = 0;
-        captureGameCheckpoint('Spielstart: Rollen verteilt');
-
-        // Add Henker's target to their card
-        if (henker && henker.target) {
-          const cards = revealGrid.querySelectorAll('.reveal-card');
-          cards.forEach(card => {
-            const playerNameOnCard = card.querySelector('.player-name').textContent;
-            if (playerNameOnCard === henker.player) {
-              const backOfCard = card.querySelector('.reveal-card-back');
-              const targetEl = document.createElement('span');
-              targetEl.className = 'henker-target';
-              targetEl.innerHTML = `Dein Ziel ist: <strong>${henker.target}</strong>`;
-              backOfCard.appendChild(targetEl);
-            }
-          });
-        }
-
-        // Save the session
-        saveSession();
-
-        // Hide setup and show results
-        document.querySelector('.setup-container').style.display = 'none';
-        assignBtn.style.display = 'none';
-        loadLastUsedBtn.style.display = 'none';
-        document.getElementById('ergebnisse-title').style.display = 'block';
-        document.querySelector('.navigation-buttons').style.display = 'flex';
-        showRolesOverviewBtn.style.display = 'inline-block';
-        revealGrid.style.display = 'grid';
+      const rolesForAssignment = roles.slice();
+      shuffleArray(rolesForAssignment);
+      applyRoleAssignment(playersRaw, rolesForAssignment);
     };
 
     if (roles.length < playersRaw.length) {
@@ -11087,6 +11122,35 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     finalizeAssignment();
   });
+
+  if (reshuffleRolesBtn) {
+    reshuffleRolesBtn.addEventListener('click', () => {
+      if (!Array.isArray(players) || players.length === 0 || !Array.isArray(rolesAssigned) || rolesAssigned.length !== players.length) {
+        showInfoMessage({
+          title: 'Keine Zuteilung aktiv',
+          text: 'Bitte zuerst Rollen zuteilen, bevor du sie neu mischst.',
+          confirmText: 'Okay',
+          log: { type: 'error', label: 'Rollen neu mischen fehlgeschlagen', detail: 'Keine aktuelle Rollenzuteilung vorhanden.' }
+        });
+        return;
+      }
+
+      if (deadPlayers.length > 0) {
+        showInfoMessage({
+          title: 'Neu-Verteilung nicht möglich',
+          text: 'Rollen können nur neu gemischt werden, solange noch keine Spieler ausgeschieden sind.',
+          confirmText: 'Okay',
+          log: { type: 'error', label: 'Rollen neu mischen abgebrochen', detail: 'Bereits ausgeschiedene Spieler vorhanden.' }
+        });
+        return;
+      }
+
+      const reshuffledRoles = rolesAssigned.slice();
+      shuffleArray(reshuffledRoles);
+      applyRoleAssignment(players.slice(), reshuffledRoles);
+      logAction({ type: 'admin', label: 'Rollen neu gemischt', detail: `Rollen für ${players.length} Spieler neu verteilt.` });
+    });
+  }
 
   function updatePlayerCardVisuals() {
     const revealGrid = document.getElementById('reveal-grid');
@@ -12667,7 +12731,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   const triggerBloodMoonBtn = document.getElementById('trigger-blood-moon-btn');
   const adminPanelToggle = document.getElementById('admin-panel-toggle');
   const closeAdminPanelBtn = document.getElementById('close-admin-panel-btn');
-  const showRolesOverviewBtn = document.getElementById('show-roles-overview-btn');
 
   const adminKillPlayerSelect = document.getElementById('admin-kill-player-select');
   const adminKillPlayerBtn = document.getElementById('admin-kill-player-btn');
