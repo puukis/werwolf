@@ -2951,6 +2951,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const revealControlsEl = document.getElementById('reveal-controls');
   const currentRevealPlayerEl = document.getElementById('current-player-display');
   const revealNextBtn = document.getElementById('reveal-next-btn');
+  const revealPrevBtn = document.getElementById('reveal-prev-btn');
   const reshuffleRolesBtn = document.getElementById('reshuffle-roles-btn');
   const nextBtn = document.getElementById("next-btn");
   const finishBtn = document.getElementById("finish-btn");
@@ -6917,6 +6918,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   let revealTurnIndex = -1;
   let revealCards = [];
   let revealCurrentPlayerHasFlipped = false;
+  let revealPlayersViewed = [];
 
   let roleLayoutCustomized = false;
   let lastSuggestionSnapshot = null;
@@ -10913,6 +10915,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     revealCards = new Array(players.length);
     revealCurrentPlayerHasFlipped = false;
     currentlyFlippedCard = null;
+    revealPlayersViewed = new Array(players.length).fill(false);
 
     players.forEach((player, index) => {
       const card = document.createElement('div');
@@ -10932,7 +10935,10 @@ document.addEventListener("DOMContentLoaded", async () => {
         card.classList.toggle('flipped');
         const isFlipped = card.classList.contains('flipped');
         currentlyFlippedCard = isFlipped ? card : null;
-        revealCurrentPlayerHasFlipped = isFlipped;
+        if (isFlipped) {
+          revealPlayersViewed[index] = true;
+        }
+        revealCurrentPlayerHasFlipped = Boolean(revealPlayersViewed[index]);
         refreshRevealControls();
       };
 
@@ -11276,6 +11282,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     revealTurnIndex = -1;
     revealCards = [];
     revealCurrentPlayerHasFlipped = false;
+    revealPlayersViewed = [];
     currentlyFlippedCard = null;
     if (revealControlsEl) {
       revealControlsEl.style.display = 'none';
@@ -11286,6 +11293,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (revealNextBtn) {
       revealNextBtn.disabled = true;
       revealNextBtn.style.display = '';
+    }
+    if (revealPrevBtn) {
+      revealPrevBtn.disabled = true;
     }
   }
 
@@ -11318,6 +11328,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     const currentPlayerIndex = revealTurnOrder[revealTurnIndex];
     const playerName = players[currentPlayerIndex] || '';
     const isLast = revealTurnIndex === revealTurnOrder.length - 1;
+    const hasSeenRole = Boolean(revealPlayersViewed[currentPlayerIndex]);
+    revealCurrentPlayerHasFlipped = hasSeenRole;
 
     if (currentRevealPlayerEl) {
       if (!playerName) {
@@ -11335,8 +11347,11 @@ document.addEventListener("DOMContentLoaded", async () => {
         revealNextBtn.disabled = true;
       } else {
         revealNextBtn.style.display = '';
-        revealNextBtn.disabled = !revealCurrentPlayerHasFlipped;
+        revealNextBtn.disabled = !hasSeenRole;
       }
+    }
+    if (revealPrevBtn) {
+      revealPrevBtn.disabled = revealTurnIndex <= 0;
     }
 
     updateRevealCardStates();
@@ -11350,7 +11365,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     revealTurnOrder = order.slice();
     revealTurnIndex = 0;
-    revealCurrentPlayerHasFlipped = false;
+    const firstIndex = revealTurnOrder[0];
+    revealCurrentPlayerHasFlipped = Boolean(revealPlayersViewed[firstIndex]);
     currentlyFlippedCard = null;
     refreshRevealControls();
   }
@@ -11366,13 +11382,36 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     revealTurnIndex += 1;
-    revealCurrentPlayerHasFlipped = false;
+    const nextIndex = revealTurnOrder[revealTurnIndex];
+    revealCurrentPlayerHasFlipped = Boolean(revealPlayersViewed[nextIndex]);
+    refreshRevealControls();
+  }
+
+  function rewindRevealTurn() {
+    if (revealTurnIndex <= 0) {
+      return;
+    }
+
+    if (currentlyFlippedCard) {
+      currentlyFlippedCard.classList.remove('flipped');
+      currentlyFlippedCard = null;
+    }
+
+    revealTurnIndex -= 1;
+    const previousIndex = revealTurnOrder[revealTurnIndex];
+    revealCurrentPlayerHasFlipped = Boolean(revealPlayersViewed[previousIndex]);
     refreshRevealControls();
   }
 
   if (revealNextBtn) {
     revealNextBtn.addEventListener('click', () => {
       advanceRevealTurn();
+    });
+  }
+
+  if (revealPrevBtn) {
+    revealPrevBtn.addEventListener('click', () => {
+      rewindRevealTurn();
     });
   }
 
@@ -12649,6 +12688,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     revealCards = new Array(players.length);
     revealCurrentPlayerHasFlipped = false;
     currentlyFlippedCard = null;
+    revealPlayersViewed = new Array(players.length).fill(false);
 
     players.forEach((player, index) => {
       const card = document.createElement('div');
@@ -12668,7 +12708,10 @@ document.addEventListener("DOMContentLoaded", async () => {
         card.classList.toggle('flipped');
         const isFlipped = card.classList.contains('flipped');
         currentlyFlippedCard = isFlipped ? card : null;
-        revealCurrentPlayerHasFlipped = isFlipped;
+        if (isFlipped) {
+          revealPlayersViewed[index] = true;
+        }
+        revealCurrentPlayerHasFlipped = Boolean(revealPlayersViewed[index]);
         refreshRevealControls();
       };
 
@@ -14673,6 +14716,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       },
       showRoleInfo(roleName, options) {
         showRoleInfo(roleName, options);
+      },
+      assignRolesManually(newPlayers, newRoles) {
+        applyRoleAssignment(newPlayers, newRoles);
       },
       getActionLog() {
         return actionLog.slice();

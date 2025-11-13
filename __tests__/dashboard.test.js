@@ -469,6 +469,39 @@ const flushAsync = () => new Promise((resolve) => setTimeout(resolve, 0));
     expect(testApi.getActionLog()[0].label).toContain('Makro: Alle Spieler wiederbeleben');
   });
 
+  test('role reveal navigation keeps next unlocked after first flip and allows going back', async () => {
+    testApi.assignRolesManually(
+      ['Anna', 'Boris'],
+      ['Werwolf', 'Seer']
+    );
+    await flushAsync();
+
+    const nextBtn = document.getElementById('reveal-next-btn');
+    const prevBtn = document.getElementById('reveal-prev-btn');
+    const firstCard = document.querySelector('.reveal-card[data-player-index="0"]');
+
+    expect(nextBtn.disabled).toBe(true);
+    expect(prevBtn.disabled).toBe(true);
+
+    firstCard.click();
+    expect(nextBtn.disabled).toBe(false);
+
+    firstCard.click();
+    expect(nextBtn.disabled).toBe(false);
+
+    nextBtn.click();
+    await flushAsync();
+
+    expect(prevBtn.disabled).toBe(false);
+    expect(nextBtn.style.display).toBe('none');
+
+    prevBtn.click();
+    await flushAsync();
+
+    expect(prevBtn.disabled).toBe(true);
+    expect(nextBtn.disabled).toBe(false);
+  });
+
   test('saving a session surfaces the confirmation modal', async () => {
     const modal = document.getElementById('confirmation-modal');
     expect(modal.style.display).not.toBe('flex');

@@ -3077,6 +3077,13 @@ body.night-active main.container {
   flex-wrap: wrap;
 }
 
+.reveal-controls .reveal-controls-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .reveal-controls .current-player-display {
   font-weight: 600;
   font-size: 1.1rem;
