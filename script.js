@@ -3,7 +3,121 @@
 let authManager = null;
 let lobbyManager = null;
 
+function createMockApiClient() {
+  const STORAGE_PREFIX = 'werwolf_offline_';
+  const activeLobby = { id: 999, name: 'Offline Lobby', isPersonal: true, role: 'owner' };
+
+  function getLocal(key, defaultVal = null) {
+    try {
+      const item = localStorage.getItem(STORAGE_PREFIX + key);
+      return item ? JSON.parse(item) : defaultVal;
+    } catch (e) {
+      return defaultVal;
+    }
+  }
+
+  function setLocal(key, value) {
+    try {
+      localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(value));
+    } catch (e) {
+      console.error('Offline storage failed', e);
+    }
+  }
+
+  return {
+    request: async () => null,
+    clearCaches: () => {},
+    storage: {
+      getItem: async (key) => getLocal('storage_' + key),
+      getCachedItem: (key) => getLocal('storage_' + key),
+      setItem: async (key, value) => setLocal('storage_' + key, value),
+      removeItem: async (key) => localStorage.removeItem(STORAGE_PREFIX + 'storage_' + key),
+      prefetch: async () => {},
+    },
+    theme: {
+      get: async () => getLocal('theme', { variant: 'light' }),
+      set: async (update) => {
+        const current = getLocal('theme', { variant: 'light' });
+        const next = { ...current, ...(typeof update === 'string' ? { variant: update } : update) };
+        setLocal('theme', next);
+        return next;
+      },
+      presets: async () => ({ version: 1, presets: [] }),
+      getCachedState: () => getLocal('theme'),
+      setCachedState: () => {},
+      getCachedPresets: () => null,
+    },
+    locale: {
+      get: async () => ({}),
+      set: async () => {},
+    },
+    savedNames: {
+      get: async () => getLocal('names', []),
+      set: async (names) => {
+        setLocal('names', names);
+        return names;
+      },
+    },
+    rolePresets: {
+      get: async () => getLocal('roles', []),
+      set: async (roles) => {
+        setLocal('roles', roles);
+        return roles;
+      },
+    },
+    rolesConfig: {
+      get: async () => ({ config: getLocal('rolesConfig'), source: 'custom' }),
+      set: async (config) => {
+        setLocal('rolesConfig', config);
+        return { config, source: 'custom' };
+      },
+      create: async (config) => {
+        setLocal('rolesConfig', config);
+        return { config, source: 'custom' };
+      },
+      remove: async () => localStorage.removeItem(STORAGE_PREFIX + 'rolesConfig'),
+    },
+    storageScopes: {
+      withLobby: async (lobby, cb) => cb(),
+      setActiveLobby: () => {},
+      getActiveLobby: () => activeLobby,
+    },
+    sessions: {
+      list: async () => [],
+      create: async () => {},
+      remove: async () => {},
+      timeline: async () => null,
+    },
+    analytics: {
+      get: async () => ({}),
+    },
+    auth: {
+      me: async () => ({ id: 'offline-admin', displayName: 'Offline Admin', isAdmin: true, email: 'offline@local' }),
+      login: async () => ({ id: 'offline-admin', displayName: 'Offline Admin', isAdmin: true, email: 'offline@local' }),
+      register: async () => ({ id: 'offline-admin', displayName: 'Offline Admin', isAdmin: true, email: 'offline@local' }),
+      logout: async () => {},
+    },
+    lobby: {
+      setActive: () => {},
+      getActive: () => activeLobby,
+      withLobby: async (id, cb) => cb(),
+      list: async () => [activeLobby],
+      create: async () => activeLobby,
+      join: async () => activeLobby,
+      update: async () => {},
+      rotateCode: async () => {},
+      remove: async () => {},
+      members: async () => ({ lobby: activeLobby, members: [{ id: 'offline-admin', displayName: 'Offline Admin', role: 'owner', isAdmin: true }] }),
+      updateMember: async () => {},
+      removeMember: async () => {},
+    },
+  };
+}
+
 const apiClient = (() => {
+  if (new URLSearchParams(window.location.search).get('offline') === 'true') {
+    return createMockApiClient();
+  }
   const baseUrl = '/api';
   const storageCache = new Map();
   const inflightReads = new Map();
@@ -450,6 +564,336 @@ const apiClient = (() => {
 })();
 
 const localization = (() => {
+  const EMBEDDED_LOCALES = {
+    de: {
+      messages: {
+  "meta": {
+    "locale": "de",
+    "fallback": "de"
+  },
+  "messages": {
+    "app.title": "Werwolf",
+    "app.subtitle": "Rollenverteiler für das Werwolf-Spiel",
+    "phoenix.status.default": "Phoenix Pulse: –",
+    "phoenix.status.disabled": "Phoenix Pulse: deaktiviert",
+    "phoenix.status.ready": "Phoenix Pulse: bereit",
+    "phoenix.status.resolved": "Phoenix Pulse: {players} zurück",
+    "phoenix.overlay.title": "Phoenix Pulse",
+    "phoenix.overlay.message": "Die Phoenix Pulse lodert durch das Dorf.",
+    "sessions.sidebar.title": "Gespeicherte Sessions",
+    "sessions.toggle.aria": "Sessions-Leiste umschalten",
+    "theme.toggle.aria": "Dunkelmodus umschalten",
+    "welcome.hero.title": "Willkommen zurück, Erzähler:in",
+    "welcome.hero.subtitle": "Verwalte Sessions, Rollen und Ereignisse mit wenigen Klicks und behalte dein Dorf jederzeit im Blick.",
+    "welcome.highlights.protected.title": "Geschützt",
+    "welcome.highlights.protected.body": "Nur angemeldete Leitungen sehen gespeicherte Sessions, Rollenlayouts und Spielstände.",
+    "welcome.highlights.quickStart.title": "Schneller Einstieg",
+    "welcome.highlights.quickStart.body": "Deine zuletzt genutzten Einstellungen stehen direkt bereit – auch auf neuen Geräten.",
+    "welcome.highlights.atmosphere.title": "Atmosphäre pur",
+    "welcome.highlights.atmosphere.body": "Wechsle dynamisch zwischen hellen und dunklen Themen und bring das Dorf zum Leuchten.",
+    "auth.tabs.aria": "Anmeldung und Registrierung",
+    "auth.tabs.login": "Anmelden",
+    "auth.tabs.register": "Registrieren",
+    "auth.login.emailLabel": "E-Mail-Adresse",
+    "auth.login.emailPlaceholder": "du@beispiel.de",
+    "auth.login.passwordLabel": "Passwort",
+    "auth.login.passwordPlaceholder": "••••••••",
+    "auth.login.submit": "Loslegen",
+    "auth.register.displayNameLabel": "Anzeigename",
+    "auth.register.displayNamePlaceholder": "Spielleitung",
+    "auth.register.emailLabel": "E-Mail-Adresse",
+    "auth.register.emailPlaceholder": "du@beispiel.de",
+    "auth.register.passwordLabel": "Passwort",
+    "auth.register.passwordPlaceholder": "Mindestens 8 Zeichen",
+    "auth.register.adminCodeLabel": "Administrator-Code",
+    "auth.register.optionalTag": "(optional)",
+    "auth.register.adminCodePlaceholder": "Nur falls vorhanden",
+    "auth.register.hint": "Die erste registrierte Person wird automatisch Admin. Weitere Admins benötigen einen Code.",
+    "auth.register.submit": "Registrieren",
+    "auth.errors.unauthorized": "Deine Sitzung ist abgelaufen. Bitte melde dich erneut an.",
+    "auth.errors.missingCredentials": "Bitte gib E-Mail und Passwort ein.",
+    "auth.errors.missingRegistrationFields": "Bitte fülle alle Pflichtfelder aus.",
+    "auth.login.failure": "Anmeldung fehlgeschlagen.",
+    "auth.login.required": "Bitte melde dich an, um weiterzuspielen.",
+    "auth.login.unavailable": "Anmeldung momentan nicht möglich.",
+    "auth.logout.success": "Du wurdest abgemeldet. Bis bald!",
+    "auth.logout.failure": "Abmelden fehlgeschlagen.",
+    "auth.logout.button": "Abmelden",
+    "auth.register.failure": "Registrierung fehlgeschlagen.",
+    "toolbar.config": "Konfiguration",
+    "user.displayName.fallback": "Spielleitung",
+    "user.role.admin": "Admin",
+    "lobbies.emptySelection": "Keine Lobby ausgewählt.",
+    "settings.modal.title": "Konfiguration",
+    "settings.events.heading": "Ereignisse",
+    "settings.events.randomEventsEnabled": "Random Events an",
+    "settings.events.bloodMoonEnabled": "Blutmond aktiv",
+    "settings.events.bloodMoonChance": "Blutmond-Grundchance",
+    "settings.events.firstNightShield": "Schutznacht aktiv",
+    "settings.events.phoenixPulseEnabled": "Phoenix Pulse aktiv",
+    "settings.events.phoenixPulseChance": "Phoenix Pulse Chance",
+    "settings.events.deckWeight": "Gewichtung",
+    "settings.events.deckHeading": "Ereignisdecks",
+    "settings.events.campaignHeading": "Kampagnen",
+    "settings.events.campaignSelect": "Kampagnen-Preset",
+    "settings.events.campaignPreview": "Kommende Story-Beats",
+    "settings.events.consequencePreview": "Mögliche Konsequenzen",
+    "settings.events.printCards": "Karten drucken",
+    "settings.events.printCards.emptyTitle": "Keine Karten aktiviert",
+    "settings.events.printCards.emptyBody": "Aktiviere mindestens ein Ereignisdeck, um Karten zu drucken.",
+    "settings.events.printCards.emptyList": "Keine Karten aktiviert.",
+    "settings.events.printCards.popupBlockedTitle": "Druckfenster blockiert",
+    "settings.events.printCards.popupBlockedBody": "Erlaube Pop-ups in deinem Browser, um die Karten zu drucken.",
+    "settings.events.printCards.windowTitle": "Ereigniskarten",
+    "settings.events.printCards.printHint": "Nutze die Druckfunktion deines Browsers, um ein PDF zu erzeugen.",
+    "settings.roles.printCards": "Rollenkarten drucken",
+    "settings.roles.printCards.emptyTitle": "Keine Rollen geplant",
+    "settings.roles.printCards.emptyBody": "Füge mindestens eine Rolle mit Anzahl größer als null hinzu, um Karten zu drucken.",
+    "settings.roles.printCards.popupBlockedTitle": "Druckfenster blockiert",
+    "settings.roles.printCards.popupBlockedBody": "Erlaube Pop-ups in deinem Browser, um die Karten zu drucken.",
+    "settings.roles.printCards.windowTitle": "Rollenkarten",
+    "settings.roles.printCards.printHint": "Nutze die Druckfunktion deines Browsers, um ein PDF zu erzeugen.",
+    "settings.roles.printCards.copyLabel": "Karte {current} von {total}",
+    "settings.roles.printCards.category.village": "Dorfbewohner",
+    "settings.roles.printCards.category.werwolf": "Werwölfe",
+    "settings.roles.printCards.category.special": "Spezialrollen",
+    "settings.theme.heading": "Themen & Kulissen",
+    "settings.theme.description": "Passe Hintergrund, Akzentfarbe und Lichtstimmung für deine Lobby an. Änderungen werden sofort in allen verbundenen Ansichten sichtbar.",
+    "settings.theme.presetLabel": "Voreinstellung",
+    "settings.theme.variantLabel": "Variante",
+    "settings.theme.accentLabel": "Akzentfarbe",
+    "settings.theme.backgroundUrlLabel": "Hintergrund-URL",
+    "settings.theme.backgroundUrlHint": "Nutze HTTPS-Bilder. Leere Eingaben verwenden das Preset.",
+    "settings.theme.backgroundUploadLabel": "Eigenes Bild hochladen",
+    "settings.theme.backgroundUploadHint": "Bis 1,5 MB, wird direkt in der Lobby gespeichert.",
+    "settings.theme.backgroundStatus.preset": "Preset-Hintergrund aktiv",
+    "settings.theme.backgroundStatus.upload": "Eigene Datei aktiv",
+    "settings.theme.backgroundStatus.url": "Eigene URL aktiv",
+    "settings.theme.save": "Speichern",
+    "settings.theme.reset": "Zurücksetzen",
+    "settings.theme.preview.title": "Live-Vorschau",
+    "settings.theme.preview.primary": "Primärer Button",
+    "settings.theme.preview.secondary": "Sekundärer Button",
+    "settings.theme.warnings.title": "Hinweise zur Barrierefreiheit",
+    "settings.gameInfo.heading": "Spielinformationen",
+    "settings.gameInfo.revealDeadRoles": "Rollen der Toten aufdecken",
+    "settings.jobs.heading": "Jobs",
+    "settings.jobs.bodyguardChance": "Bodyguard-Job Chance",
+    "settings.jobs.doctorChance": "Arzt-Job Chance",
+    "settings.jobs.note": "Nur Dorfbewohner-Rollen können Bodyguard- und Arzt-Jobs erhalten.",
+    "settings.footer.close": "Schließen",
+    "settings.locale.heading": "Sprache & Lokalisierung",
+    "settings.locale.selectLabel": "Bevorzugte Sprache",
+    "settings.locale.systemOption": "Systemsprache verwenden",
+    "settings.locale.germanOption": "Deutsch",
+    "settings.locale.englishOption": "Englisch",
+    "roles.info.abilitiesTitle": "Fähigkeiten",
+    "roles.info.jobsTitle": "Jobs",
+    "roles.info.noDescription": "Keine Beschreibung für diese Rolle verfügbar.",
+    "roles.info.unknown": "Unbekannte Rolle",
+    "events.decks.legacy.name": "Klassisches Deck",
+    "events.decks.legacy.description": "Erhält die bekannten Ereignisse Blutmond und Phoenix Pulse.",
+    "events.campaigns.legacy.name": "Klassische Ereigniskette",
+    "events.campaigns.legacy.description": "Behält die bisherigen Zufallsereignisse mit sanften Vorahnungen bei.",
+    "events.campaigns.legacy.stepTitle": "Vorzeichen des Phönix",
+    "events.campaigns.legacy.stepDescription": "Die Phoenix Pulse knistert schon in der ersten Nacht und lädt garantiert.",
+    "events.campaigns.freePlay": "Freies Spiel",
+    "events.campaigns.noneActive": "Keine Kampagne aktiv.",
+    "events.campaigns.complete": "Alle Beats dieser Kampagne wurden erlebt.",
+    "events.campaigns.nightLabel": "Nacht {night}"
+  }
+}
+,
+      gameplay: {
+  "meta": {
+    "locale": "de",
+    "fallback": "de"
+  },
+  "roles": {
+    "Dorfbewohner": {
+      "displayName": { "other": "Dorfbewohner" },
+      "category": "village",
+      "description": { "other": "Gewinnt, wenn alle Werwölfe eliminiert sind." },
+      "abilities": []
+    },
+    "Seer": {
+      "displayName": { "other": "Seher:in" },
+      "category": "village",
+      "description": { "other": "Kann jede Nacht die Rolle eines Spielers sehen." },
+      "abilities": [
+        { "id": "seer.vision", "text": { "other": "Sieht jede Nacht eine Spielerrolle." } }
+      ]
+    },
+    "Jäger": {
+      "displayName": { "male": "Jäger", "female": "Jägerin", "other": "Jäger:in" },
+      "category": "village",
+      "description": { "other": "Darf vor seinem Tod einen Spieler erschießen." },
+      "abilities": [
+        { "id": "hunter.retal", "text": { "other": "Kann beim Tod eine Person mitreißen." } }
+      ]
+    },
+    "Hexe": {
+      "displayName": { "other": "Hexe" },
+      "category": "village",
+      "description": { "other": "Hat einen Heil- und einen Gifttrank." },
+      "abilities": [
+        { "id": "witch.heal", "text": { "other": "Ein Heiltrank" } },
+        { "id": "witch.poison", "text": { "other": "Ein Gifttrank" } }
+      ]
+    },
+    "Stumme Jule": {
+      "displayName": { "other": "Stumme Jule" },
+      "category": "village",
+      "description": { "other": "Wählt jede Nacht jemanden, der bis zum nächsten Tag nicht reden darf." },
+      "abilities": [
+        { "id": "mute.choice", "text": { "other": "Schweigt eine Person pro Nacht" } }
+      ]
+    },
+    "Inquisitor": {
+      "displayName": { "other": "Inquisitor" },
+      "category": "village",
+      "description": { "other": "Kann jede Nacht prüfen, ob jemand zur Werwolf-Fraktion gehört." },
+      "abilities": [
+        { "id": "inquisitor.check", "text": { "other": "Prüft eine Person pro Nacht" } }
+      ]
+    },
+    "Sündenbock": {
+      "displayName": { "other": "Sündenbock" },
+      "category": "village",
+      "description": { "other": "Wird bei einem Gleichstand gelyncht." },
+      "abilities": [
+        { "id": "scapegoat.tie", "text": { "other": "Opfert sich bei Stimmengleichstand" } }
+      ]
+    },
+    "Geschwister": {
+      "displayName": { "other": "Geschwister" },
+      "category": "village",
+      "description": { "other": "Zwei Dorfbewohner, die sich gegenseitig kennen." },
+      "abilities": [
+        { "id": "siblings.know", "text": { "other": "Erkennen Geschwister in der ersten Nacht" } }
+      ]
+    },
+    "Geist": {
+      "displayName": { "other": "Geist" },
+      "category": "village",
+      "description": { "other": "Kann nach seinem Tod eine Nachricht senden." },
+      "abilities": [
+        { "id": "ghost.message", "text": { "other": "Sendet nach dem Tod eine Nachricht" } }
+      ]
+    },
+    "Werwolf": {
+      "displayName": { "other": "Werwolf" },
+      "category": "werwolf",
+      "description": { "other": "Gewinnt, wenn sie alle Dorfbewohner eliminieren." },
+      "abilities": [
+        { "id": "wolf.hunt", "text": { "other": "Eliminieren nachts gemeinsam" } }
+      ]
+    },
+    "Verfluchte": {
+      "displayName": { "other": "Verfluchte" },
+      "category": "werwolf",
+      "description": { "other": "Startet als Dorfbewohner und wird bei einem Angriff der Werwölfe selbst zum Werwolf." },
+      "abilities": [
+        { "id": "cursed.swap", "text": { "other": "Wechselt bei Werwolf-Angriff die Seite" } }
+      ]
+    },
+    "Amor": {
+      "displayName": { "other": "Amor" },
+      "category": "special",
+      "description": { "other": "Verknüpft zwei Liebende, die gemeinsam gewinnen." },
+      "abilities": [
+        { "id": "amor.link", "text": { "other": "Verbindet zwei Liebende" } }
+      ]
+    },
+    "Trickster": {
+      "displayName": { "other": "Trickster" },
+      "category": "special",
+      "description": { "other": "Gewinnt, wenn er gelyncht wird, bevor die Werwölfe gewinnen." },
+      "abilities": [
+        { "id": "trickster.lynch", "text": { "other": "Gewinnt beim eigenen Lynch" } }
+      ]
+    },
+    "Henker": {
+      "displayName": { "other": "Henker" },
+      "category": "special",
+      "description": { "other": "Gewinnt, wenn sein geheimes Ziel vom Dorf gelyncht wird. Spielt für sich allein." },
+      "abilities": [
+        { "id": "executioner.target", "text": { "other": "Erfährt ein geheimes Ziel" } }
+      ]
+    },
+    "Friedenstifter": {
+      "displayName": { "other": "Friedenstifter" },
+      "category": "special",
+      "description": { "other": "Gewinnt, wenn für zwei aufeinanderfolgende Runden niemand stirbt." },
+      "abilities": [
+        { "id": "pacifist.streak", "text": { "other": "Gewinnt nach zwei friedlichen Runden" } }
+      ]
+    },
+    "Michael Jackson": {
+      "displayName": { "other": "Michael Jackson" },
+      "category": "special",
+      "description": { "other": "Dorfbewohner-Sonderrolle: Ab der ersten Beschuldigung zählt seine Stimme doppelt, bei der zweiten Beschuldigung stirbt er sofort." },
+      "abilities": [
+        { "id": "mj.doubleVote", "text": { "other": "Stimme zählt doppelt nach erster Beschuldigung" } },
+        { "id": "mj.secondAccuse", "text": { "other": "Stirbt bei zweiter Beschuldigung" } }
+      ]
+    }
+  },
+  "jobs": {
+    "Bodyguard": {
+      "displayName": { "other": "Bodyguard" },
+      "description": { "other": "Wählt jede Nacht eine Person und schützt sie vor Angriffen der Werwölfe." }
+    },
+    "Doctor": {
+      "displayName": { "other": "Arzt" },
+      "description": { "other": "Wacht nach einer blutigen Nacht auf und kann eine der Opferpersonen zurück ins Leben holen." }
+    }
+  },
+  "events": {
+    "blood-moon": {
+      "label": { "other": "🌕 Blutmond" },
+      "description": { "other": "Der Mond färbt sich rot – die Werwölfe dürfen ein zweites Opfer wählen." },
+      "log": {
+        "label": { "other": "Blutmond steigt auf" },
+        "detail": { "other": "Die Werwölfe dürfen in dieser Nacht zwei Opfer wählen." }
+      },
+      "note": { "other": "Die Werwölfe wählen zwei Opfer." },
+      "preview": { "other": "Werwölfe wählen zwei Opfer." }
+    },
+    "phoenix-pulse": {
+      "label": { "other": "🔥 Phoenix Pulse" },
+      "description": { "other": "Eine uralte Energie lodert durch das Dorf – Nachtopfer werden wiederbelebt." },
+      "log": {
+        "label": { "other": "Phoenix Pulse geladen" },
+        "detail": { "other": "Die Phoenix Pulse lädt und wird bei Tagesanbruch explodieren." }
+      },
+      "note": { "other": "Nachtopfer werden am Morgen wiederbelebt." },
+      "message": { "other": "<br><strong>🔥 Phoenix Pulse:</strong> Eine uralte Energie sammelt sich in dieser Nacht." },
+      "preview": { "other": "Nachtopfer kehren bei Tagesanbruch zurück." }
+    }
+  },
+  "logs": {
+    "bodyguard.saved": {
+      "label": { "other": "Bodyguard Rettung" },
+      "detail": { "other": "{player}" }
+    },
+    "doctor.skipped": {
+      "label": { "other": "Arzt verzichtet" },
+      "detail": { "other": "Keine Heilung gewählt" }
+    },
+    "doctor.healed": {
+      "label": { "other": "Arzt heilt" },
+      "detail": { "other": "{player}" }
+    },
+    "doctor.alive": {
+      "label": { "other": "Arzt vergeblich" },
+      "detail": { "other": "{player} war bereits am Leben" }
+    }
+  }
+}
+
+    }
+  };
   const DEFAULT_LOCALE = 'de';
   const SUPPORTED_LOCALES = new Set(['de', 'en']);
   const LOCALE_STORAGE_KEY = 'werwolfLocalePreference';
@@ -558,10 +1002,19 @@ const localization = (() => {
     if (!locale || catalogs.has(locale)) {
       return catalogs.get(locale) || null;
     }
-    const [messages, gameplay] = await Promise.all([
-      fetchJson(`/locales/${encodeURIComponent(locale)}/messages.json`),
-      fetchJson(`/locales/${encodeURIComponent(locale)}/gameplay.json`)
-    ]);
+
+    let messages = null;
+    let gameplay = null;
+
+    if (EMBEDDED_LOCALES[locale]) {
+      messages = EMBEDDED_LOCALES[locale].messages;
+      gameplay = EMBEDDED_LOCALES[locale].gameplay;
+    } else {
+      [messages, gameplay] = await Promise.all([
+        fetchJson(`/locales/${encodeURIComponent(locale)}/messages.json`),
+        fetchJson(`/locales/${encodeURIComponent(locale)}/gameplay.json`)
+      ]);
+    }
     const catalog = {
       messages: messages?.messages || {},
       gameplay: gameplay || {}
@@ -1018,6 +1471,18 @@ function createAuthManager() {
   const userNameEl = document.getElementById('user-name');
   const userRoleEl = document.getElementById('user-role');
   const logoutBtn = document.getElementById('logout-btn');
+  const offlineBtn = document.getElementById('offline-mode-btn');
+
+  if (offlineBtn) {
+    if (new URLSearchParams(window.location.search).get('offline') === 'true') {
+      offlineBtn.style.display = 'none';
+    }
+    offlineBtn.addEventListener('click', () => {
+      const url = new URL(window.location.href);
+      url.searchParams.set('offline', 'true');
+      window.location.href = url.toString();
+    });
+  }
 
   let activeForm = 'login';
   let messageTimeout = null;
